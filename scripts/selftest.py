@@ -1,0 +1,262 @@
+"""Offline self-test for the runner: no API key, no network.
+
+    python scripts/selftest.py
+
+Serves a tiny local shop page from a temp file and replaces Jev with a rule-based stand-in that
+answers the same question shapes. Exercises the terminal states: passed (auto-done on checks), never_violated (an error appeared),
+blocked (needed data missing), low_confidence (Jev unsure which value to type: nothing gets typed),
+plus the two DONE rules: a low-confidence DONE is a WAIT, and a confident DONE with unsatisfied
+checks gets one settle-and-recheck before the verdict.
+Run this after installing to confirm Playwright + Chromium work before spending TypeSafe credit.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+import tempfile
+
+from run_test import run
+from summarize_trace import summarize
+
+PAGE = """<!doctype html><html><head><title>Mini Shop</title>
+<style>
+ body{font-family:sans-serif;margin:24px}
+ #banner{position:fixed;bottom:0;left:0;right:0;background:#333;color:#fff;padding:16px}
+ .item{margin:8px 0}
+</style></head><body>
+<header><a href="#home">Home</a> &nbsp; <span id="cart">Cart: 0 items</span></header>
+<h1>Mini Shop</h1>
+<form id="search" onsubmit="event.preventDefault(); showResults();">
+  <input id="q" placeholder="Search products">
+  <button type="submit">Search</button>
+</form>
+<div id="results" hidden>
+  <div class="item">Blue Hoodie <button onclick="addToCart()">Add to cart</button></div>
+  <div class="item">Red Hoodie <button onclick="addToCart()">Add to cart</button></div>
+</div>
+<div id="error" hidden role="alert">Something went wrong. Please try again later.</div>
+<div id="banner">We use cookies. <button onclick="document.getElementById('banner').remove()">Accept cookies</button></div>
+<script>
+ const FAIL = location.search.includes('fail=1');
+ function showResults(){ document.getElementById('results').hidden = false; }
+ let count = 0;
+ const SLOW = location.search.includes('slow=1');
+ function addToCart(){
+   if (FAIL) { document.getElementById('error').hidden = false; return; }
+   count++;
+   const paint = () => { document.getElementById('cart').textContent = 'Cart: ' + count + ' items'; };
+   if (SLOW) setTimeout(paint, 250); else paint();
+ }
+</script></body></html>"""
+
+
+class FakeJev:
+    """Rule-based stand-in for Jev. Answers exactly the shapes the real API returns."""
+
+    def __init__(self, mode: str = "normal") -> None:
+        self.mode = mode          # normal | hedge_value | early_low_done | early_confident_done | done_after_add
+        self.requests = 0
+        self.op_requests = 0
+        self.seen_states: list[dict] = []
+
+    def _choice(self, label: str, options: dict, conf: float = 0.9) -> dict:
+        probs = {k: (conf if k == label else round((1 - conf) / max(1, len(options) - 1), 3)) for k in options}
+        return {"type": "choice", "choice": label, "confidence": conf, "probabilities": probs}
+
+    @staticmethod
+    def _find(options: dict, needle: str) -> str | None:
+        for k, v in options.items():
+            if needle.lower() in v.lower():
+                return k
+        return None
+
+    def system_one(self, state: dict, questions: dict) -> dict:
+        self.requests += 1
+        self.seen_states.append(state)
+        text = state["visible_text"]
+        answers: dict = {}
+        for key, q in questions.items():
+            if q["type"] == "noul":
+                if key == "cart_has_item":
+                    answers[key] = {"type": "noul", "noul": 1.0 if re.search(r"Cart: [1-9]", text) else 0.02}
+                elif key == "error_visible":
+                    answers[key] = {"type": "noul", "noul": 0.98 if "Something went wrong" in text else 0.01}
+                else:
+                    answers[key] = {"type": "noul", "noul": 0.5}
+        if "operation" not in questions:
+            return {"answers": answers, "usage": {"input_tokens": 300, "output_tokens": 20}, "model": "fake-jev", "latency_ms": 1}
+
+        ops = questions["operation"]["criteria"]
+        self.op_requests += 1
+        usage = {"input_tokens": 400, "output_tokens": 60}
+        # Scripted deviations that reproduce failure modes seen in real runs.
+        if self.mode == "early_low_done" and self.op_requests == 1:
+            answers["operation"] = self._choice("DONE", ops, conf=0.3)      # "I think we're done?" (run C, 0.36)
+            return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
+        if self.mode == "early_confident_done" and self.op_requests == 1:
+            answers["operation"] = self._choice("DONE", ops, conf=0.9)      # confidently wrong
+            return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
+        if self.mode == "done_after_add" and "Add to cart" in state["actions_so_far"]:
+            answers["operation"] = self._choice("DONE", ops, conf=0.9)      # right, but the page is still painting
+            return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
+        clicks = questions.get("click_target", {}).get("criteria", {})
+        types = questions.get("type_target", {}).get("criteria", {})
+        results_shown = self._find(clicks, "Add to cart") is not None
+        typed_before = "TYPE_TEXT" in state["actions_so_far"]
+        search_box_visible = "Search products" in state["interactive_elements"]
+
+        if self._find(clicks, "Accept cookies"):
+            op, target = "CLICK", ("click_target", self._find(clicks, "Accept cookies"))
+        elif not results_shown and self._find(types, "Search products") and not typed_before and "TYPE_TEXT" in ops:
+            op, target = "TYPE_TEXT", ("type_target", self._find(types, "Search products"))
+            value_conf = 0.36 if self.mode == "hedge_value" else 0.9   # run A: username 0.68 / password 0.32
+            answers["type_value"] = self._choice("search_query", questions["type_value"]["criteria"], conf=value_conf)
+        elif not results_shown and search_box_visible and "TYPE_TEXT" not in ops:
+            op, target = "BLOCKED", None  # wants to type but no data value was prepared
+        elif "PRESS_ENTER" in ops and not results_shown:
+            op, target = "PRESS_ENTER", None
+        elif results_shown:
+            op, target = "CLICK", ("click_target", self._find(clicks, "Add to cart"))
+        else:
+            op, target = "DONE", None
+
+        answers["operation"] = self._choice(op, ops)
+        if target:
+            qkey, label = target
+            answers[qkey] = self._choice(label, questions[qkey]["criteria"])
+        return {"answers": answers, "usage": {"input_tokens": 400, "output_tokens": 60}, "model": "fake-jev", "latency_ms": 1}
+
+    def usage_summary(self) -> dict:
+        return {"jev_requests": self.requests, "input_tokens": 400 * self.requests, "output_tokens": 60 * self.requests, "model": "fake-jev"}
+
+
+def base_spec(url: str) -> dict:
+    from spec import DEFAULTS, _merge, validate
+
+    spec = _merge(
+        DEFAULTS,
+        {
+            "id": "selftest",
+            "start_url": url,
+            "goal": "Search for a blue hoodie and add it to the cart.",
+            "notes": "Accept the cookie banner first if it is shown.",
+            "data": {"search_query": "blue hoodie", "password": "hunter2-not-real"},
+            "secrets": ["password"],
+            "checks": {
+                "cart_has_item": "The header shows the cart contains at least one item",
+                "error_visible": "An error message such as 'something went wrong' is visible",
+            },
+            "done_when": ["cart_has_item"],
+            "never": ["error_visible"],
+            "budget": {"max_steps": 10, "max_seconds": 60},
+            "browser": {"settle_ms": 100},
+        },
+    )
+    problems = validate(spec)
+    assert not problems, problems
+    return spec
+
+
+def main() -> int:
+    tmp = tempfile.mkdtemp(prefix="jev-selftest-")
+    html = os.path.join(tmp, "shop.html")
+    with open(html, "w", encoding="utf-8") as f:
+        f.write(PAGE)
+    url = "file://" + html
+    failures = []
+
+    # 1. happy path -> passed via auto_done
+    spec = base_spec(url)
+    jev = FakeJev()
+    out = os.path.join(tmp, "run-pass")
+    trace = run(spec, jev, out, screenshots=True)
+    print(summarize(trace, out))
+    print()
+    ops = [s.get("executed", {}).get("action") for s in trace["steps"]]
+    if trace["status"] != "passed":
+        failures.append(f"expected passed, got {trace['status']} ({trace.get('error')})")
+    if ops != ["CLICK", "TYPE_TEXT", "PRESS_ENTER", "CLICK", "AUTO_DONE"]:
+        failures.append(f"unexpected action sequence {ops}")
+    if trace["spec"]["data"]["password"] != "<secret>":
+        failures.append("secret not redacted in trace spec")
+    if any("hunter2" in json.dumps(st) for st in jev.seen_states):
+        failures.append("secret value leaked into Jev state")
+    if not os.path.exists(os.path.join(out, "steps", "001.png")):
+        failures.append("screenshot missing")
+    if not os.path.exists(os.path.join(out, "trace.json")):
+        failures.append("trace.json missing")
+
+    # 2. the app shows an error -> never_violated
+    spec = base_spec(url + "?fail=1")
+    out = os.path.join(tmp, "run-error")
+    trace = run(spec, FakeJev(), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    if trace["status"] != "never_violated":
+        failures.append(f"expected never_violated, got {trace['status']} ({trace.get('error')})")
+
+    # 3. needed data missing -> blocked
+    spec = base_spec(url)
+    spec["data"] = {}
+    spec["secrets"] = []
+    out = os.path.join(tmp, "run-blocked")
+    trace = run(spec, FakeJev(), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    if trace["status"] != "blocked":
+        failures.append(f"expected blocked, got {trace['status']} ({trace.get('error')})")
+
+    # 4. Jev unsure WHICH value to type -> nothing is typed, run ends low_confidence (was: typed anyway)
+    spec = base_spec(url)
+    out = os.path.join(tmp, "run-hedge-value")
+    trace = run(spec, FakeJev("hedge_value"), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    ops = [s.get("executed", {}).get("action") for s in trace["steps"]]
+    if trace["status"] != "low_confidence":
+        failures.append(f"expected low_confidence, got {trace['status']} ({trace.get('error')})")
+    if "TYPE_TEXT" in ops or trace["actions_executed"] != 1:
+        failures.append(f"a low-confidence value choice was executed: {ops}")
+
+    # 5. a low-confidence DONE is a WAIT, not a verdict -> the flow continues and passes
+    spec = base_spec(url)
+    out = os.path.join(tmp, "run-early-low-done")
+    trace = run(spec, FakeJev("early_low_done"), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    ops = [s.get("executed", {}).get("action") for s in trace["steps"]]
+    if trace["status"] != "passed" or ops[:2] != ["WAIT", "CLICK"]:
+        failures.append(f"low-confidence DONE was terminal: {trace['status']} {ops}")
+
+    # 6. confident DONE while the page is still updating -> confirmation pass -> passed (run C race)
+    spec = base_spec(url + "?slow=1")
+    out = os.path.join(tmp, "run-done-race")
+    trace = run(spec, FakeJev("done_after_add"), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    ops = [s.get("executed", {}).get("action") for s in trace["steps"]]
+    if trace["status"] != "passed" or ops[-2:] != ["WAIT", "DONE"] or not trace["steps"][-1]["executed"].get("confirmed"):
+        failures.append(f"DONE race not recovered by confirmation pass: {trace['status']} {ops}")
+
+    # 7. confident DONE and the checks really are unsatisfied -> done_unverified after one recheck
+    spec = base_spec(url)
+    out = os.path.join(tmp, "run-done-unverified")
+    trace = run(spec, FakeJev("early_confident_done"), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    if trace["status"] != "done_unverified" or len(trace["steps"]) != 2:
+        failures.append(f"expected done_unverified in 2 steps, got {trace['status']} in {len(trace['steps'])}")
+
+    if failures:
+        print("SELFTEST FAILED:")
+        for fmsg in failures:
+            print("  -", fmsg)
+        return 1
+    print(f"SELFTEST OK (artifacts in {tmp})")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

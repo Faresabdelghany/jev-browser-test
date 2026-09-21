@@ -1,0 +1,15 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Test artifacts (traces + screenshots of real apps — keep out of version control)
+runs/
+
+# Local session notes
+.remember/

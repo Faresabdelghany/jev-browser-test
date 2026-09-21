@@ -1,0 +1,188 @@
+"""Load and validate a test spec.
+
+A spec is the contract Claude writes before a run. See references/spec-format.md.
+Run `python scripts/spec.py path/to/spec.json` to validate a spec without a browser.
+"""
+from __future__ import annotations
+
+import copy
+import json
+import os
+import re
+import sys
+
+RESERVED_QUESTIONS = {
+    "operation",
+    "click_target",
+    "type_target",
+    "type_value",
+    "select_target",
+}
+SETUP_ACTIONS = {"goto", "click", "fill", "press", "wait", "wait_for", "select"}
+ENV_RE = re.compile(r"\$\{([A-Z0-9_]+)\}")
+
+DEFAULTS = {
+    "notes": "",
+    "data": {},
+    "secrets": [],
+    "setup": [],
+    "checks": {},
+    "done_when": [],
+    "never": [],
+    "auto_done": True,
+    "fail_fast": True,
+    "budget": {"max_steps": 25, "max_seconds": 240},
+    "thresholds": {
+        "check_true": 0.8,
+        "never_true": 0.8,
+        "min_confidence": 0.5,
+        "max_low_confidence_steps": 3,
+        "max_repeat": 3,
+    },
+    "browser": {
+        "headless": True,
+        "viewport": [1280, 800],
+        "settle_ms": 600,
+        "action_timeout_ms": 8000,
+        "storage_state": None,
+        "channel": None,
+    },
+    "observation": {"max_elements": 60, "max_text_chars": 2000, "screenshots": True},
+}
+
+
+def _merge(defaults: dict, given: dict) -> dict:
+    out = copy.deepcopy(defaults)
+    for k, v in given.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def substitute_env(value, missing: list[str]):
+    """Replace ${VAR} with os.environ[VAR] in strings, recursively."""
+    if isinstance(value, str):
+
+        def repl(m):
+            name = m.group(1)
+            if name not in os.environ:
+                missing.append(name)
+                return m.group(0)
+            return os.environ[name]
+
+        return ENV_RE.sub(repl, value)
+    if isinstance(value, list):
+        return [substitute_env(v, missing) for v in value]
+    if isinstance(value, dict):
+        return {k: substitute_env(v, missing) for k, v in value.items()}
+    return value
+
+
+def validate(spec: dict) -> list[str]:
+    """Return a list of human-readable problems (empty list means valid)."""
+    errors: list[str] = []
+    for key in ("id", "start_url", "goal"):
+        if not spec.get(key) or not isinstance(spec[key], str):
+            errors.append(f"'{key}' is required and must be a non-empty string")
+    if "id" in spec and isinstance(spec["id"], str) and not re.fullmatch(r"[A-Za-z0-9._-]+", spec["id"]):
+        errors.append("'id' may only contain letters, digits, '.', '_' and '-' (it becomes a folder name)")
+
+    checks = spec.get("checks", {})
+    if not isinstance(checks, dict):
+        errors.append("'checks' must be an object mapping check_name -> statement")
+        checks = {}
+    for name, statement in checks.items():
+        if name in RESERVED_QUESTIONS:
+            errors.append(f"check '{name}' collides with a reserved question name {sorted(RESERVED_QUESTIONS)}")
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            errors.append(f"check name '{name}' must be a simple identifier (letters, digits, underscore)")
+        if not isinstance(statement, str) or len(statement.strip()) < 8:
+            errors.append(f"check '{name}' needs a statement about what is visible on the page")
+        elif statement.strip().endswith("?"):
+            errors.append(f"check '{name}' should be a statement ('The cart shows 1 item'), not a question")
+
+    for list_name in ("done_when", "never"):
+        for name in spec.get(list_name, []):
+            if name not in checks:
+                errors.append(f"'{list_name}' references unknown check '{name}'")
+    if not spec.get("done_when"):
+        errors.append("'done_when' must list at least one check; otherwise nothing defines success")
+
+    data = spec.get("data", {})
+    if not isinstance(data, dict) or any(not isinstance(v, str) for v in data.values()):
+        errors.append("'data' must be an object mapping value_name -> string")
+    for s in spec.get("secrets", []):
+        if s not in data:
+            errors.append(f"'secrets' names '{s}' which is not a key in 'data'")
+
+    for i, step in enumerate(spec.get("setup", [])):
+        act = step.get("action") if isinstance(step, dict) else None
+        if act not in SETUP_ACTIONS:
+            errors.append(f"setup[{i}]: action must be one of {sorted(SETUP_ACTIONS)}")
+            continue
+        need = {
+            "goto": ["url"],
+            "click": ["selector"],
+            "fill": ["selector", "value"],
+            "press": ["selector", "key"],
+            "wait": ["ms"],
+            "select": ["selector", "value"],
+            "wait_for": [],
+        }[act]
+        for field in need:
+            if field not in step:
+                errors.append(f"setup[{i}] ({act}): missing '{field}'")
+        if act == "wait_for":
+            if not (step.get("selector") or step.get("url")):
+                errors.append(f"setup[{i}] (wait_for): needs 'selector' and/or 'url'")
+            if step.get("state", "visible") not in ("attached", "detached", "visible", "hidden"):
+                errors.append(f"setup[{i}] (wait_for): 'state' must be attached|detached|visible|hidden")
+
+    b = spec.get("budget", {})
+    if not (1 <= int(b.get("max_steps", 1)) <= 200):
+        errors.append("'budget.max_steps' must be between 1 and 200")
+    t = spec.get("thresholds", {})
+    for k in ("check_true", "never_true", "min_confidence"):
+        v = t.get(k, 0.5)
+        if not (0.0 <= float(v) <= 1.0):
+            errors.append(f"'thresholds.{k}' must be between 0 and 1")
+    return errors
+
+
+def load_spec(path: str) -> dict:
+    """Load, apply defaults, substitute ${ENV} and validate. Raises ValueError on problems."""
+    with open(path, encoding="utf-8") as f:
+        raw = json.load(f)
+    spec = _merge(DEFAULTS, raw)
+    missing: list[str] = []
+    spec = substitute_env(spec, missing)
+    errors = validate(spec)
+    if missing:
+        errors.append("missing environment variables: " + ", ".join(sorted(set(missing))))
+    if errors:
+        raise ValueError("Spec problems:\n  - " + "\n  - ".join(errors))
+    return spec
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 2:
+        print("usage: python scripts/spec.py path/to/spec.json")
+        return 2
+    try:
+        spec = load_spec(argv[1])
+    except (ValueError, json.JSONDecodeError, OSError) as e:
+        print(str(e))
+        return 1
+    print(f"OK: spec '{spec['id']}' is valid")
+    print(f"  goal: {spec['goal']}")
+    print(f"  checks: {', '.join(spec['checks'])}")
+    print(f"  done_when: {spec['done_when']}  never: {spec['never']}")
+    print(f"  data keys: {list(spec['data'])}  secrets: {spec['secrets']}")
+    print(f"  budget: {spec['budget']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

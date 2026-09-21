@@ -1,0 +1,18 @@
+{
+  "id": "smoke-login",
+  "start_url": "https://the-internet.herokuapp.com/login",
+  "goal": "Log in with the provided username and password, so that the Secure Area page is shown.",
+  "notes": "Type the username into the Username field, the password into the Password field, then press the Login button.",
+  "data": {
+    "username": "tomsmith",
+    "password": "SuperSecretPassword!"
+  },
+  "checks": {
+    "logged_in": "A green flash message says 'You logged into a secure area!'",
+    "on_secure_page": "The page heading says 'Secure Area' and a Logout button is visible",
+    "login_error": "A red flash message says the username or password is invalid"
+  },
+  "done_when": ["logged_in", "on_secure_page"],
+  "never": ["login_error"],
+  "budget": { "max_steps": 8, "max_seconds": 120 }
+}

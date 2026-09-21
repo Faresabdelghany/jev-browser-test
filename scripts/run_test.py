@@ -1,0 +1,453 @@
+"""Run one Jev browser test from a spec and write a trace.
+
+    python scripts/run_test.py path/to/spec.json [--out runs/<id>] [--headed] [--no-screenshots]
+
+Exit codes: 0 = passed, 1 = did not pass (see trace status), 2 = spec / environment problem.
+
+No language model sits in this loop. Claude writes the spec beforehand and reads the trace afterwards;
+Jev makes one typed decision per step; Playwright executes. Everything here is deterministic given
+Jev's answers, which is what makes the trace trustworthy evidence.
+"""
+from __future__ import annotations
+
+import argparse
+import copy
+import json
+import os
+import sys
+import time
+from datetime import datetime, timezone
+
+from jev_client import JevClient, JevError
+from observe import observe, signature
+from policy import build_questions, build_state, read_checks, read_choice, resolve_target
+from spec import load_spec
+from summarize_trace import summarize
+
+TERMINAL_STATUSES = {
+    "passed": "all done_when checks satisfied",
+    "done_unverified": "Jev chose DONE confidently, and after a settle-and-recheck the done_when checks are still not satisfied",
+    "blocked": "Jev chose BLOCKED: it saw no way to make progress",
+    "never_violated": "a 'never' check became true",
+    "stuck": "the same action on the same page repeated max_repeat times",
+    "low_confidence": "max_low_confidence_steps consecutive low-confidence decisions (none of them executed): Jev could not choose between the offered options",
+    "budget_exhausted": "max_steps or max_seconds reached",
+    "error": "the runner, browser or TypeSafe API failed",
+}
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def redacted_spec(spec: dict) -> dict:
+    s = copy.deepcopy(spec)
+    for k in s["secrets"]:
+        s["data"][k] = "<secret>"
+    for step in s["setup"]:
+        if step.get("action") == "fill":
+            step["value"] = "<redacted>"
+    return s
+
+
+def settle(page, spec: dict) -> None:
+    ms = spec["browser"]["settle_ms"]
+    try:
+        page.wait_for_load_state("load", timeout=ms * 5)
+    except Exception:
+        pass
+    page.wait_for_timeout(ms)
+
+
+def run_setup(page, spec: dict) -> list[dict]:
+    """Deterministic Playwright steps before Jev takes over (login, cookie banner, fixtures)."""
+    results = []
+    timeout = spec["browser"]["action_timeout_ms"]
+    for i, step in enumerate(spec["setup"]):
+        act = step["action"]
+        rec = {"n": i, "action": act, "selector": step.get("selector"), "ok": True, "error": None}
+        try:
+            if act == "goto":
+                page.goto(step["url"], wait_until="domcontentloaded")
+                rec["url"] = step["url"]
+            elif act == "click":
+                page.locator(step["selector"]).first.click(timeout=timeout)
+            elif act == "fill":
+                page.locator(step["selector"]).first.fill(step["value"], timeout=timeout)
+            elif act == "press":
+                page.locator(step["selector"]).first.press(step["key"], timeout=timeout)
+            elif act == "select":
+                page.locator(step["selector"]).first.select_option(step["value"], timeout=timeout)
+            elif act == "wait":
+                page.wait_for_timeout(int(step["ms"]))
+            elif act == "wait_for":
+                t = int(step.get("timeout_ms", timeout))
+                if step.get("selector"):
+                    page.locator(step["selector"]).first.wait_for(state=step.get("state", "visible"), timeout=t)
+                if step.get("url"):
+                    page.wait_for_url(step["url"], timeout=t)
+            settle(page, spec)
+        except Exception as e:  # noqa: BLE001 - we want every failure in the trace
+            rec["ok"] = False
+            rec["error"] = f"{type(e).__name__}: {str(e)[:300]}"
+            results.append(rec)
+            raise RuntimeError(f"setup[{i}] ({act}) failed: {rec['error']}") from None
+        results.append(rec)
+    return results
+
+
+def execute(page, spec: dict, operation: str, target: dict | None, value_key: str | None) -> dict:
+    timeout = spec["browser"]["action_timeout_ms"]
+    res: dict = {"action": operation, "ok": True, "error": None}
+    try:
+        if operation in ("CLICK", "TYPE_TEXT", "SELECT"):
+            if not target or target.get("missing"):
+                raise RuntimeError("no target answer for this operation")
+            loc = page.locator(f'[data-jev-idx="{target["element"]}"]').first
+            res["element"] = target["element"]
+        if operation == "CLICK":
+            try:
+                loc.click(timeout=timeout)
+            except Exception as first:  # covered by a transparent overlay is the usual cause
+                if "intercepts pointer events" not in str(first):
+                    raise
+                loc.click(timeout=timeout, force=True)
+                res["forced"] = True
+        elif operation == "TYPE_TEXT":
+            if not value_key or value_key not in spec["data"]:
+                raise RuntimeError("no usable type_value answer")
+            res["value_key"] = value_key
+            value = spec["data"][value_key]
+            try:
+                loc.fill(value, timeout=timeout)
+            except Exception:  # contenteditable / custom inputs don't support fill
+                loc.click(timeout=timeout)
+                loc.press_sequentially(value, timeout=timeout)
+        elif operation == "PRESS_ENTER":
+            page.keyboard.press("Enter")
+        elif operation == "SELECT":
+            res["option"] = target["option"]
+            loc.select_option(index=target["option"], timeout=timeout)
+        elif operation == "SCROLL_DOWN":
+            page.evaluate("window.scrollBy(0, Math.round(window.innerHeight * 0.8))")
+        elif operation == "SCROLL_UP":
+            page.evaluate("window.scrollBy(0, -Math.round(window.innerHeight * 0.8))")
+        elif operation == "WAIT":
+            page.wait_for_timeout(spec["browser"]["settle_ms"] * 2)
+        else:
+            raise RuntimeError(f"unknown operation {operation}")
+    except Exception as e:  # noqa: BLE001
+        res["ok"] = False
+        res["error"] = f"{type(e).__name__}: {str(e)[:300]}"
+    return res
+
+
+def history_line(n: int, operation: str, target: dict | None, value_key: str | None, executed: dict) -> str:
+    line = f"{n}. {operation}"
+    if target and not target.get("missing"):
+        line += f" {target['label']}"
+    if value_key:
+        line += f" <- {value_key}"
+    if not executed["ok"]:
+        line += f"  (FAILED: {executed['error'][:80]})"
+    return line
+
+
+def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: bool = False) -> dict:
+    """Execute the spec. `jev` is anything with .system_one(state, questions) and .usage_summary()."""
+    from playwright.sync_api import sync_playwright
+
+    if screenshots is None:
+        screenshots = spec["observation"]["screenshots"]
+    os.makedirs(os.path.join(out_dir, "steps"), exist_ok=True)
+    th = spec["thresholds"]
+    budget = spec["budget"]
+    obs_cfg = spec["observation"]
+
+    trace: dict = {
+        "spec_id": spec["id"],
+        "started_at": now_iso(),
+        "status": None,
+        "pass": False,
+        "steps": [],
+        "setup": [],
+        "final": None,
+        "spec": redacted_spec(spec),
+    }
+    t_start = time.perf_counter()
+    history: list[str] = []
+    last_operation: str | None = None
+    low_streak = 0
+    pending_done = False  # a confident DONE with unsatisfied checks gets one settle-and-recheck
+    repeats: dict = {}
+    status: str | None = None
+    error: str | None = None
+
+    def shot(page, name: str) -> str | None:
+        if not screenshots:
+            return None
+        rel = os.path.join("steps", name)
+        try:
+            page.screenshot(path=os.path.join(out_dir, rel))
+            return rel
+        except Exception:
+            return None
+
+    def satisfied(checks: dict) -> bool:
+        return bool(spec["done_when"]) and all(checks.get(c, 0.0) >= th["check_true"] for c in spec["done_when"])
+
+    def violated(checks: dict) -> list[str]:
+        return [c for c in spec["never"] if checks.get(c, 0.0) >= th["never_true"]]
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=not headed and spec["browser"]["headless"],
+            channel=spec["browser"]["channel"],
+        )
+        ctx_kwargs = {"viewport": {"width": spec["browser"]["viewport"][0], "height": spec["browser"]["viewport"][1]}}
+        if spec["browser"]["storage_state"]:
+            ctx_kwargs["storage_state"] = spec["browser"]["storage_state"]
+        context = browser.new_context(**ctx_kwargs)
+        page = context.new_page()
+        page.set_default_timeout(spec["browser"]["action_timeout_ms"])
+        try:
+            page.goto(spec["start_url"], wait_until="domcontentloaded")
+            settle(page, spec)
+            trace["setup"] = run_setup(page, spec)
+
+            for n in range(1, budget["max_steps"] + 1):
+                if time.perf_counter() - t_start > budget["max_seconds"]:
+                    status = "budget_exhausted"
+                    break
+                obs = observe(page, obs_cfg["max_elements"], obs_cfg["max_text_chars"])
+                sig = signature(obs)
+                step: dict = {
+                    "n": n,
+                    "url": obs["url"],
+                    "title": obs["title"],
+                    "signature": sig,
+                    "screenshot": shot(page, f"{n:03d}.png"),
+                    "elements": obs["elements"],
+                    "truncated_elements": obs["truncated"],
+                    "visible_text": obs["visible_text"][:600],
+                }
+                state = build_state(spec, obs, n, history)
+                questions, meta = build_questions(spec, obs, last_operation)
+                step["offered_operations"] = meta["operations"]
+                t_jev = time.perf_counter()
+                try:
+                    resp = jev.system_one(state, questions)
+                except JevError as e:
+                    status, error = "error", str(e)
+                    step["error"] = error
+                    trace["steps"].append(step)
+                    break
+                step["latency_ms"] = {"jev": resp.get("latency_ms", int((time.perf_counter() - t_jev) * 1000))}
+                answers = resp["answers"]
+                checks = read_checks(answers, spec)
+                step["checks"] = checks
+                op = read_choice(answers, "operation")
+                step["operation"] = op
+
+                bad = violated(checks)
+                if bad:
+                    step["never_violated"] = bad
+                    if spec["fail_fast"]:
+                        status = "never_violated"
+                        step["executed"] = {"action": "STOP", "ok": True, "error": None}
+                        trace["steps"].append(step)
+                        break
+
+                if pending_done:
+                    # Jev said DONE last step while done_when was unsatisfied; the page has now had a
+                    # full settle (reloads, toasts, redirects). This observation is the verdict.
+                    status = "passed" if satisfied(checks) else "done_unverified"
+                    step["executed"] = {"action": "DONE", "ok": True, "error": None, "confirmed": True}
+                    trace["steps"].append(step)
+                    break
+
+                if satisfied(checks) and spec["auto_done"]:
+                    status = "passed"
+                    step["executed"] = {"action": "AUTO_DONE", "ok": True, "error": None}
+                    trace["steps"].append(step)
+                    if n == 1 and not spec["setup"]:
+                        trace["passed_without_actions"] = True
+                    break
+
+                if op is None:
+                    status, error = "error", "no 'operation' answer in response"
+                    step["error"] = error
+                    trace["steps"].append(step)
+                    break
+                operation = op["choice"]
+                target = resolve_target(operation, answers, obs)
+                step["target"] = target
+                value_key = None
+                if operation == "TYPE_TEXT":
+                    tv = read_choice(answers, "type_value")
+                    step["type_value"] = tv
+                    value_key = tv["choice"] if tv else None
+
+                # Confidence gate. Jev reporting low confidence on the operation, the target, or (for
+                # TYPE_TEXT) which value to type is a typed "I don't know", and the runner never acts on
+                # one: it would type wrong values into fields or stop mid-reload. A low decision is
+                # treated as a WAIT (the page may still be settling) and counts toward
+                # max_low_confidence_steps; the same undecided answer on an unchanged page then ends the
+                # run as `low_confidence`, which is Claude's cue to fix the spec.
+                confs = [op["confidence"]]
+                if target and not target.get("missing"):
+                    confs.append(target["confidence"])
+                if operation == "TYPE_TEXT" and tv:
+                    confs.append(tv["confidence"])
+                low = min(confs) < th["min_confidence"]
+                step["low_confidence"] = low
+                step["decision_confidence"] = round(min(confs), 3)
+
+                if low:
+                    low_streak += 1
+                    if low_streak >= th["max_low_confidence_steps"]:
+                        status = "low_confidence"
+                        step["executed"] = {"action": "STOP", "ok": True, "error": None}
+                        trace["steps"].append(step)
+                        break
+                    step["executed"] = {"action": "WAIT", "ok": True, "error": None,
+                                        "reason": f"low confidence; {operation} not executed"}
+                    history.append(f"{n}. WAIT (undecided between options)")
+                    t_b = time.perf_counter()
+                    settle(page, spec)
+                    step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
+                    trace["steps"].append(step)
+                    continue
+                low_streak = 0
+
+                if operation == "DONE":
+                    if satisfied(checks):
+                        status = "passed"
+                        step["executed"] = {"action": "DONE", "ok": True, "error": None}
+                        trace["steps"].append(step)
+                        break
+                    if n >= budget["max_steps"]:
+                        status = "done_unverified"
+                        step["executed"] = {"action": "DONE", "ok": True, "error": None}
+                        trace["steps"].append(step)
+                        break
+                    # Confident DONE but the checks disagree: give the page one full settle and look
+                    # again before calling it (a reload or redirect is often still in flight).
+                    pending_done = True
+                    step["executed"] = {"action": "WAIT", "ok": True, "error": None, "reason": "confirming DONE"}
+                    history.append(f"{n}. DONE (checking the result)")
+                    t_b = time.perf_counter()
+                    settle(page, spec)
+                    page.wait_for_timeout(spec["browser"]["settle_ms"] * 2)
+                    step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
+                    trace["steps"].append(step)
+                    continue
+                if operation == "BLOCKED":
+                    status = "blocked"
+                    step["executed"] = {"action": "BLOCKED", "ok": True, "error": None}
+                    trace["steps"].append(step)
+                    break
+
+                key = (sig, operation, target["choice"] if target and not target.get("missing") else None, value_key)
+                repeats[key] = repeats.get(key, 0) + 1
+                step["repeat_count"] = repeats[key]
+                if repeats[key] >= th["max_repeat"]:
+                    status = "stuck"
+                    step["executed"] = {"action": "STOP", "ok": True, "error": None}
+                    trace["steps"].append(step)
+                    break
+
+                t_b = time.perf_counter()
+                executed = execute(page, spec, operation, target, value_key)
+                settle(page, spec)
+                step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
+                step["executed"] = executed
+                history.append(history_line(n, operation, target, value_key, executed))
+                last_operation = operation if executed["ok"] else None
+                trace["steps"].append(step)
+            else:
+                status = "budget_exhausted"
+
+            if status == "budget_exhausted":
+                # One last look: did the final action happen to reach the goal?
+                obs = observe(page, obs_cfg["max_elements"], obs_cfg["max_text_chars"])
+                questions, _ = build_questions(spec, obs, last_operation)
+                only_checks = {k: v for k, v in questions.items() if k in spec["checks"]}
+                final_checks = {}
+                if only_checks:
+                    try:
+                        resp = jev.system_one(build_state(spec, obs, len(trace["steps"]) + 1, history), only_checks)
+                        final_checks = read_checks(resp["answers"], spec)
+                    except JevError as e:
+                        error = str(e)
+                if satisfied(final_checks) and spec["auto_done"] and not violated(final_checks):
+                    status = "passed"
+                trace["final"] = {"url": obs["url"], "title": obs["title"], "checks": final_checks}
+            else:
+                last = trace["steps"][-1] if trace["steps"] else {}
+                trace["final"] = {
+                    "url": page.url,
+                    "title": page.title(),
+                    "checks": last.get("checks", {}),
+                }
+            trace["final"]["screenshot"] = shot(page, "final.png")
+        except Exception as e:  # noqa: BLE001
+            status, error = "error", f"{type(e).__name__}: {str(e)[:500]}"
+            try:
+                trace["final"] = {"url": page.url, "title": page.title(), "checks": {}, "screenshot": shot(page, "final.png")}
+            except Exception:
+                trace["final"] = {"url": None, "title": None, "checks": {}}
+        finally:
+            context.close()
+            browser.close()
+
+    trace["status"] = status or "error"
+    trace["status_meaning"] = TERMINAL_STATUSES.get(trace["status"], "")
+    trace["pass"] = trace["status"] == "passed"
+    trace["error"] = error
+    trace["ended_at"] = now_iso()
+    trace["duration_ms"] = int((time.perf_counter() - t_start) * 1000)
+    trace["actions_executed"] = sum(
+        1 for s in trace["steps"]
+        if s.get("executed", {}).get("action") not in (None, "STOP", "DONE", "AUTO_DONE", "BLOCKED")
+        and not s.get("executed", {}).get("reason")  # runner-inserted waits (low confidence, DONE recheck) are not actions
+    )
+    trace["usage"] = jev.usage_summary()
+    with open(os.path.join(out_dir, "trace.json"), "w", encoding="utf-8") as f:
+        json.dump(trace, f, indent=2, ensure_ascii=False)
+    return trace
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("spec")
+    ap.add_argument("--out", help="output directory (default runs/<spec id>/<timestamp>)")
+    ap.add_argument("--headed", action="store_true", help="show the browser window")
+    ap.add_argument("--no-screenshots", action="store_true")
+    ap.add_argument("--model", help="override TYPESAFE_MODEL (default jev-latest)")
+    args = ap.parse_args(argv[1:])
+
+    try:
+        spec = load_spec(args.spec)
+    except (ValueError, json.JSONDecodeError, OSError) as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    try:
+        jev = JevClient(model=args.model)
+    except JevError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    try:
+        import playwright  # noqa: F401
+    except ImportError:
+        print("Playwright is not installed: pip install -r scripts/requirements.txt && python -m playwright install chromium", file=sys.stderr)
+        return 2
+
+    out_dir = args.out or os.path.join("runs", spec["id"], datetime.now().strftime("%Y%m%d-%H%M%S"))
+    trace = run(spec, jev, out_dir, screenshots=False if args.no_screenshots else None, headed=args.headed)
+    print(summarize(trace, out_dir))
+    return 0 if trace["pass"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
