@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from jev_client import JevClient, JevError
 from observe import observe, signature
 from policy import build_questions, build_state, read_checks, read_choice, resolve_target
-from spec import load_spec
+from spec import load_dotenv, load_spec
 from summarize_trace import summarize
 
 TERMINAL_STATUSES = {
@@ -435,6 +435,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--model", help="override TYPESAFE_MODEL (default jev-latest)")
     args = ap.parse_args(argv[1:])
 
+    load_dotenv()  # ./.env, if present; exported variables win
     try:
         spec = load_spec(args.spec)
     except (ValueError, json.JSONDecodeError, OSError) as e:

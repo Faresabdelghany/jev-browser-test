@@ -31,7 +31,8 @@ python3 -m venv .venv
 export TYPESAFE_API_KEY=...                   # from https://console.typesafe.ai/keys
 ```
 
-The runner reads the key from the environment. Never put keys or passwords in a spec: use `${ENV_VAR}`
+The runner reads the key from the environment, or from a `.env` file in the directory you start it
+from (already-exported variables win; `.env` is git-ignored). Never put keys or passwords in a spec: use `${ENV_VAR}`
 in `data` and list the key under `secrets`; better, do the login itself in `setup` so the credential
 never reaches Jev at all.
 

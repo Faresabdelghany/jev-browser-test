@@ -54,7 +54,7 @@ class JevClient:
         if not self.api_key:
             raise JevError(
                 "TYPESAFE_API_KEY is not set. Create a key at https://console.typesafe.ai/keys "
-                "and export it (or put it in a .env file the runner is started from)."
+                "and export it (or put it in a .env file in the directory the runner is started from)."
             )
         self.model = model or os.environ.get("TYPESAFE_MODEL", "jev-latest")
         self.base_url = base_url or os.environ.get("TYPESAFE_BASE_URL", DEFAULT_BASE_URL)

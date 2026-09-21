@@ -44,10 +44,10 @@ Mixing is the normal case: deterministic `setup`, then a Jev-driven goal, then N
 ```bash
 pip install -r scripts/requirements.txt && python -m playwright install chromium
 python scripts/selftest.py            # offline: local page + fake Jev, proves the loop works, no credit spent
-export TYPESAFE_API_KEY=...           # https://console.typesafe.ai/keys ; the runner reads it from the env
+export TYPESAFE_API_KEY=...           # https://console.typesafe.ai/keys ; or put it in ./.env, the runner loads it
 ```
 
-The key must be an environment variable (or in a `.env` the user sources). Never write it into a spec
+The key must be an environment variable (or in a `.env` in the working directory, which the runner loads itself). Never write it into a spec
 file or a command you echo back. If the `typesafe-ai` plugin skill is installed, it is the reference for
 anything about the API itself; this skill only needs `POST /v1/systemone` with Choice and Noul questions.
 
@@ -159,7 +159,7 @@ is the fastest way to manufacture flakiness. Store `runs/` outside version contr
 
 | Symptom | Cause / fix |
 |---|---|
-| `TYPESAFE_API_KEY is not set` | Export the key or source the `.env`; the installed TypeSafe plugin does not provide one |
+| `TYPESAFE_API_KEY is not set` | Export the key or put it in `.env` in the directory you run from; the installed TypeSafe plugin does not provide one |
 | exit 2 with "Spec problems" | Read the list; usually a `done_when` naming an unknown check, a check written as a question, or a missing `${ENV}` |
 | `error` with `setup[i] failed` | The selector in a setup step did not match; fix it or move that step into the goal |
 | `blocked` right after a text field appears | Add the needed value to `data` |

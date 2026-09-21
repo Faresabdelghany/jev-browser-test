@@ -6,7 +6,7 @@ Serves a tiny local shop page from a temp file and replaces Jev with a rule-base
 answers the same question shapes. Exercises the terminal states: passed (auto-done on checks), never_violated (an error appeared),
 blocked (needed data missing), low_confidence (Jev unsure which value to type: nothing gets typed),
 plus the two DONE rules: a low-confidence DONE is a WAIT, and a confident DONE with unsatisfied
-checks gets one settle-and-recheck before the verdict.
+checks gets one settle-and-recheck before the verdict. Also checks that a ./.env is loaded.
 Run this after installing to confirm Playwright + Chromium work before spending TypeSafe credit.
 """
 from __future__ import annotations
@@ -18,6 +18,7 @@ import sys
 import tempfile
 
 from run_test import run
+from spec import load_dotenv
 from summarize_trace import summarize
 
 PAGE = """<!doctype html><html><head><title>Mini Shop</title>
@@ -333,6 +334,27 @@ def main() -> int:
     print()
     if trace["status"] != "done_unverified" or len(trace["steps"]) != 2:
         failures.append(f"expected done_unverified in 2 steps, got {trace['status']} in {len(trace['steps'])}")
+
+    # 8. .env in the working directory is loaded; already-exported variables win; quotes are stripped
+    env_dir = os.path.join(tmp, "dotenv")
+    os.makedirs(env_dir)
+    with open(os.path.join(env_dir, ".env"), "w", encoding="utf-8") as f:
+        f.write("# comment\n\nSELFTEST_PLAIN=abc\nexport SELFTEST_EXPORTED='quoted value'\n"
+                "SELFTEST_PRESET=from-file\nnot a variable line\n")
+    os.environ["SELFTEST_PRESET"] = "from-shell"
+    for name in ("SELFTEST_PLAIN", "SELFTEST_EXPORTED"):
+        os.environ.pop(name, None)
+    loaded = load_dotenv(os.path.join(env_dir, ".env"))
+    if sorted(loaded) != ["SELFTEST_EXPORTED", "SELFTEST_PLAIN"]:
+        failures.append(f".env loaded unexpected names: {loaded}")
+    if os.environ.get("SELFTEST_PLAIN") != "abc" or os.environ.get("SELFTEST_EXPORTED") != "quoted value":
+        failures.append(".env values not loaded or quotes not stripped")
+    if os.environ.get("SELFTEST_PRESET") != "from-shell":
+        failures.append(".env overrode a variable that was already exported")
+    if load_dotenv(os.path.join(env_dir, "missing.env")) != []:
+        failures.append("a missing .env should load nothing")
+    print("dotenv: loaded", loaded, "| preset kept:", os.environ["SELFTEST_PRESET"])
+    print()
 
     if failures:
         print("SELFTEST FAILED:")

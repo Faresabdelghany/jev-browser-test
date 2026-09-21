@@ -20,6 +20,7 @@ RESERVED_QUESTIONS = {
 }
 SETUP_ACTIONS = {"goto", "click", "fill", "press", "wait", "wait_for", "select"}
 ENV_RE = re.compile(r"\$\{([A-Z0-9_]+)\}")
+DOTENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 DEFAULTS = {
     "notes": "",
@@ -78,6 +79,37 @@ def substitute_env(value, missing: list[str]):
     if isinstance(value, dict):
         return {k: substitute_env(v, missing) for k, v in value.items()}
     return value
+
+
+def load_dotenv(path: str = ".env") -> list[str]:
+    """Load KEY=VALUE lines from `path` into os.environ; variables already set win.
+
+    Keeps the key out of the shell history and out of specs: a `.env` in the directory the
+    runner is started from is read by both run_test.py and spec.py, so validation and the run
+    see the same environment. Blank lines and `#` comments are skipped, a leading `export ` is
+    allowed, and matching quotes around a value are removed. Returns the names that were set.
+    """
+    loaded: list[str] = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return loaded
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        name, _, value = line.partition("=")
+        name, value = name.strip(), value.strip()
+        if not DOTENV_NAME_RE.match(name) or name in os.environ:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        os.environ[name] = value
+        loaded.append(name)
+    return loaded
 
 
 def validate(spec: dict) -> list[str]:
@@ -170,6 +202,7 @@ def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print("usage: python scripts/spec.py path/to/spec.json")
         return 2
+    load_dotenv()
     try:
         spec = load_spec(argv[1])
     except (ValueError, json.JSONDecodeError, OSError) as e:
