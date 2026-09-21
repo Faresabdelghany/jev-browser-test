@@ -20,6 +20,10 @@ Only the outcomes come back to you: `passed`, `blocked`, a `never` check firing,
 loop, or a budget running out. The runner is deterministic given Jev's answers, which is what makes the
 trace usable as evidence.
 
+The loop this skill exists for: **ticket or flow → Claude writes the spec → Jev runs it → Claude judges →
+if BUG, Claude fixes the code → the same spec re-runs green → PR.** Steps 1–4 below get you to the
+verdict; step 5 is the half that produces value. Do not stop at the verdict when a repo is available.
+
 ## When Jev earns its place
 
 Use plain Playwright (or a `setup` step) for anything with a stable selector that is *not* what you are
@@ -100,6 +104,45 @@ Never call a single run flaky; rerun and compare.
 Report with the template in the rubric: verdict, one-line flow, result numbers, the story in 2–4 sentences,
 the evidence (step number, action, confidence, check value, screenshot path), what was expected, and the next
 step. If the verdict is BUG and the user has an issue tracker connected, offer to file it with that block.
+
+### 5. Close the loop: fix, re-run, ship
+
+The verdict is not the end of the job; it is the hand-off to the part only Claude can do. The whole
+point of putting Jev in the loop is that a BUG comes back to a brain that can fix it, and the spec that
+found it becomes the regression test that proves the fix.
+
+When the verdict is **BUG** and the app's repository is available to you:
+
+1. **Locate.** Use the trace as your reproduction: the URL, the element Jev clicked (`target.label`), the
+   check that failed or the `never` that fired, and the visible error text in `visible_text`. Grep the repo
+   for the error string, the route, the component name in the screenshot. You are looking for the code
+   path a user hits when they do what Jev did.
+2. **Fix it** the way you would fix any bug in that codebase: its conventions, its tests, any review skill
+   the user has installed. Keep the change scoped to the defect the trace shows. Never change the app to
+   make a wrong spec pass; if the spec is wrong, that is a TEST_ISSUE and the fix goes in `specs/`.
+3. **Re-run the same spec** against the fixed build (local dev server, preview deploy). The run that was
+   red must now be green with the same actions. If the fix needed a spec change too, say so; a spec that
+   had to be loosened to pass is a warning sign, not a fix.
+4. **Report and ship.** The fix summary, the failing trace, the passing trace, and the before/after
+   summary tables are the evidence for the PR and the ticket update. Offer to open the PR and update the
+   ticket; do not do either without asking.
+
+When the verdict is **TEST_ISSUE**, the fix is in the spec (at most two revisions, then NEEDS_HUMAN).
+When it is **FLAKY**, the fix is usually a `wait_for` in `setup` or a check anchored on better text.
+When it is **NEEDS_HUMAN**, stop and ask the specific question the rubric tells you to ask.
+
+### Starting from a ticket
+
+If the user hands you a Linear/Jira issue or a bug report instead of a flow, write the spec from it:
+
+- **goal** = the user story or the reproduction steps, in one breath, ending at the visible outcome.
+- one **check** per acceptance criterion, worded with the app's own text;
+- the reported wrong behaviour as a **`never`** check (for a bug ticket) so the run fails for the right reason.
+
+A bug ticket's spec should come back **BUG before the fix and PASS after** — that is the definition of
+done for the fix, and the spec stays in `specs/` as the regression test for that ticket. For a feature
+ticket, the spec is the acceptance test: write it from the criteria before the code exists, expect
+`blocked`/`never_violated` until the feature lands, and PASS when it does.
 
 ## Triage-only mode
 

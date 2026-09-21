@@ -11,6 +11,9 @@ Claude (slow brain)  →  spec.json  →  runner loop  →  trace.json + screens
                             Playwright: observe + act
 ```
 
+The loop: **ticket or flow → Claude writes the spec → Jev runs it → Claude judges → if BUG, Claude fixes
+the code → the same spec re-runs green → PR.** The spec that found a bug stays as its regression test.
+
 Jev never generates text. Each step the runner sends it the page state and a fixed set of typed
 questions — which operation, which element, which prepared value, and every check in the spec as a
 true/false probability — and gets structured answers with confidence. Claude pre-supplies every string

@@ -78,8 +78,14 @@ Keep it short; the trace is the appendix. Use this shape (plain prose is fine fo
 **Expected:** <what a user should have seen>
 
 **Next step:** <fix in the app | spec change made and rerun result | what a human should check>
-Trace: runs/<id>/<ts>/trace.json
+**Fix:** <files changed, one line on the cause> — re-run: <status>, <n> actions (was <status>)   ← BUG only
+Trace: runs/<id>/<ts>/trace.json (failing), runs/<id>/<ts2>/trace.json (after fix)
 ```
+
+A BUG report without a fix attempt is incomplete when the repository is available: the spec is a
+reproduction, so use it. The one hard rule: the fix must make the *app* behave as a user expects, never
+make the *spec* easier to satisfy. If you find yourself loosening a check to get green, stop — that is a
+TEST_ISSUE wearing a BUG's clothes, or a real bug you have not understood yet.
 
 If the user has an issue tracker connected (Linear, Jira, GitHub) and the verdict is BUG, offer to file it
 with the evidence block and attach `final.png` and the divergence screenshot. Do not file without asking.
