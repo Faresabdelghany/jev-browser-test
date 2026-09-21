@@ -6,7 +6,9 @@ Serves a tiny local shop page from a temp file and replaces Jev with a rule-base
 answers the same question shapes. Exercises the terminal states: passed (auto-done on checks), never_violated (an error appeared),
 blocked (needed data missing), low_confidence (Jev unsure which value to type: nothing gets typed),
 plus the two DONE rules: a low-confidence DONE is a WAIT, and a confident DONE with unsatisfied
-checks gets one settle-and-recheck before the verdict. Also checks that a ./.env is loaded.
+checks gets one settle-and-recheck before the verdict, and the answer validation: an operation
+answer that fails validation is re-asked once (the run goes on), twice ends the run as error.
+Also checks that a ./.env is loaded.
 Run this after installing to confirm Playwright + Chromium work before spending TypeSafe credit.
 """
 from __future__ import annotations
@@ -136,13 +138,21 @@ class FakeJev:
     """Rule-based stand-in for Jev. Answers exactly the shapes the real API returns."""
 
     def __init__(self, mode: str = "normal") -> None:
-        self.mode = mode          # normal | hedge_value | early_low_done | early_confident_done | done_after_add
+        # normal | hedge_value | early_low_done | early_confident_done | done_after_add
+        # | invalid_operation_once | invalid_operation_always
+        self.mode = mode
         self.requests = 0
         self.op_requests = 0
         self.seen_states: list[dict] = []
 
     def _choice(self, label: str, options: dict, conf: float = 0.9) -> dict:
-        probs = {k: (conf if k == label else round((1 - conf) / max(1, len(options) - 1), 3)) for k in options}
+        """A Choice answer that passes policy.validate_choice: `label` carries the top probability,
+        the rest is spread evenly. Like the real API, `confidence` is a concentration measure rather
+        than the top probability, so a hedged answer (low conf) still keeps `label` narrowly on top."""
+        others = [k for k in options if k != label]
+        top = max(conf, 1 / len(options) + 0.01) if others else 1.0
+        probs = {k: (1 - top) / len(others) for k in others}
+        probs[label] = top
         return {"type": "choice", "choice": label, "confidence": conf, "probabilities": probs}
 
     @staticmethod
@@ -203,6 +213,8 @@ class FakeJev:
             op, target = "DONE", None
 
         answers["operation"] = self._choice(op, ops)
+        if self.mode == "invalid_operation_always" or (self.mode == "invalid_operation_once" and self.op_requests == 1):
+            answers["operation"]["choice"] = "FLY"  # a well-formed distribution, but the pick was never offered
         if target:
             qkey, label = target
             answers[qkey] = self._choice(label, questions[qkey]["criteria"])
@@ -335,7 +347,42 @@ def main() -> int:
     if trace["status"] != "done_unverified" or len(trace["steps"]) != 2:
         failures.append(f"expected done_unverified in 2 steps, got {trace['status']} in {len(trace['steps'])}")
 
-    # 8. .env in the working directory is loaded; already-exported variables win; quotes are stripped
+    # 8. an operation answer that fails validation is re-asked once; the retry answers well -> the run passes
+    spec = base_spec(url)
+    jev = FakeJev("invalid_operation_once")
+    out = os.path.join(tmp, "run-invalid-op-once")
+    trace = run(spec, jev, out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    first = trace["steps"][0]
+    if trace["status"] != "passed":
+        failures.append(f"expected passed after one retried operation answer, got {trace['status']} ({trace.get('error')})")
+    if not first.get("retried") or not str(first.get("invalid_answer", "")).startswith("operation: choice 'FLY'"):
+        failures.append(f"step 1 not marked retried/invalid_answer: {first.get('retried')} {first.get('invalid_answer')!r}")
+    if jev.requests != len(trace["steps"]) + 1:
+        failures.append(f"expected exactly one extra request for the retry, got {jev.requests} for {len(trace['steps'])} steps")
+    if any(s.get("retried") or s.get("invalid_answer") for s in trace["steps"][1:]):
+        failures.append("later steps carry retried/invalid_answer flags")
+    if first["latency_ms"]["jev"] != 2:
+        failures.append(f"retry latency not summed into the step: {first['latency_ms']}")
+
+    # 9. still invalid after the retry -> error, and exactly two requests were made for the step
+    spec = base_spec(url)
+    jev = FakeJev("invalid_operation_always")
+    out = os.path.join(tmp, "run-invalid-op-always")
+    trace = run(spec, jev, out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    if trace["status"] != "error" or "invalid operation answer" not in (trace.get("error") or ""):
+        failures.append(f"expected error 'invalid operation answer', got {trace['status']} ({trace.get('error')})")
+    if jev.requests != 2 or len(trace["steps"]) != 1:
+        failures.append(f"expected 2 requests for a single step, got {jev.requests} requests, {len(trace['steps'])} steps")
+    if trace["steps"][0].get("executed", {}).get("action") != "STOP":
+        failures.append(f"invalid-operation stop not recorded as STOP: {trace['steps'][0].get('executed')}")
+    if trace["actions_executed"] != 0:
+        failures.append("an unvalidated operation answer was counted as an action")
+
+    # 10. .env in the working directory is loaded; already-exported variables win; quotes are stripped
     env_dir = os.path.join(tmp, "dotenv")
     os.makedirs(env_dir)
     with open(os.path.join(env_dir, ".env"), "w", encoding="utf-8") as f:

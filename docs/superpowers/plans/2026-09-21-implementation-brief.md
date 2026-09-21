@@ -31,9 +31,9 @@ the spec it points to, then start. Do not re-brainstorm the design; it was revie
     ~4–6 requests). `specs/smoke-login.json` must end `passed`; `specs/smoke-login-badpw.json` must end
     with the bad-credentials outcome (today: `never_violated`).
   - `.venv/bin/python scripts/summarize_trace.py runs/<id>/<ts>/trace.json [--step N]`.
-- Pushing: the repo owner account is `Faresabdelghany`; the active `gh` account is usually
-  `Abdelaziz-wastehero`. Push with
-  `gh auth switch --user Faresabdelghany; git push origin main; gh auth switch --user Abdelaziz-wastehero`.
+- Pushing: the repo owner account is `Faresabdelghany`; the active `gh` account is usually the work
+  account. Push with `gh auth switch --user Faresabdelghany; git push origin main; gh auth switch`
+  (with two accounts logged in, the bare `gh auth switch` toggles back to the other one).
 - Commit attribution: end every commit message with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`
   (or whatever attribution line your session's system reminder specifies).
 
@@ -139,7 +139,7 @@ producing a single static `report.html`). Acceptance in §6.
 - Keep `spec.data` — never add a text-generation model. Never let a model answer become a selector,
   coordinate or code: targets are indices into the observed table only.
 - Never commit `.env`, `runs/`, `.venv/`, `.remember/`. `git status --short` must be clean of them.
-- No WasteHero-specific content in this repo (URLs, flows, company names). Generic demo specs only
+- No employer-specific content in this repo (URLs, flows, company names, account handles). Generic demo specs only
   (`the-internet.herokuapp.com`).
 - Every number in README/docs comes from `bench.py` output, with before/after files committed.
 - Small commits, one per task, in the order above. Push after each track completes and its

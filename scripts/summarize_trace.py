@@ -54,6 +54,10 @@ def _flags(step: dict) -> str:
         f.append("NEVER:" + ",".join(step["never_violated"]))
     if (step.get("target") or {}).get("missing"):
         f.append("NO-TARGET-ANSWER")
+    if step.get("invalid_answer"):
+        f.append("INVALID-ANSWER")
+    if step.get("retried"):
+        f.append("RETRIED")
     if step.get("error"):
         f.append("ERROR")
     return " ".join(f)

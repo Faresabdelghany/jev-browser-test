@@ -45,7 +45,9 @@ look at (step number, screenshot, the specific question).
 
 1. Summary line: status, actions, duration, `passed_without_actions` warning.
 2. Step table: read the operations as a story. Does the sequence make sense for the goal?
-3. Flags column: `LOW-CONF`, `ACTION-FAILED`, `FORCED-CLICK`, `REPEAT×n`, `NEVER:*`, `NO-TARGET-ANSWER`.
+3. Flags column: `LOW-CONF`, `ACTION-FAILED`, `FORCED-CLICK`, `DISPATCHED-CLICK`, `REPEAT×n`, `NEVER:*`,
+   `NO-TARGET-ANSWER`, `INVALID-ANSWER` (a Jev answer failed validation; the reason is in `step.invalid_answer`),
+   `RETRIED` (the request was re-sent once), `ERROR`.
 4. The step **after** the last sensible action: its checks and screenshot show what the app actually did.
 5. `--step N` for the divergence point: was the chosen element the right one? What else was offered?
 6. `final.png`.

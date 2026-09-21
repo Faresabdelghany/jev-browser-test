@@ -33,7 +33,7 @@ secrets out of any model that does not need them, and turns a missing value into
 |---|---|
 | `scripts/spec.py` | Defaults, `${ENV}` substitution, validation. CLI validates a spec |
 | `scripts/observe.py` | The injected JS that builds the element table; `render_table`, `signature` |
-| `scripts/policy.py` | State + question construction, answer parsing, target resolution |
+| `scripts/policy.py` | State + question construction, strict answer validation, target resolution |
 | `scripts/jev_client.py` | Stdlib HTTP client for `POST /v1/systemone`: one persistent connection per run (reconnects and retries once if the socket was dropped; Jev calls are read-only), 429/5xx backoff, usage counters; honours `https_proxy` / `no_proxy` like urllib |
 | `scripts/run_test.py` | The loop, setup steps, action execution, stop conditions, trace writing |
 | `scripts/summarize_trace.py` | Summary table and `--step N` dump |
@@ -44,7 +44,8 @@ secrets out of any model that does not need them, and turns a missing value into
 
 ## Stop conditions (in the order they are evaluated each step)
 
-time budget → observe → ask Jev → `never` violated (fail_fast) → `done_when` satisfied (`auto_done`) →
+time budget → observe → ask Jev (re-ask once if the `operation` answer fails validation) → `never`
+violated (fail_fast) → `done_when` satisfied (`auto_done`) → invalid `operation` after the retry (`error`) →
 DONE / BLOCKED chosen → repeat detection (`stuck`) → low-confidence streak → execute → settle → next step.
 
 Repeat detection keys on `(page signature, operation, target, value_key)`. The signature hashes URL, title,
@@ -93,6 +94,24 @@ intercepted clicks still fall back to `force=True` (`executed.forced`).
 
 Known blind spots: canvas content (maps, charts) has no elements at all; a clickable element with no
 role, no handler attribute and no pointer cursor. Both need a `setup` step.
+
+## Answer validation
+
+Jev's answers are data from a network service and the runner acts on them, so nothing is trusted before
+it is checked. `build_questions` returns in `meta["offered"]` the keys each Choice question offered, and
+`policy.validate_choice` accepts an answer only if `choice` is one of them, every probability key is one
+of them, the values are finite in [0, 1] and sum to 1 (± 0.02), `confidence` is finite in [0, 1], and the
+chosen key carries the top probability (within 1e-6). Missing fields are invalid; a bool is not a number.
+`resolve_target` runs that check before it turns a choice into an element index, so `int()` never sees an
+unvalidated string, and `type_value` is checked against the spec's `data` keys the same way.
+
+An invalid or missing `operation` answer is not a decision: the loop re-sends the same state and
+questions once (Jev calls are read-only, so this cannot double-act) and reads checks and operation from
+the second response; a second failure ends the run as `error`. Invalid target or `type_value` answers are
+not retried: the reason is recorded in `step.invalid_answer` and the action fails safely through the
+missing-target path. Noul checks whose value is not a finite number in [0, 1] are dropped from
+`step.checks`; the absent key is the signal. `read_choice` without `offered` keeps a lenient, shape-only
+parse for reading traces and ad-hoc tools; the loop always passes `offered`.
 
 ## Confidence gate and DONE confirmation
 

@@ -22,7 +22,7 @@ the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to re
 | `stuck` | Same action on an unchanged page `max_repeat` times | The action had no effect: dead button (bug), or Jev is confused by the page (test issue: add a note or a `setup` step) |
 | `low_confidence` | `max_low_confidence_steps` consecutive uncertain decisions, none of them executed | Jev could not choose between the offered options: look at `decision_confidence` and the probabilities in `--step N`. A split over `type_value` means the `data` key names do not match the field labels (rename them); a split over targets means the goal/notes do not say which of several similar controls to use |
 | `budget_exhausted` | Ran out of steps or seconds | Wandering (test issue, tighten the goal) or a very long flow (raise the budget) |
-| `error` | Runner, browser or API failure (`trace.error`) | Environment issue; rerun before concluding anything |
+| `error` | Runner, browser or API failure (`trace.error`). `invalid operation answer: <reason>` means Jev's `operation` answer failed validation twice in a row for one step (the step carries `invalid_answer` and `retried`) | Environment issue; rerun before concluding anything |
 
 `trace.pass` is `true` only for `passed`.
 
@@ -53,6 +53,8 @@ the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to re
       "checks": { "cart_has_item": 0.02, "error_visible": 0.01 },   // evaluated on the page BEFORE the action
       "low_confidence": false, "decision_confidence": 0.94, "repeat_count": 1,
       "never_violated": ["error_visible"],                           // only when a never check fired
+      "invalid_answer": "operation: choice 'FLY' was not offered",   // only when an answer failed validation
+      "retried": true,                                               // only when the request was re-sent
       "executed": { "action": "CLICK", "ok": true, "error": null, "element": 3 },
       "latency_ms": { "jev": 131, "browser": 640 }
     }
@@ -74,6 +76,17 @@ Notes that matter when judging:
 - `executed.action == "WAIT"` with `reason == "confirming DONE"` means Jev chose DONE while `done_when` was
   unsatisfied; the next step's checks are the verdict and carry `executed.confirmed == true`. This absorbs
   reloads and redirects still in flight when Jev declared victory.
+- Every Choice answer is validated before it is used: the choice must be one of the keys the question
+  offered, every probability key must be offered, values finite in [0, 1] and summing to 1 (± 0.02),
+  `confidence` in [0, 1], and the choice must carry the top probability. `invalid_answer` names the
+  question and the reason (`"operation: choice 'FLY' was not offered"`; several are joined with `"; "`).
+  An invalid or missing `operation` answer makes the runner send the **same** request once more:
+  `retried` is true, `latency_ms.jev` is the sum of both round trips, and `checks` and `operation` come
+  from the second response. Still invalid → the run ends `error` with `invalid operation answer: <reason>`
+  and the step is a `STOP`. An invalid target or `type_value` answer is not retried: `target` is
+  `{ "question": ..., "missing": true, "invalid": "<reason>" }` (flag `NO-TARGET-ANSWER`) and the action
+  fails safely with `executed.ok == false`. A check whose Noul value is malformed is simply absent from
+  `checks` for that step. None of this is evidence about the page; it is evidence about the API answer.
 - `executed.ok == false` means Playwright could not perform the action Jev chose (timeout, detached element).
   One failure is noise; the same failure repeating is a real signal (element not clickable → possible bug).
 - `executed.forced == true` means the click needed `force=True` because a transparent overlay intercepted it.

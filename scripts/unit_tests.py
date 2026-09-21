@@ -5,19 +5,24 @@
 Standard-library unittest. Python puts this script's directory on sys.path, so the modules under
 scripts/ import directly (`from jev_client import JevClient`). Exits non-zero on any failure.
 The Jev client is exercised against a local HTTP/1.1 server that counts connections and requests,
-so the keep-alive, reconnect, backoff and proxy behaviour is observed, not assumed.
+so the keep-alive, reconnect, backoff and proxy behaviour is observed, not assumed. The policy
+tests feed hand-built answers to the validation and target resolution, including the malformed
+shapes the runner must refuse to act on.
 """
 from __future__ import annotations
 
 import http.client
 import http.server
 import json
+import math
 import os
 import threading
 import unittest
 from unittest import mock
 
 from jev_client import DEFAULT_BASE_URL, JevClient, JevError
+from policy import build_questions, read_checks, read_choice, resolve_target, validate_choice
+from spec import DEFAULTS, _merge
 
 ANSWER = {
     "model": "fake",
@@ -297,6 +302,180 @@ class JevClientTests(unittest.TestCase):
     def test_rejects_non_http_base_url(self) -> None:
         with self.assertRaises(JevError):
             JevClient(api_key="x", base_url="ftp://example.invalid/v1")
+
+
+OFFERED = ["CLICK", "WAIT", "DONE"]
+
+
+def answer(choice="CLICK", probabilities=None, confidence=0.8, **extra) -> dict:
+    """A valid Choice answer over OFFERED unless a field is overridden."""
+    a = {"type": "choice", "choice": choice, "confidence": confidence,
+         "probabilities": {"CLICK": 0.8, "WAIT": 0.15, "DONE": 0.05} if probabilities is None else probabilities}
+    a.update(extra)
+    return a
+
+
+def observation(elements: list[dict]) -> dict:
+    """The fields of observe() that build_questions and resolve_target read."""
+    return {"url": "http://x/", "title": "t", "elements": elements, "truncated": 0, "visible_text": "",
+            "can_scroll_down": False, "can_scroll_up": False}
+
+
+ELEMENTS = [
+    {"idx": 0, "role": "textbox", "name": "Username"},
+    {"idx": 1, "role": "button", "name": "Login"},
+    {"idx": 2, "role": "select", "name": "Size", "options": [{"i": 0, "text": "S"}, {"i": 1, "text": "M", "disabled": True}]},
+]
+SPEC = _merge(DEFAULTS, {"id": "u", "start_url": "http://x/", "goal": "g", "data": {"username": "tom", "password": "pw"},
+                         "secrets": ["password"], "checks": {"ok": "The page says welcome"}, "done_when": ["ok"]})
+
+
+class ValidateChoiceTests(unittest.TestCase):
+    def test_valid(self) -> None:
+        self.assertIsNone(validate_choice(answer(), OFFERED))
+        self.assertIsNone(validate_choice(answer(probabilities={"CLICK": 1}, confidence=1), OFFERED))  # ints are numbers
+        self.assertIsNone(validate_choice(answer(probabilities={"CLICK": 0.5, "WAIT": 0.5}), OFFERED))  # a tie is on top
+        self.assertIsNone(validate_choice(answer(probabilities={"CLICK": 0.81, "WAIT": 0.2}), OFFERED))  # 1.01 is within 0.02
+
+    def test_choice_not_offered(self) -> None:
+        self.assertIn("not offered", validate_choice(answer(choice="FLY", probabilities={"FLY": 1.0}), OFFERED))
+        self.assertIn("not offered", validate_choice(answer(choice="FLY"), OFFERED))
+
+    def test_probability_key_not_offered(self) -> None:
+        self.assertIn("probability key 'FLY'", validate_choice(answer(probabilities={"CLICK": 0.7, "FLY": 0.3}), OFFERED))
+
+    def test_value_above_one(self) -> None:
+        self.assertIn("probability of 'CLICK'", validate_choice(answer(probabilities={"CLICK": 1.2, "WAIT": -0.2}), OFFERED))
+
+    def test_nan_value(self) -> None:
+        self.assertIn("not a finite number", validate_choice(answer(probabilities={"CLICK": math.nan, "WAIT": 0.1}), OFFERED))
+        self.assertIn("not a finite number", validate_choice(answer(probabilities={"CLICK": math.inf}), OFFERED))
+
+    def test_sum_not_one(self) -> None:
+        self.assertIn("sum to 0.900", validate_choice(answer(probabilities={"CLICK": 0.8, "WAIT": 0.1}), OFFERED))
+        self.assertIn("sum to 1.500", validate_choice(answer(probabilities={"CLICK": 0.9, "WAIT": 0.6}), OFFERED))
+
+    def test_confidence_out_of_range(self) -> None:
+        self.assertIn("confidence", validate_choice(answer(confidence=1.2), OFFERED))
+        self.assertIn("confidence", validate_choice(answer(confidence=math.nan), OFFERED))
+        self.assertIn("confidence", validate_choice(answer(confidence="0.9"), OFFERED))
+
+    def test_choice_not_top(self) -> None:
+        self.assertIn("not the top option", validate_choice(answer(choice="WAIT"), OFFERED))
+        self.assertIn("has no probability", validate_choice(answer(choice="DONE", probabilities={"CLICK": 0.5, "WAIT": 0.5}), OFFERED))
+
+    def test_huge_integer_is_rejected_not_raised(self) -> None:
+        # json.loads turns a 400-digit literal into an int; float(int) would raise OverflowError.
+        self.assertIn("not a finite number", validate_choice(answer(probabilities={"CLICK": 10**400}), OFFERED))
+        self.assertIn("not a finite number", validate_choice(answer(probabilities={"CLICK": 1.0, "WAIT": -(10**400)}), OFFERED))
+        self.assertIn("confidence", validate_choice(answer(confidence=10**400), OFFERED))
+
+    def test_bool_is_not_a_number(self) -> None:
+        self.assertIn("not a finite number", validate_choice(answer(probabilities={"CLICK": True}), OFFERED))
+        self.assertIn("confidence", validate_choice(answer(confidence=True), OFFERED))
+
+    def test_missing_fields(self) -> None:
+        a = answer()
+        del a["probabilities"]
+        self.assertIn("probabilities missing", validate_choice(a, OFFERED))
+        self.assertIn("probabilities missing", validate_choice(answer(probabilities={}), OFFERED))
+        a = answer()
+        del a["confidence"]
+        self.assertIn("confidence is missing", validate_choice(a, OFFERED))
+        a = answer()
+        del a["choice"]
+        self.assertIn("choice is missing", validate_choice(a, OFFERED))
+        self.assertIn("choice is missing", validate_choice(answer(choice=1), OFFERED))
+
+    def test_wrong_shape(self) -> None:
+        self.assertEqual(validate_choice(None, OFFERED), "no answer")
+        self.assertIn("not an object", validate_choice("CLICK", OFFERED))
+        self.assertIn("not 'choice'", validate_choice({"type": "noul", "noul": 0.5}, OFFERED))
+        self.assertIn("not offered", validate_choice(answer(), []))
+
+
+class ReadAnswersTests(unittest.TestCase):
+    def test_read_choice_strict_and_lenient(self) -> None:
+        answers = {"operation": answer(choice="FLY")}
+        self.assertIsNone(read_choice(answers, "operation", OFFERED))
+        self.assertEqual(read_choice(answers, "operation")["choice"], "FLY")  # lenient: shape only
+        self.assertIsNone(read_choice({}, "operation", OFFERED))
+        self.assertIsNone(read_choice({}, "operation"))
+        got = read_choice({"operation": answer()}, "operation", OFFERED)
+        self.assertEqual(got, {"choice": "CLICK", "confidence": 0.8, "top_probabilities": {"CLICK": 0.8, "WAIT": 0.15, "DONE": 0.05}})
+
+    def test_read_checks_skips_malformed_values(self) -> None:
+        spec = {"checks": {"a": "", "b": "", "c": "", "d": "", "e": "", "f": "", "g": "", "h": ""}}
+        answers = {
+            "a": {"type": "noul", "noul": 0.42},
+            "b": {"type": "noul", "noul": 1.5},
+            "c": {"type": "noul", "noul": math.nan},
+            "d": {"type": "noul", "noul": True},
+            "e": {"type": "noul"},
+            "f": {"type": "choice", "choice": "x"},
+            "g": {"type": "noul", "noul": 1},
+            "h": {"type": "noul", "noul": 10**400},  # must be skipped, not raise OverflowError
+        }
+        self.assertEqual(read_checks(answers, spec), {"a": 0.42, "g": 1.0})
+
+    def test_build_questions_reports_offered_keys(self) -> None:
+        questions, meta = build_questions(SPEC, observation(ELEMENTS), last_operation="TYPE_TEXT")
+        self.assertEqual(meta["operations"], ["CLICK", "TYPE_TEXT", "PRESS_ENTER", "SELECT", "WAIT", "DONE", "BLOCKED"])
+        self.assertEqual(meta["offered"], {
+            "operation": meta["operations"],
+            "click_target": ["1"],
+            "type_target": ["0"],
+            "type_value": ["username", "password"],
+            "select_target": ["2:0"],  # the disabled option is not offered
+        })
+        for key, offered in meta["offered"].items():
+            self.assertEqual(list(questions[key]["criteria"]), offered)
+        self.assertNotIn("ok", meta["offered"])  # nouls have no option set
+        _, meta = build_questions(SPEC, observation(ELEMENTS[:1]), last_operation=None)
+        self.assertEqual(set(meta["offered"]), {"operation", "type_target", "type_value"})
+        self.assertNotIn("CLICK", meta["offered"]["operation"])
+
+    def test_select_with_only_disabled_options_is_withdrawn(self) -> None:
+        el = {"idx": 2, "role": "select", "name": "Size", "options": [{"i": 0, "text": "S", "disabled": True}]}
+        questions, meta = build_questions(SPEC, observation([el]), last_operation=None)
+        self.assertNotIn("SELECT", meta["operations"])
+        self.assertNotIn("SELECT", meta["offered"]["operation"])
+        self.assertNotIn("select_target", questions)
+
+
+class ResolveTargetTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.obs = observation(ELEMENTS)
+        _, self.meta = build_questions(SPEC, self.obs, last_operation=None)
+
+    def test_non_offered_choice_is_missing_and_invalid(self) -> None:
+        for bad in ("7", "1; DROP", "[1]", "", "1:0", "-1", " 1"):
+            answers = {"click_target": answer(choice=bad, probabilities={bad: 1.0}, confidence=1.0)}
+            got = resolve_target("CLICK", answers, self.obs, self.meta)
+            self.assertEqual(got["question"], "click_target")
+            self.assertTrue(got["missing"], bad)
+            self.assertIn("not offered", got["invalid"])
+            self.assertNotIn("element", got)
+
+    def test_missing_or_malformed_answer_never_raises(self) -> None:
+        self.assertEqual(resolve_target("CLICK", {}, self.obs, self.meta),
+                         {"question": "click_target", "missing": True, "invalid": "no answer"})
+        got = resolve_target("SELECT", {"select_target": {"type": "choice", "choice": "2:0"}}, self.obs, self.meta)
+        self.assertTrue(got["missing"])
+        self.assertIn("probabilities missing", got["invalid"])
+        got = resolve_target("TYPE_TEXT", {"type_target": "0"}, self.obs, self.meta)
+        self.assertTrue(got["missing"])
+        self.assertIn("not an object", got["invalid"])
+
+    def test_valid_answers_resolve_to_elements(self) -> None:
+        answers = {"click_target": answer(choice="1", probabilities={"1": 1.0}, confidence=1.0)}
+        got = resolve_target("CLICK", answers, self.obs, self.meta)
+        self.assertEqual((got["element"], got["label"], got["question"]), (1, '[1] button "Login"', "click_target"))
+        answers = {"select_target": answer(choice="2:0", probabilities={"2:0": 1.0}, confidence=1.0)}
+        got = resolve_target("SELECT", answers, self.obs, self.meta)
+        self.assertEqual((got["element"], got["option"]), (2, 0))
+        self.assertEqual(got["label"], '[2] select "Size" -> "S"')
+        self.assertIsNone(resolve_target("WAIT", answers, self.obs, self.meta))
 
 
 if __name__ == "__main__":

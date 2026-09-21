@@ -6,7 +6,9 @@ Exit codes: 0 = passed, 1 = did not pass (see trace status), 2 = spec / environm
 
 No language model sits in this loop. Claude writes the spec beforehand and reads the trace afterwards;
 Jev makes one typed decision per step; Playwright executes. Everything here is deterministic given
-Jev's answers, which is what makes the trace trustworthy evidence.
+Jev's answers, which is what makes the trace trustworthy evidence. Those answers are validated
+against the options that were offered before anything is executed (policy.validate_choice): a
+malformed `operation` answer is asked again once, then ends the run; a malformed target is never acted on.
 """
 from __future__ import annotations
 
@@ -20,7 +22,7 @@ from datetime import datetime, timezone
 
 from jev_client import JevClient, JevError
 from observe import observe, signature
-from policy import build_questions, build_state, read_checks, read_choice, resolve_target
+from policy import build_questions, build_state, read_checks, read_choice, resolve_target, validate_choice
 from spec import load_dotenv, load_spec
 from summarize_trace import summarize
 
@@ -150,6 +152,16 @@ def execute(page, spec: dict, operation: str, target: dict | None, value_key: st
     return res
 
 
+def note_invalid(step: dict, text: str) -> None:
+    """Append one '<question>: <reason>' to step["invalid_answer"] (several are joined with '; ')."""
+    step["invalid_answer"] = f"{step['invalid_answer']}; {text}" if step.get("invalid_answer") else text
+
+
+def latency_of(resp: dict, started: float) -> int:
+    """The Jev round trip in ms: the client's own measurement when it has one, else ours."""
+    return resp.get("latency_ms", int((time.perf_counter() - started) * 1000))
+
+
 def history_line(n: int, operation: str, target: dict | None, value_key: str | None, executed: dict) -> str:
     line = f"{n}. {operation}"
     if target and not target.get("missing"):
@@ -241,20 +253,35 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
                 }
                 state = build_state(spec, obs, n, history)
                 questions, meta = build_questions(spec, obs, last_operation)
+                offered = meta["offered"]
                 step["offered_operations"] = meta["operations"]
-                t_jev = time.perf_counter()
                 try:
+                    t_jev = time.perf_counter()
                     resp = jev.system_one(state, questions)
+                    step["latency_ms"] = {"jev": latency_of(resp, t_jev)}
+                    answers = resp["answers"]
+                    op_problem = validate_choice(answers.get("operation"), offered["operation"])
+                    if op_problem:
+                        # A malformed or missing operation answer is not a decision. Jev calls are
+                        # read-only, so the same state and questions are sent once more before the
+                        # run gives up; both round trips count toward this step's Jev latency.
+                        note_invalid(step, f"operation: {op_problem}")
+                        step["retried"] = True
+                        t_jev = time.perf_counter()
+                        resp = jev.system_one(state, questions)
+                        step["latency_ms"]["jev"] += latency_of(resp, t_jev)
+                        answers = resp["answers"]
+                        op_problem = validate_choice(answers.get("operation"), offered["operation"])
+                        if op_problem:
+                            note_invalid(step, f"operation after retry: {op_problem}")
                 except JevError as e:
                     status, error = "error", str(e)
                     step["error"] = error
                     trace["steps"].append(step)
                     break
-                step["latency_ms"] = {"jev": resp.get("latency_ms", int((time.perf_counter() - t_jev) * 1000))}
-                answers = resp["answers"]
                 checks = read_checks(answers, spec)
                 step["checks"] = checks
-                op = read_choice(answers, "operation")
+                op = read_choice(answers, "operation", offered["operation"])  # None iff op_problem
                 step["operation"] = op
 
                 bad = violated(checks)
@@ -283,16 +310,22 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
                     break
 
                 if op is None:
-                    status, error = "error", "no 'operation' answer in response"
+                    status, error = "error", f"invalid operation answer: {op_problem}"
                     step["error"] = error
+                    step["executed"] = {"action": "STOP", "ok": True, "error": None}
                     trace["steps"].append(step)
                     break
                 operation = op["choice"]
-                target = resolve_target(operation, answers, obs)
+                target = resolve_target(operation, answers, obs, meta)
                 step["target"] = target
+                if target and target.get("invalid"):
+                    # Not retried: the missing-target path below fails the action safely.
+                    note_invalid(step, f"{target['question']}: {target['invalid']}")
                 value_key = None
                 if operation == "TYPE_TEXT":
-                    tv = read_choice(answers, "type_value")
+                    tv = read_choice(answers, "type_value", offered.get("type_value", []))
+                    if tv is None:
+                        note_invalid(step, "type_value: " + validate_choice(answers.get("type_value"), offered.get("type_value", [])))
                     step["type_value"] = tv
                     value_key = tv["choice"] if tv else None
 
