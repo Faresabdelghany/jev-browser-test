@@ -453,7 +453,12 @@ def main(argv: list[str]) -> int:
         return 2
 
     out_dir = args.out or os.path.join("runs", spec["id"], datetime.now().strftime("%Y%m%d-%H%M%S"))
-    trace = run(spec, jev, out_dir, screenshots=False if args.no_screenshots else None, headed=args.headed)
+    try:
+        trace = run(spec, jev, out_dir, screenshots=False if args.no_screenshots else None, headed=args.headed)
+    finally:
+        close = getattr(jev, "close", None)  # the seam only requires system_one() and usage_summary()
+        if close:
+            close()
     print(summarize(trace, out_dir))
     return 0 if trace["pass"] else 1
 

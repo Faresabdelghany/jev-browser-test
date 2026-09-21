@@ -34,7 +34,7 @@ secrets out of any model that does not need them, and turns a missing value into
 | `scripts/spec.py` | Defaults, `${ENV}` substitution, validation. CLI validates a spec |
 | `scripts/observe.py` | The injected JS that builds the element table; `render_table`, `signature` |
 | `scripts/policy.py` | State + question construction, answer parsing, target resolution |
-| `scripts/jev_client.py` | Stdlib HTTP client for `POST /v1/systemone`, retries, usage counters |
+| `scripts/jev_client.py` | Stdlib HTTP client for `POST /v1/systemone`: one persistent connection per run (reconnects and retries once if the socket was dropped; Jev calls are read-only), 429/5xx backoff, usage counters; honours `https_proxy` / `no_proxy` like urllib |
 | `scripts/run_test.py` | The loop, setup steps, action execution, stop conditions, trace writing |
 | `scripts/summarize_trace.py` | Summary table and `--step N` dump |
 | `scripts/selftest.py` | Offline end-to-end test with a local page and a rule-based fake Jev |

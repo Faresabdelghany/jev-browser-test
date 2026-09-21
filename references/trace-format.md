@@ -35,7 +35,8 @@ the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to re
   "started_at": "...", "ended_at": "...", "duration_ms": 6210,
   "actions_executed": 4,                 // steps that changed the browser (not DONE/STOP, not runner-inserted WAITs)
   "passed_without_actions": true,        // only present if the start page already satisfied done_when
-  "usage": { "jev_requests": 5, "input_tokens": 2100, "output_tokens": 300, "model": "jev-1.13.0" },
+  "usage": { "jev_requests": 5, "input_tokens": 2100, "output_tokens": 300, "model": "jev-1.13.0",
+             "reconnects": 0 },      // reconnects > 0: the kept-alive API connection dropped mid-run and was reopened
   "spec": { ... },                       // the spec as run, secrets replaced by "<secret>"
   "setup": [ { "n": 0, "action": "fill", "selector": "...", "ok": true, "error": null } ],
   "steps": [
@@ -81,3 +82,6 @@ Notes that matter when judging:
   checkbox input) and the click was dispatched on the control directly. Normal for antd/MUI checkboxes.
 - Element indices are re-assigned every step. Never compare `idx` across steps; compare `label`.
 - Typed values are never stored; only the `data` key name (`value_key`) is.
+- `usage.reconnects` counts the times the client's kept-alive connection to the API died and the request
+  was retried on a fresh one. Jev calls are read-only, so a retry is harmless; the number is evidence of an
+  unstable network or an API idle timeout, not of anything the page did.
