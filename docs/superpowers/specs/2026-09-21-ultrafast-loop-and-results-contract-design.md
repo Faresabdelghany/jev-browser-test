@@ -21,7 +21,7 @@ adds on top is everything that makes it a *test* rather than an agent demo.
 | Run | Result | Wall | Jev calls | Jev ms | Post-action settle ms | Observe + screenshots + navigation ms |
 |---|---|---:|---:|---:|---:|---:|
 | `smoke-login` | passed, 3 actions | 8,961 | 4 | 3,355 | 2,312 | 3,294 |
-| `smoke-login-badpw` | never_violated, 3 actions | 18,400 | 6 | — | — | — |
+| `smoke-login-badpw` | never_violated, 3 actions (+2 refused low-confidence steps) | 18,412 | 6 | 8,162 | 3,445 | 6,805 |
 
 Connection experiment, one small request repeated three times: fresh TLS connection per request
 **1023 / 717 / 688 ms**; one persistent connection **835 / 304 / 307 ms**. `jev_client.py` opens a new
@@ -114,7 +114,10 @@ unchanged in outcome.
 ### 4.6 Freshness guard — `scripts/observe.py` (new `fingerprint`), `scripts/run_test.py`
 After Jev answers and before executing, evaluate a cheap page-side fingerprint **without re-tagging**:
 url, title, the first 500 chars of visible text, and for every `[data-jev-idx]` node its connectedness,
-box, value and checked state. If it differs from the observation Jev saw, the step is recorded
+visibility, value, checked and disabled state — **not its geometry**: animations move boxes without changing
+meaning (jev-ultrafast's guards compare identity and meaning for the same reason), and Playwright's
+actionability checks already resolve geometry and hit-test at click time. If the fingerprint differs from
+the observation Jev saw, the step is recorded
 `stale: true`, `executed: {"action": "WAIT", "reason": "page changed during the decision"}`, nothing is
 executed, and the loop re-observes. Mutations are never retried. `max_stale` (default 3) consecutive
 stale steps end the run with a new terminal status **`unstable_page`** ("the page kept changing while Jev
@@ -139,11 +142,13 @@ close **only that page**. `storage_state` is ignored when attached. Documented r
 `--remote-debugging-port=9222`. This is how SSO-walled internal apps get tested without scripting login.
 
 ### 4.10 Screenshot policy — `observation.screenshots: true | false | "key"`
-Default becomes `"key"`: write a step's screenshot when the step is terminal, or has `never_violated`,
-`low_confidence`, `stale`, `repeat_count ≥ 2`, `executed.ok == false` — **and** always the step before
-any of those (one step of PNG bytes is buffered in memory). `final.png` is always written. `true` keeps
-today's behaviour; the CLI gains `--screenshots all|key|none`. The rubric's reading order (the step after
-the last sensible action, the divergence step, `final.png`) is fully covered by `"key"`.
+Default becomes `"key"`: the screenshot is taken **after Jev's answer and before execution**, and only
+when the step is terminal or has `never_violated`, `low_confidence`, `stale` or `repeat_count ≥ 2`; a step
+whose action fails (`executed.ok == false`) is captured right after the failure. `final.png` is always
+written. Capture, not encoding, is the cost, so buffering every step would save nothing; the price is that
+the step *before* a divergence has no screenshot. Its element table and probabilities are still in the
+trace, and `--screenshots all` (`true` in the spec) restores today's behaviour for a rerun when a human
+needs the picture. The rubric's reading order is updated to say so.
 
 ### 4.11 Measurement plan for Track 1
 Before/after, five repeats each of `smoke-login` and `smoke-login-badpw`, recording wall, Jev ms, browser
@@ -186,7 +191,8 @@ phrasing (§4.4) runs on the same harness and is adopted only if it wins.
 - Compatibility: at load time, when `outcomes` is absent, synthesize `goal_reached = {requires:
   done_when, verdict: pass}` and, per `never` check `n`, `never_<n> = {requires: [n], verdict: bug}`.
   Internally the runner only knows outcomes; the Choice is asked only when at least one outcome has a
-  `when`. Old specs produce identical statuses plus a `result.json`.
+  `when`. Old specs keep their pass/fail result and exit code and gain a `result.json`; a fired `never`
+  check now ends with status `outcome` and `outcome: never_<n>` (previously `never_violated`).
 
 ### 5.2 Per-step questions — `scripts/policy.py`
 - `outcome`: one Choice over the outcome names plus `none_yet` ("the flow is still in progress, or nothing
@@ -212,9 +218,13 @@ phrasing (§4.4) runs on the same harness and is adopted only if it wins.
   Claude decides whether the assertion or the app is wrong.
 - Any other verdict: terminal on first confident sighting, screenshot forced for that step. A vanishing
   error toast is still an error. This is today's `fail_fast` asymmetry, kept.
+- Trace statuses: a confirmed `pass` outcome ends as `passed`; any other seen outcome ends with the new
+  terminal status **`outcome`**, and `result.outcome` names it. With `fail_fast: false` a non-pass sighting
+  is recorded on the step (`outcome_seen`) and the run continues.
 - No outcome within budget, or the loop ends `stuck | blocked | low_confidence | done_unverified |
   budget_exhausted | unstable_page | error` → outcome **`undetermined`**, with `reason.status`, the typed
-  `blocked_reason`/`stuck_reason`, and a `suggested_verdict` from a fixed table:
+  `blocked_reason`/`stuck_reason`, and a `suggested_verdict` from a fixed table (the typed reason wins over
+  the status when both match a row):
 
 | reason | suggested |
 |---|---|
@@ -305,10 +315,10 @@ text-only); Score questions; a served inspector UI.
 ## 9. Decisions for the implementation plan
 
 1. Order: Track 1 (4.1 → 4.7 first, then 4.8–4.10), Track 2, Track 3. Each track ends with its
-   measurement and a push.
+   measurement and a push, and gets its own implementation plan.
 2. No new runtime dependency; stdlib + Playwright.
 3. New files: `scripts/rules.py`, `scripts/run_suite.py`, `scripts/report.py`. New statuses:
-   `unstable_page`; new result outcome: `undetermined`.
+   `unstable_page`, `outcome`; new result outcome: `undetermined`.
 4. Defaults change: `max_elements` 200, `max_text_chars` 4000, `settle_ms` 400 (cap), `quiet_ms` 100,
    `screenshots "key"`, `outcome_true` 0.8.
 5. Every behavioural change lands with a selftest case; every performance claim in the README comes from
