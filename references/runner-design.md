@@ -73,14 +73,26 @@ beyond what `querySelectorAll` reaches; one tab (new tabs opened by the page are
 these are also outside jev-ultrafast's current scope. Put such steps in `setup` with plain Playwright when
 they are preconditions rather than the thing under test.
 
-## Observer: two passes
+## Observer: three passes
 
-Pass 1 collects semantic controls (tags, ARIA roles, `[onclick]`, focusable `tabindex`). Pass 2 walks the
-body (capped at 8,000 nodes) for elements whose computed `cursor` is `pointer`, keeping only the outermost
-of each pointer chain (cursor inherits) and skipping anything nested in a pass-1 control. This is what
-surfaces React-style clickables that carry no role — an avatar menu, a card, a table row. Each element
-records `via: "semantic" | "cursor"` in the trace so triage can tell how it was found. Known blind spot:
-a clickable element with no role, no handler attribute and no pointer cursor — use a `setup` click.
+Pass 1 collects semantic controls (tags, ARIA roles, `[onclick]`, focusable `tabindex`). A form control
+at `opacity: 0` is **kept** if it still has a real box: that is the antd/MUI/Bootstrap "hidden input under
+a styled box" pattern, and the input is the thing to click. The occlusion test accepts the control's own
+styled box (its label, or a sibling in the same wrapper) as non-occluding. Pass 2 offers a `<label>` as
+the checkbox/radio it controls when the input itself is parked offscreen. Pass 3 walks the body (capped at
+8,000 nodes) for elements whose computed `cursor` is `pointer`, keeping only the outermost of each pointer
+chain (cursor inherits) and skipping anything nested in a pass-1 control; this surfaces React-style
+clickables that carry no role (an avatar menu, a card, a table row). Anonymous controls get a `context`
+(the text of their row / list item / label) so `checkbox ""` in a table reads
+`checkbox "" in "1000-05-1100L Residual 1100L Nile Bakery"`. Each element records
+`via: "semantic" | "label" | "cursor"`.
+
+Executing a click on a control that something sits on top of dispatches the click on the control itself
+(`executed.dispatched`), because a forced pointer click lands on the styled box and is swallowed; other
+intercepted clicks still fall back to `force=True` (`executed.forced`).
+
+Known blind spots: canvas content (maps, charts) has no elements at all; a clickable element with no
+role, no handler attribute and no pointer cursor. Both need a `setup` step.
 
 ## Confidence gate and DONE confirmation
 

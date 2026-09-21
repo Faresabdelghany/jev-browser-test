@@ -108,11 +108,19 @@ def execute(page, spec: dict, operation: str, target: dict | None, value_key: st
         if operation == "CLICK":
             try:
                 loc.click(timeout=timeout)
-            except Exception as first:  # covered by a transparent overlay is the usual cause
+            except Exception as first:  # something sits on top of the element
                 if "intercepts pointer events" not in str(first):
                     raise
-                loc.click(timeout=timeout, force=True)
-                res["forced"] = True
+                is_control = loc.evaluate("el => el.tagName === 'INPUT' || el.tagName === 'LABEL'")
+                if is_control:
+                    # A hidden checkbox/radio under its styled box: a forced pointer click lands on the
+                    # box and is swallowed. Fire the click on the control itself instead (this is what
+                    # frameworks' onChange listens to for checkboxes).
+                    loc.dispatch_event("click")
+                    res["dispatched"] = True
+                else:
+                    loc.click(timeout=timeout, force=True)
+                    res["forced"] = True
         elif operation == "TYPE_TEXT":
             if not value_key or value_key not in spec["data"]:
                 raise RuntimeError("no usable type_value answer")

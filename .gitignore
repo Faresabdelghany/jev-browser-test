@@ -1,15 +1,14 @@
-# Secrets
+# secrets — the runner reads TYPESAFE_API_KEY and app credentials from the environment, never from the repo
 .env
 .env.*
-!.env.example
+*.storage-state.json
 
-# Python
+# local environment
 .venv/
+venv/
 __pycache__/
-*.py[cod]
+*.pyc
+.DS_Store
 
-# Test artifacts (traces + screenshots of real apps — keep out of version control)
+# run artifacts: traces contain page text and screenshots of your app
 runs/
-
-# Local session notes
-.remember/

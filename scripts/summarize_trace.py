@@ -46,6 +46,8 @@ def _flags(step: dict) -> str:
         f.append("ACTION-FAILED")
     if ex.get("forced"):
         f.append("FORCED-CLICK")
+    if ex.get("dispatched"):
+        f.append("DISPATCHED-CLICK")
     if step.get("repeat_count", 0) > 1:
         f.append(f"REPEAT×{step['repeat_count']}")
     if step.get("never_violated"):

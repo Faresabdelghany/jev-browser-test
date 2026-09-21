@@ -124,6 +124,7 @@ is the fastest way to manufacture flakiness. Store `runs/` outside version contr
 | A `never` check sits at 0.7–0.8 for several steps | The statement half-matches the page; reuse the app's exact wording instead of lowering `never_true` |
 | `stuck` on the same button | Look at the screenshot: dead control (bug) or a modal Jev cannot see past (add a note or setup step) |
 | `stuck` with confidence ≈ `min_confidence` and flat target probabilities | Jev is saying "the thing I need is not in the table". Check the element table for that step: if the control is missing, it is a non-semantic clickable the observer skipped (the `cursor: pointer` pass catches most; a `div` with no cursor hint needs a `setup` click or an ARIA role in the app). Verdict TEST_ISSUE, not BUG — but note the missing role for accessibility |
+| `stuck` clicking a table row *confidently* | The row was the best thing on offer: the real control (a selection checkbox, an inline action) is missing from the table. Hidden-input checkboxes are now observed with their row text; if a control is still absent, script that one step in `setup`. Canvas content (maps) is never observable |
 | Setup is most of the wall-clock | Replace `wait {ms}` with `wait_for {selector}` / `wait_for {url}` |
 | Choice rejected as too large | Lower `observation.max_elements` |
 | Page needs an existing login session | Save a Playwright `storage_state` once and point `browser.storage_state` at it |

@@ -34,14 +34,20 @@ OBSERVE_JS = r"""
     if (r.width < 2 || r.height < 2) return false;
     if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) return false;
     const cs = getComputedStyle(el);
-    if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0' || cs.pointerEvents === 'none') return false;
+    const formControl = tag === 'input' || tag === 'select' || tag === 'textarea';
+    if (cs.visibility === 'hidden' || cs.display === 'none' || cs.pointerEvents === 'none') return false;
+    // opacity:0 on a form control with a real box is the "hidden input behind a styled box" pattern
+    // (antd/MUI/Bootstrap checkboxes, file inputs under an Upload button) -> still the thing to click.
+    if (cs.opacity === '0' && !formControl) return false;
     const cx = Math.min(vw - 1, Math.max(0, r.left + r.width / 2));
     const cy = Math.min(vh - 1, Math.max(0, r.top + r.height / 2));
     const top = document.elementFromPoint(cx, cy);
     if (top && top !== el && !el.contains(top) && !top.contains(el)) {
-      // covered by something else (modal, banner, overlay) -> a human could not click it either
+      // covered by something else (modal, banner, overlay) -> a human could not click it either,
+      // unless what is on top is the control's own styled box: its label, or a sibling in the same wrapper.
       const lbl = top.closest('label');
-      if (!(lbl && lbl.control === el)) return false;
+      const sibling = el.parentElement && (top.parentElement === el.parentElement || el.parentElement.contains(top));
+      if (!((lbl && lbl.control === el) || (formControl && sibling))) return false;
     }
     let role = el.getAttribute('role');
     if (!role) {
@@ -62,8 +68,19 @@ OBSERVE_JS = r"""
       el.getAttribute('title') || el.getAttribute('alt') || (tag === 'input' && type === 'submit' ? el.value : '') ||
       text || el.getAttribute('name') || el.id || ''
     ).slice(0, 80);
+    let context;
+    if (!name || (role === 'checkbox' || role === 'radio' || role === 'switch')) {
+      let h = el.parentElement;
+      while (h && h !== document.body) {
+        if (h.matches('tr, [role="row"], li, [role="listitem"], label, [role="option"]')) {
+          const ctx = clean(h.innerText).slice(0, 70);
+          if (ctx && ctx !== name) { context = ctx; break; }
+        }
+        h = h.parentElement;
+      }
+    }
     let value;
-    if (tag === 'input' || tag === 'textarea') {
+    if ((tag === 'input' && type !== 'checkbox' && type !== 'radio') || tag === 'textarea') {
       value = type === 'password' ? (el.value ? '(filled)' : '') : String(el.value || '').slice(0, 40);
     } else if (tag === 'select') {
       const o = el.options[el.selectedIndex];
@@ -80,7 +97,7 @@ OBSERVE_JS = r"""
     seen.add(el);
     candidates.push({
       el, role, tag, type: type || undefined, name, text: text && text !== name ? text : undefined,
-      value: value || undefined, options, checked, via,
+      value: value || undefined, options, checked, via, context,
       href: tag === 'a' ? (el.getAttribute('href') || '').slice(0, 80) : undefined,
       disabled, x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)
     });
@@ -90,7 +107,20 @@ OBSERVE_JS = r"""
   // Pass 1: semantic controls (tags, ARIA roles, explicit handlers).
   for (const el of document.querySelectorAll(SEL)) describe(el, 'semantic');
 
-  // Pass 2: non-semantic clickables. Frameworks like React attach handlers by delegation, so a
+  // Pass 2: a <label> whose checkbox/radio is parked offscreen (clip/left:-9999px) is the only thing
+  // a human can click for it. Offer the label, described as the control.
+  for (const lbl of document.querySelectorAll('label')) {
+    const c = lbl.control;
+    if (!c || seen.has(c) || seen.has(lbl)) continue;
+    const t = (c.getAttribute('type') || '').toLowerCase();
+    if (!(t === 'checkbox' || t === 'radio')) continue;
+    if (describe(lbl, 'label')) {
+      const d = candidates[candidates.length - 1];
+      d.role = t; d.checked = !!c.checked; d.disabled = !!c.disabled;
+    }
+  }
+
+  // Pass 3: non-semantic clickables. Frameworks like React attach handlers by delegation, so a
   // clickable <div> (an avatar menu, a card, a table row) has no role, no tabindex and no onclick
   // attribute -- the only visible hint is `cursor: pointer`. Because `cursor` is inherited, keep the
   // OUTERMOST element of each pointer chain, and skip anything nested inside a pass-1 control.
@@ -145,6 +175,8 @@ def element_label(e: dict) -> str:
     parts = [e["role"], f'"{e["name"]}"' if e.get("name") else '""']
     if e.get("text"):
         parts.append(f'text="{e["text"]}"')
+    if e.get("context"):
+        parts.append(f'in "{e["context"]}"')
     if e.get("value"):
         parts.append(f'value="{e["value"]}"')
     if e.get("checked") is not None and e["role"] in ("checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"):

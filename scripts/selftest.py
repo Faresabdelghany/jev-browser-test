@@ -52,6 +52,85 @@ PAGE = """<!doctype html><html><head><title>Mini Shop</title>
 </script></body></html>"""
 
 
+# Real-world checkbox patterns that hid from earlier observers: antd (opacity-0 input over a styled span,
+# inside a cursor:pointer row), Bootstrap (input parked offscreen, label is the target), MUI (styled svg
+# over the input), plus one genuinely hidden sr-only input that must stay out of the table.
+CONTROLS_PAGE = """<!doctype html><html><head><title>Controls</title><style>
+ tr.ant-table-row{cursor:pointer}
+ td{padding:6px 12px;border-bottom:1px solid #eee}
+ .ant-checkbox-wrapper{cursor:pointer;display:inline-flex}
+ .ant-checkbox{position:relative;display:inline-block;width:16px;height:16px}
+ .ant-checkbox-input{position:absolute;inset:0;z-index:1;width:100%;height:100%;cursor:pointer;opacity:0;margin:0}
+ .ant-checkbox-inner{position:relative;display:block;width:16px;height:16px;border:1px solid #d9d9d9;border-radius:4px;background:#fff}
+ .ant-checkbox-checked .ant-checkbox-inner{background:#1677ff}
+ /* Bootstrap-style: input parked offscreen, label is the click target */
+ .custom-control-input{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+ .custom-control-label{cursor:pointer;padding-left:24px;position:relative;display:inline-block}
+ .custom-control-label::before{content:"";position:absolute;left:0;top:2px;width:16px;height:16px;border:1px solid #999}
+ /* MUI-style: styled span on top, input underneath covering the box, pointer-events on span */
+ .mui-box{position:relative;display:inline-flex;width:20px;height:20px}
+ .mui-box svg{position:absolute;inset:0;z-index:1}
+ .mui-box input{position:absolute;inset:0;width:100%;height:100%;opacity:0;margin:0;cursor:pointer}
+ .sr-only{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0)}
+</style></head><body>
+<table><tbody>
+<tr class="ant-table-row"><td><label class="ant-checkbox-wrapper"><span class="ant-checkbox"><input class="ant-checkbox-input" type="checkbox"><span class="ant-checkbox-inner"></span></span></label></td>
+    <td><a href="#c1">1000-04-660L</a></td><td>Cardboard 660L</td><td>Provas2 Depot</td></tr>
+<tr class="ant-table-row"><td><label class="ant-checkbox-wrapper"><span class="ant-checkbox"><input class="ant-checkbox-input" type="checkbox"><span class="ant-checkbox-inner"></span></span></label></td>
+    <td><a href="#c2">1000-05-1100L</a></td><td>Residual 1100L</td><td>Nile Bakery</td></tr>
+</tbody></table>
+<div><input type="checkbox" class="custom-control-input" id="terms"><label class="custom-control-label" for="terms">I accept the terms</label></div>
+<div><span class="mui-box"><svg viewBox="0 0 20 20"><rect x="2" y="2" width="16" height="16" fill="none" stroke="#666"/></svg><input type="checkbox" aria-label="Notify me"></span></div>
+<input type="checkbox" class="sr-only" aria-label="genuinely hidden, should NOT appear">
+<button>Continue</button>
+</body></html>
+"""
+
+
+def observer_check(url: str) -> list[str]:
+    """Observation + execution sanity on CONTROLS_PAGE. No Jev involved."""
+    from playwright.sync_api import sync_playwright
+    from observe import observe
+    from run_test import execute
+    from spec import DEFAULTS, _merge
+
+    failures = []
+    sp = _merge(DEFAULTS, {"id": "obs", "start_url": url, "goal": "x", "checks": {}, "done_when": [],
+                           "browser": {"action_timeout_ms": 1500, "settle_ms": 50}})
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page(viewport={"width": 1280, "height": 800})
+        pg.goto(url)
+        pg.evaluate("() => { window.changes = 0; document.addEventListener('change', () => window.changes++); }")
+        obs = observe(pg)
+        boxes = [e for e in obs["elements"] if e["role"] == "checkbox"]
+        if len(boxes) != 4:
+            failures.append(f"expected 4 checkboxes in the table, got {len(boxes)}: {[e['name'] for e in boxes]}")
+        if not any("Nile Bakery" in (e.get("context") or "") for e in boxes):
+            failures.append("antd row checkbox has no row context")
+        if not any(e["name"] == "I accept the terms" for e in boxes):
+            failures.append("offscreen-input label not offered as a checkbox")
+        if any("genuinely hidden" in e["name"] for e in obs["elements"]):
+            failures.append("sr-only input leaked into the table")
+        if any(e.get("value") == "on" for e in boxes):
+            failures.append("checkbox value noise")
+        for key in ("Notify me", "Nile Bakery", "terms"):
+            e = next((e for e in boxes if key in e["name"] or key in (e.get("context") or "")), None)
+            if not e:
+                continue
+            res = execute(pg, sp, "CLICK", {"element": e["idx"], "choice": str(e["idx"]), "label": e["name"], "confidence": 1.0}, None)
+            if not res["ok"]:
+                failures.append(f"click on checkbox '{key}' failed: {res['error']}")
+        states = pg.evaluate("() => Array.from(document.querySelectorAll('input[type=checkbox]')).map(c => +c.checked).join('')")
+        changes = pg.evaluate("() => window.changes")
+        if states != "01110" or changes != 3:
+            failures.append(f"checkbox clicks did not toggle the right inputs: states={states} change_events={changes}")
+        b.close()
+    print(f"observer check: {len(obs['elements'])} elements, checkboxes={len(boxes)}, states={states}, change_events={changes}")
+    print()
+    return failures
+
+
 class FakeJev:
     """Rule-based stand-in for Jev. Answers exactly the shapes the real API returns."""
 
@@ -165,7 +244,13 @@ def main() -> int:
     with open(html, "w", encoding="utf-8") as f:
         f.write(PAGE)
     url = "file://" + html
+    controls = os.path.join(tmp, "controls.html")
+    with open(controls, "w", encoding="utf-8") as f:
+        f.write(CONTROLS_PAGE)
     failures = []
+
+    # 0. observer: hidden-input checkboxes are seen, described with their row, and clickable
+    failures += observer_check("file://" + controls)
 
     # 1. happy path -> passed via auto_done
     spec = base_spec(url)

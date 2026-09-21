@@ -77,5 +77,7 @@ Notes that matter when judging:
   One failure is noise; the same failure repeating is a real signal (element not clickable → possible bug).
 - `executed.forced == true` means the click needed `force=True` because a transparent overlay intercepted it.
   Worth a look: an invisible layer blocking clicks is a classic UI bug.
+- `executed.dispatched == true` means the target was a form control under its own styled box (a hidden
+  checkbox input) and the click was dispatched on the control directly. Normal for antd/MUI checkboxes.
 - Element indices are re-assigned every step. Never compare `idx` across steps; compare `label`.
 - Typed values are never stored; only the `data` key name (`value_key`) is.
