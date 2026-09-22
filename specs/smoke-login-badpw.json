@@ -2,7 +2,7 @@
   "id": "smoke-login-badpw",
   "start_url": "https://the-internet.herokuapp.com/login",
   "goal": "Log in with the provided username and password, so that the Secure Area page is shown.",
-  "notes": "Type the username into the Username field, the password into the Password field, then press the Login button.",
+  "notes": "Type the username into the Username field, the password into the Password field, then press the Login button. This is a negative test: the password is deliberately wrong, and the expected result is that the site rejects it.",
   "data": {
     "username": "tomsmith",
     "password": "wrong"
@@ -12,15 +12,26 @@
     "on_secure_page": "The page heading says 'Secure Area' and a Logout button is visible",
     "login_error": "A red flash message says the username or password is invalid"
   },
-  "done_when": [
-    "logged_in",
-    "on_secure_page"
+  "outcomes": {
+    "bad_credentials": {
+      "when": "A red flash message says the username or password is invalid",
+      "verdict": "pass",
+      "note": "the wrong password is deliberate: the site rejecting it is the expected behaviour"
+    },
+    "logged_in": {
+      "when": "The page heading says 'Secure Area' and a green flash message says 'You logged into a secure area!'",
+      "verdict": "bug",
+      "note": "a wrong password must never log in"
+    },
+    "server_error": {
+      "when": "An error page, a stack trace or 'something went wrong' text is shown instead of the login form",
+      "verdict": "bug"
+    }
+  },
+  "assert": [
+    { "url_matches": "**/login" },
+    { "text_contains": "Your password is invalid!" },
+    { "element_absent": { "role": "link", "name": "Logout" } }
   ],
-  "never": [
-    "login_error"
-  ],
-  "budget": {
-    "max_steps": 8,
-    "max_seconds": 120
-  }
+  "budget": { "max_steps": 8, "max_seconds": 120 }
 }

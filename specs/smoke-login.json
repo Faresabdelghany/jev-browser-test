@@ -14,5 +14,25 @@
   },
   "done_when": ["logged_in", "on_secure_page"],
   "never": ["login_error"],
+  "outcomes": {
+    "logged_in": {
+      "when": "The page heading says 'Secure Area' and a green flash message says 'You logged into a secure area!'",
+      "verdict": "pass"
+    },
+    "bad_credentials": {
+      "when": "A red flash message says the username or password is invalid",
+      "verdict": "bug",
+      "note": "these are the demo site's valid credentials; rejecting them is a defect"
+    },
+    "server_error": {
+      "when": "An error page, a stack trace or 'something went wrong' text is shown instead of the login form or the secure area",
+      "verdict": "bug"
+    }
+  },
+  "assert": [
+    { "url_matches": "**/secure" },
+    { "text_contains": "You logged into a secure area!" },
+    { "element_present": { "role": "link", "name": "Logout" } }
+  ],
   "budget": { "max_steps": 8, "max_seconds": 120 }
 }
