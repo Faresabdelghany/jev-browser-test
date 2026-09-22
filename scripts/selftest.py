@@ -948,6 +948,9 @@ def main() -> int:
         failures.append(f"loading: the Start click is the one counted action: {steps[0].get('target')} {steps[0].get('repeat_count')}")
     if not all((s.get("stuck_reason") or {}).get("choice") == "still_loading" for s in waits[1:]):
         failures.append(f"loading: a WAIT on an unchanged page is asked stuck_reason: {[s.get('stuck_reason') for s in waits]}")
+    pauses = [s["executed"].get("wait_ms") for s in waits]
+    if pauses[:3] != [100, 200, 400] or any(p != 400 for p in pauses[3:]) or [s.get("wait_streak") for s in waits] != list(range(len(waits))):
+        failures.append(f"loading: consecutive WAITs on the unchanged page back off settle_ms x 1, 2, 4, 4...: {pauses} streaks {[s.get('wait_streak') for s in waits]}")
     if trace["result"]["assertions"] and not all(a["ok"] for a in trace["result"]["assertions"]):
         failures.append(f"loading: the assertion on the loaded text should hold: {trace['result']['assertions']}")
 

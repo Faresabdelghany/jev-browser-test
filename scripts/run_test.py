@@ -208,7 +208,10 @@ def run_setup(page, spec: dict) -> list[dict]:
     return results
 
 
-def execute(page, spec: dict, operation: str, target: dict | None, value_key: str | None) -> dict:
+WAIT_BACKOFF_MAX = 4  # lever F4: consecutive WAITs on an unchanged page pause settle_ms x 1, 2, 4, 4, ... (never more than x4)
+
+
+def execute(page, spec: dict, operation: str, target: dict | None, value_key: str | None, wait_ms: int | None = None) -> dict:
     timeout = spec["browser"]["action_timeout_ms"]
     res: dict = {"action": operation, "ok": True, "error": None}
     try:
@@ -253,7 +256,8 @@ def execute(page, spec: dict, operation: str, target: dict | None, value_key: st
         elif operation == "SCROLL_UP":
             page.evaluate("window.scrollBy(0, -Math.round(window.innerHeight * 0.8))")
         elif operation == "WAIT":
-            page.wait_for_timeout(spec["browser"]["settle_ms"])  # then the loop's normal settle
+            res["wait_ms"] = spec["browser"]["settle_ms"] if wait_ms is None else wait_ms  # the loop's backoff, else settle_ms
+            page.wait_for_timeout(res["wait_ms"])  # then the loop's normal settle
         else:
             raise RuntimeError(f"unknown operation {operation}")
     except Exception as e:  # noqa: BLE001
@@ -591,6 +595,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     history: list[dict] = []
     last_operation: str | None = None
     last_page_changed: bool | None = None  # of the last executed action, once the next observation exists
+    wait_streak, last_wait_sig = 0, None  # lever F4: consecutive Jev WAITs on the same page signature
     low_streak = 0
     stale_streak = 0
     # A pass outcome (or Jev's DONE) gets one settle-and-recheck before it counts: {name, action}
@@ -1000,11 +1005,24 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                         finish(page, step, "stuck", dict(STOP))
                         break
 
+                # Lever F4: a WAIT chosen again on a page that has not changed since the last WAIT pauses twice as
+                # long as the last one, settle_ms x 1, 2, 4 and then 4 (measured on a 5 s loader: every WAIT is a
+                # full request, six of them at settle_ms cost ten requests a run). The first WAIT on a page, and any
+                # WAIT after the page changed, pause settle_ms as before; a non-WAIT action resets the streak.
+                wait_ms = None
+                if operation == "WAIT":
+                    wait_streak = wait_streak + 1 if sig == last_wait_sig else 0
+                    last_wait_sig = sig
+                    wait_ms = spec["browser"]["settle_ms"] * min(2 ** wait_streak, WAIT_BACKOFF_MAX)
+                    step["wait_streak"] = wait_streak
+                else:
+                    wait_streak, last_wait_sig = 0, None
+
                 # The page Jev decided on, before anything changes it. The last allowed step is terminal
                 # for the budget (the for-else below), so it gets its picture like every terminal step.
                 capture(page, step, terminal=(n == budget["max_steps"]))
                 t_b = time.perf_counter()
-                executed = execute(page, spec, operation, target, value_key)
+                executed = execute(page, spec, operation, target, value_key, wait_ms)
                 if not executed["ok"]:
                     step["screenshot_after_failure"] = shot(page, f"{n:03d}-failed.png", step)
                 target_el = next((e for e in obs["elements"] if e["idx"] == (target or {}).get("element")), {})
