@@ -77,21 +77,26 @@ SETTLE_JS = r"""
     resolve({ ended, ms: Math.round(performance.now() - t0) });
   };
   cap = setTimeout(() => finish('cap'), capMs);
-  const optionVisible = () => {
+  const visibleOptions = () => {
+    const out = [];
     for (const e of document.querySelectorAll('[role="option"]')) {
       const r = e.getBoundingClientRect();
       if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight &&
-          (!e.checkVisibility || e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }))) return true;
+          (!e.checkVisibility || e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }))) out.push(e);
     }
-    return false;
+    return out;
   };
+  // Only an option that was not already showing counts as "the suggestions arrived": a listbox elsewhere on
+  // the page, or the previous query's suggestions still on screen, must not end the wait early.
+  const initialOptions = waitForOptions ? new Set(visibleOptions()) : null;
+  const newOptionVisible = () => visibleOptions().some(e => !initialOptions.has(e));
   const tick = () => {
     if (done) return;
     frames++;
     const now = performance.now();
     if (frames >= 2 && now - lastMutation >= quietMs) {
       if (!waitForOptions) return finish('quiet');
-      if (optionVisible()) return finish('options');
+      if (newOptionVisible()) return finish('options');
       if (now - t0 >= 200) return finish('options_timeout');
     }
     requestAnimationFrame(tick);
@@ -109,8 +114,9 @@ def settle(page, spec: dict, after: tuple[str | None, str | None] | None = None)
     Event-based, not a fixed pause: `domcontentloaded` (short timeout, ignored on failure), then a page-side
     promise that resolves once two animation frames have passed AND the DOM has had no mutation for
     `browser.quiet_ms`, capped at `browser.settle_ms`. After TYPE_TEXT into a combobox/searchbox
-    (`after=(operation, target_role)`) it also waits, up to 200 ms, for a visible `[role=option]`, so a
-    prediction is not paid for before the autocomplete suggestions arrive. If the evaluate throws because
+    (`after=(operation, target_role)`) it also waits, up to 200 ms, for a visible `[role=option]` that was
+    not already showing when the wait began, so a prediction is not paid for before the autocomplete
+    suggestions arrive (and a listbox elsewhere on the page cannot end the wait). If the evaluate throws because
     the document navigated, it is retried once on the new document. Returns {"ended": "quiet" | "options" |
     "options_timeout" | "cap" | "navigated", "ms": wall-clock spent here}.
     """

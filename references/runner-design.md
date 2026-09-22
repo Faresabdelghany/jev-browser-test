@@ -133,8 +133,10 @@ role, no handler attribute and no pointer cursor. Both need a `setup` step.
 pause: `domcontentloaded` (short timeout, ignored on failure), then a page-side promise that resolves once
 two animation frames have passed **and** the DOM has had no mutation for `browser.quiet_ms` (a
 `MutationObserver` on the document), capped at `browser.settle_ms`. After TYPE_TEXT into a
-`combobox`/`searchbox` it also waits, up to 200 ms, for a visible `[role=option]`, so Jev is not asked for
-a decision before the autocomplete suggestions arrive. If the evaluate throws because the document
+`combobox`/`searchbox` (explicit roles, `<input type=search>` and `<input list>`) it also waits, up to
+200 ms, for a visible `[role=option]` that was not already showing when the wait began, so Jev is not asked
+for a decision before the autocomplete suggestions arrive and a listbox elsewhere on the page (or the
+previous query's suggestions) cannot end the wait early. If the evaluate throws because the document
 navigated meanwhile, it is retried once on the new document. The result lands on the step as
 `settle: {ended: quiet | options | options_timeout | cap | navigated, ms}`: a run full of `cap` endings
 means the page never goes quiet (animations, polling) and the cap is what you are paying; raise

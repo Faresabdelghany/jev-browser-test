@@ -139,6 +139,8 @@ SETTLE_PAGE = """<!doctype html><html><head><title>Settle</title></head><body>
 <button id="forever" onclick="forever()">Forever</button>
 <input id="cb" role="combobox" aria-label="Product" oninput="suggest()">
 <ul id="list" role="listbox"></ul>
+<input id="sb" role="searchbox" aria-label="Find">
+<ul role="listbox" id="sidebar"><li role="option">Always shown</li></ul>
 <div id="counter">0</div>
 <script>
  let n = 0;
@@ -175,16 +177,20 @@ def settle_check(url: str) -> list[str]:
         if r2["ended"] != "cap" or not (280 <= r2["ms"] <= 700):
             failures.append(f"settle on a never-quiet page should end at the cap (300 ms): {r2}")
         pg.goto(url)  # a fresh document: no interval running
-        pg.fill("#cb", "blu")  # the option appears 120 ms later
+        pg.fill("#cb", "blu")  # the option appears 120 ms later; the sidebar's permanent option must not count
         r3 = settle(pg, sp(1000, 50), after=("TYPE_TEXT", "combobox"))
-        visible = pg.locator('[role="option"]').count()
+        visible = pg.locator('#list [role="option"]').count()
         if r3["ended"] != "options" or not (120 <= r3["ms"] < 600) or visible != 1:
-            failures.append(f"settle after typing into a combobox should wait for the option: {r3}, options visible={visible}")
+            failures.append(f"settle after typing into a combobox should wait for a NEW option: {r3}, options visible={visible}")
         r4 = settle(pg, sp(1000, 50))  # a plain settle right after: nothing changes, quiet within ~quiet_ms
         if r4["ended"] != "quiet" or r4["ms"] >= 400:
             failures.append(f"a quiet page should settle in about quiet_ms: {r4}")
+        pg.fill("#sb", "xyz")  # a searchbox that never produces suggestions: give up after 200 ms
+        r5 = settle(pg, sp(1000, 50), after=("TYPE_TEXT", "searchbox"))
+        if r5["ended"] != "options_timeout" or not (200 <= r5["ms"] < 500):
+            failures.append(f"typing into a searchbox with no suggestions should end options_timeout at ~200 ms: {r5}")
         b.close()
-    print(f"settle check: burst={r1} forever={r2} combobox={r3} quiet={r4}")
+    print(f"settle check: burst={r1} forever={r2} combobox={r3} quiet={r4} no-suggestions={r5}")
     print()
     return failures
 
