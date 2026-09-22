@@ -1,14 +1,21 @@
-"""Run one Jev browser test from a spec and write a trace.
+"""Run one Jev browser test from a spec and write a trace and a result.
 
     python scripts/run_test.py path/to/spec.json [--out runs/<id>] [--headed] [--screenshots all|key|none] [--cdp-url URL]
 
-Exit codes: 0 = passed, 1 = did not pass (see trace status), 2 = spec / environment problem.
+Exit codes: 0 = the run ended in an outcome with verdict "pass", 1 = it did not (see result.json / trace
+status), 2 = spec / environment problem.
 
-No language model sits in this loop. Claude writes the spec beforehand and reads the trace afterwards;
+No language model sits in this loop. Claude writes the spec beforehand and reads the result afterwards;
 Jev makes one typed decision per step; Playwright executes. Everything here is deterministic given
 Jev's answers, which is what makes the trace trustworthy evidence. Those answers are validated
 against the options that were offered before anything is executed (policy.validate_choice): a
 malformed `operation` answer is asked again once, then ends the run; a malformed target is never acted on.
+
+The results contract (references/spec-format.md, "outcomes"): the spec declares the endings it accepts
+back, each with a verdict; every step asks Jev which of them the page shows; a pass must survive a
+settle-and-recheck and the spec's `assert` block; any other verdict is terminal at first sighting. The
+run ends in exactly one outcome (or `undetermined`, with a typed reason) and writes result.json beside
+trace.json.
 """
 from __future__ import annotations
 
@@ -16,15 +23,22 @@ import argparse
 import copy
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
 
 from jev_client import JevClient, JevError
-from observe import GUARD_SKIPPED, TARGET_OPERATIONS, compare_fingerprint, fingerprint, mask_secrets, observe, signature
-from policy import build_questions, build_state, read_checks, read_choice, resolve_target, validate_choice
-from spec import load_dotenv, load_spec, validate
+from observe import (
+    GUARD_SKIPPED, TARGET_OPERATIONS, compare_fingerprint, element_label, fingerprint, mask_secrets, observe, signature,
+)
+from policy import (
+    build_adjudication, build_questions, build_state, is_field, read_checks, read_choice, read_outcome, resolve_target,
+    seen_outcomes, suggested_verdict, validate_choice,
+)
+from spec import effective_outcomes, load_dotenv, load_spec, validate
 from summarize_trace import summarize
+
 
 class BrowserUnavailable(RuntimeError):
     """The browser could not be launched or attached to: an environment problem (exit 2), not a test result."""
@@ -34,16 +48,19 @@ SCREENSHOT_TIMEOUT_MS = 3000  # a capture is ~50-100 ms; a page whose web font n
 
 
 TERMINAL_STATUSES = {
-    "passed": "all done_when checks satisfied",
-    "done_unverified": "Jev chose DONE confidently, and after a settle-and-recheck the done_when checks are still not satisfied",
+    "passed": "an outcome with verdict pass was seen, confirmed after a settle-and-recheck, and every assertion held",
+    "outcome": "a declared outcome with a verdict other than pass was seen (result.outcome names it)",
+    "assert_failed": "a pass outcome was confirmed but an assertion did not hold on the final page (result.assertions)",
+    "done_unverified": "Jev chose DONE confidently, and after a settle-and-recheck no pass outcome is visible",
     "blocked": "Jev chose BLOCKED: it saw no way to make progress",
-    "never_violated": "a 'never' check became true",
+    "never_violated": "a 'never' check became true (runs before the results contract; now status outcome)",
     "stuck": "the same action on the same page repeated max_repeat times",
     "low_confidence": "max_low_confidence_steps consecutive low-confidence decisions (none of them executed): Jev could not choose between the offered options",
     "budget_exhausted": "max_steps or max_seconds reached",
     "unstable_page": "the page kept changing while Jev was deciding: max_stale consecutive decisions were stale and nothing was executed",
     "error": "the runner, browser or TypeSafe API failed",
 }
+UNDETERMINED = "undetermined"
 
 
 def now_iso() -> str:
@@ -106,6 +123,10 @@ SETTLE_JS = r"""
 """
 
 AUTOCOMPLETE_ROLES = ("combobox", "searchbox")
+
+# The terminal page as numbered lines for the adjudication request: what a human would quote from.
+LINES_JS = "() => (document.body ? document.body.innerText : '').split('\\n').map(s => s.trim()).filter(Boolean)"
+BODY_TEXT_JS = "() => document.body ? document.body.innerText : ''"
 
 
 def settle(page, spec: dict, after: tuple[str | None, str | None] | None = None) -> dict:
@@ -268,8 +289,171 @@ def history_entry(n: int, operation: str, target: dict | None, value_key: str | 
 
 
 def wait_entry(n: int, operation: str, reason: str) -> dict:
-    """A runner-inserted wait (low confidence, DONE confirmation) as Jev should see it in recent_actions."""
+    """A runner-inserted wait (low confidence, outcome confirmation) as Jev should see it in recent_actions."""
     return {"step": n, "operation": operation, "reason": reason, "ok": True, "page_changed": None}
+
+
+def is_action_step(step: dict) -> bool:
+    """A step whose action changed the browser: not a terminal marker, not a runner-inserted WAIT."""
+    ex = step.get("executed") or {}
+    return ex.get("action") not in (None, "STOP", "DONE", "AUTO_DONE", "BLOCKED") and not ex.get("reason")
+
+
+def glob_to_regex(glob: str) -> str:
+    """Playwright's URL glob as a regex: ** = anything, * = anything but '/', ? = one char but '/'."""
+    out, i = [], 0
+    while i < len(glob):
+        c = glob[i]
+        if c == "*":
+            if glob[i:i + 2] == "**":
+                out.append(".*")
+                i += 2
+                continue
+            out.append("[^/]*")
+        elif c == "?":
+            out.append("[^/]")
+        else:
+            out.append(re.escape(c))
+        i += 1
+    return "".join(out)
+
+
+def check_assertions(spec: dict, page, obs: dict) -> list[dict]:
+    """Evaluate the spec's `assert` block in code on the final observation (spec §5.1): free, exact, non-model.
+
+    Each record repeats the assertion, adds `ok` and `actual` (the value found, or what was there instead).
+    `url_matches` is a Playwright glob over the final URL; `text_contains` looks in the whole page text;
+    `field_value` matches a text field / select whose label contains the given label (case-insensitive) and
+    compares its value; `element_present` / `element_absent` match role and, when given, a name substring.
+    """
+    results = []
+    body_text: str | None = None
+    for a in spec.get("assert") or []:
+        (kind, arg), = a.items()
+        rec: dict = {kind: arg, "ok": False, "actual": None}
+        if kind == "url_matches":
+            rec["actual"] = obs["url"]
+            rec["ok"] = re.fullmatch(glob_to_regex(arg), obs["url"]) is not None
+        elif kind == "text_contains":
+            if body_text is None:
+                try:
+                    body_text = page.evaluate(BODY_TEXT_JS)
+                except Exception:  # noqa: BLE001 - fall back to what the observer saw
+                    body_text = obs["visible_text"]
+            at = body_text.find(arg)
+            rec["ok"] = at >= 0
+            rec["actual"] = body_text[max(0, at - 60):at + len(arg) + 60] if at >= 0 else re.sub(r"\s+", " ", body_text)[:200]
+        elif kind == "field_value":
+            fields = [e for e in obs["elements"] if is_field(e) and arg["label"].lower() in (e.get("name") or "").lower()]
+            values = [e.get("value") or "" for e in fields]
+            rec["ok"] = arg["equals"] in values
+            rec["actual"] = {f'[{e["idx"]}] {element_label(e)}': v for e, v in zip(fields, values)} or "no field with that label"
+        elif kind in ("element_present", "element_absent"):
+            want = (arg.get("name") or "").lower()
+            matches = [e for e in obs["elements"] if e["role"] == arg["role"] and (not want or want in (e.get("name") or "").lower())]
+            rec["ok"] = bool(matches) if kind == "element_present" else not matches
+            rec["actual"] = [f'[{e["idx"]}] {element_label(e)}' for e in matches[:5]] or "no such element"
+        results.append(rec)
+    return results
+
+
+def adjudicate(page, jev, name: str, when: str) -> dict:
+    """One extra request after a seen outcome (spec §5.4): Jev selects the line of the final page that states
+    the outcome (`evidence_line`) and re-judges the statement (`evidence_present`). The chosen line is copied
+    verbatim into the result: selection is how a quote is produced. Never fatal: a failure is recorded."""
+    rec: dict = {"outcome": name, "statement": when, "line": None, "line_id": None, "present": None, "confidence": None}
+    try:
+        lines = page.evaluate(LINES_JS)
+    except Exception as e:  # noqa: BLE001
+        rec["error"] = f"could not read the page text: {type(e).__name__}"
+        return rec
+    state, questions, offered = build_adjudication(name, when, lines)
+    t0 = time.perf_counter()
+    try:
+        resp = jev.system_one(state, questions)
+    except JevError as e:
+        rec["error"] = str(e)[:300]
+        return rec
+    rec["latency_ms"] = latency_of(resp, t0)
+    answers = resp["answers"]
+    picked = read_choice(answers, "evidence_line", offered)
+    if picked is None:
+        rec["invalid_answer"] = f"evidence_line: {validate_choice(answers.get('evidence_line'), offered)}"
+    else:
+        rec["line_id"] = picked["choice"]
+        rec["confidence"] = picked["confidence"]
+        if picked["choice"] != "none":
+            rec["line"] = state["lines"][int(picked["choice"]) - 1]["text"]
+    present = answers.get("evidence_present")
+    if isinstance(present, dict) and isinstance(present.get("noul"), (int, float)) and 0 <= present["noul"] <= 1:
+        rec["present"] = round(float(present["noul"]), 3)
+    return rec
+
+
+def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: str) -> dict:
+    """result.json (spec §5.5): the one file Claude reads first. `final` is the loop's verdict record:
+    {outcome: {name, verdict, probability, confidence}, seen_at_step, confirmed, assertions, adjudication,
+    typed: {blocked_reason, stuck_reason}}."""
+    status = trace["status"]
+    steps = trace["steps"]
+    # A pass whose assertions failed is not that outcome: it is undetermined, with the failing assertions
+    # (Claude decides whether the assertion or the app is wrong). The sighting is kept under reason.outcome_seen.
+    seen = final.get("outcome") if status in ("passed", "outcome") else None
+    seen_step = next((s for s in steps if s["n"] == final.get("seen_at_step")), None)
+    terminal = steps[-1] if steps else {}
+    action_steps = [s for s in steps if is_action_step(s)]
+    confs = [s["decision_confidence"] for s in action_steps if isinstance(s.get("decision_confidence"), (int, float))]
+    story = []
+    for s in action_steps:
+        line = f"{s['n']} {(s.get('executed') or {}).get('action')}"
+        if (s.get("target") or {}).get("label"):
+            line += f" {s['target']['label']}"
+        if (s.get("type_value") or {}).get("choice"):
+            line += f" <- {s['type_value']['choice']}"
+        if not (s.get("executed") or {}).get("ok", True):
+            line += "  (failed)"
+        story.append(line)
+    result: dict = {
+        "spec_id": spec["id"],
+        "outcome": seen["name"] if seen else UNDETERMINED,
+        "verdict": seen["verdict"] if seen else None,
+        "note": (outcomes.get(seen["name"]) or {}).get("note") if seen else None,
+        "probability": seen.get("probability") if seen else None,
+        "confidence": seen.get("confidence") if seen else None,
+        "seen_at_step": final.get("seen_at_step"),
+        "confirmed": final.get("confirmed", False) if seen else False,
+        "path_confidence": min(confs) if confs else None,
+        "reason": None,
+        "evidence": {
+            "line": (final.get("adjudication") or {}).get("line"),
+            "present": (final.get("adjudication") or {}).get("present"),
+            "screenshot": (seen_step or {}).get("screenshot") or (trace.get("final") or {}).get("screenshot"),
+            "checks": (seen_step or terminal).get("checks", {}),
+        },
+        "assertions": final.get("assertions") or [],
+        "outcomes_seen_earlier": [{"step": s["n"], "outcome": s["outcome_seen"]} for s in steps if s.get("outcome_seen")
+                                  and s["n"] != final.get("seen_at_step")],
+        "story": story,
+        "status": status,
+        "duration_ms": trace["duration_ms"],
+        "usage": trace["usage"],
+        "trace": os.path.join(out_dir, "trace.json"),
+    }
+    if not seen:
+        typed = final.get("typed") or {}
+        result["reason"] = {
+            "status": status,
+            "blocked_reason": typed.get("blocked_reason"),
+            "stuck_reason": typed.get("stuck_reason"),
+            "suggested_verdict": suggested_verdict(status, [typed.get("stuck_reason") if status == "stuck" else None,
+                                                            typed.get("blocked_reason")]),
+        }
+        if status == "assert_failed":
+            result["reason"]["outcome_seen"] = (final.get("outcome") or {}).get("name")
+            result["reason"]["failed_assertions"] = [a for a in result["assertions"] if not a["ok"]]
+        if status == "error":
+            result["reason"]["error"] = trace.get("error")
+    return result
 
 
 SCREENSHOT_MODES = (True, False, "key")
@@ -279,7 +463,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     """Execute the spec. `jev` is anything with .system_one(state, questions) and .usage_summary().
 
     `screenshots`: True (every step), False (none, not even final.png) or "key" (terminal and flagged
-    steps only); None takes the spec's `observation.screenshots`.
+    steps only); None takes the spec's `observation.screenshots`. Writes trace.json and result.json into
+    out_dir and returns the trace (the result is under trace["result"]).
     """
     from playwright.sync_api import sync_playwright
 
@@ -289,27 +474,35 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     th = spec["thresholds"]
     budget = spec["budget"]
     obs_cfg = spec["observation"]
+    outcomes = effective_outcomes(spec)  # declared + synthesized: the runner only knows outcomes
+    verdict_of = {name: o["verdict"] for name, o in outcomes.items()}
 
     trace: dict = {
         "spec_id": spec["id"],
         "started_at": now_iso(),
         "status": None,
         "pass": False,
+        "outcome": None,
+        "verdict": None,
         "steps": [],
         "setup": [],
         "final": None,
         "spec": redacted_spec(spec),
+        "outcomes": outcomes,
     }
     t_start = time.perf_counter()
     history: list[dict] = []
     last_operation: str | None = None
+    last_page_changed: bool | None = None  # of the last executed action, once the next observation exists
     low_streak = 0
     stale_streak = 0
-    pending_done = False  # a confident DONE with unsatisfied checks gets one settle-and-recheck
+    # A pass outcome (or Jev's DONE) gets one settle-and-recheck before it counts: {name, action}
+    pending: dict | None = None
     pending_change: tuple[dict, dict, str] | None = None  # (history entry, trace step, signature decided on)
     repeats: dict = {}
     status: str | None = None
     error: str | None = None
+    final: dict = {"outcome": None, "seen_at_step": None, "confirmed": False, "assertions": [], "adjudication": None, "typed": {}}
 
     def record(entry: dict, step: dict, sig: str) -> None:
         """Append a history entry and remember which observation it was decided on, so the next
@@ -319,10 +512,11 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         pending_change = (entry, step, sig)
 
     def note_page_change(sig: str) -> None:
-        nonlocal pending_change
+        nonlocal pending_change, last_page_changed
         if pending_change:
             entry, prev_step, before = pending_change
             entry["page_changed"] = prev_step["page_changed"] = sig != before
+            last_page_changed = entry["page_changed"] if "reason" not in entry else None
             pending_change = None
 
     def shot(page, name: str, holder: dict | None = None) -> str | None:
@@ -342,7 +536,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     def key_step(step: dict) -> bool:
         """The steps worth a picture in "key" mode: something went wrong or the runner refused to act."""
         return bool(step.get("never_violated") or step.get("low_confidence") or step.get("stale")
-                    or step.get("repeat_count", 0) >= 2)
+                    or step.get("outcome_seen") or step.get("repeat_count", 0) >= 2)
 
     def capture(page, step: dict, terminal: bool = False) -> None:
         """Screenshot policy. Taken after Jev's answer and before execution, so the picture is the page
@@ -360,14 +554,38 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         step["executed"] = executed
         capture(page, step, terminal=True)
         trace["steps"].append(step)
+        final["typed"] = {
+            "blocked_reason": (step.get("blocked_reason") or {}).get("choice"),
+            "stuck_reason": (step.get("stuck_reason") or {}).get("choice"),
+        }
 
     STOP = {"action": "STOP", "ok": True, "error": None}
 
-    def satisfied(checks: dict) -> bool:
-        return bool(spec["done_when"]) and all(checks.get(c, 0.0) >= th["check_true"] for c in spec["done_when"])
+    def outcome_when(name: str) -> str:
+        """The statement the adjudication quotes against: the outcome's `when`, else its checks' statements."""
+        o = outcomes[name]
+        return o.get("when") or " and ".join(spec["checks"][r] for r in o["requires"])
 
-    def violated(checks: dict) -> list[str]:
-        return [c for c in spec["never"] if checks.get(c, 0.0) >= th["never_true"]]
+    def settle_pass(page, step: dict, obs: dict, seen: dict, action: str, jev) -> None:
+        """A confirmed pass: run the assertions on this final observation and end passed / assert_failed."""
+        final["outcome"] = seen
+        final["seen_at_step"] = step["n"]
+        final["confirmed"] = True
+        final["assertions"] = check_assertions(spec, page, obs)
+        ok = all(a["ok"] for a in final["assertions"])
+        step["assertions"] = final["assertions"]
+        finish(page, step, "passed" if ok else "assert_failed", {"action": action, "ok": True, "error": None, "confirmed": True})
+        if ok and not spec["setup"] and not any("reason" not in h for h in history):
+            trace["passed_without_actions"] = True
+        final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]))
+
+    def end_with_outcome(page, step: dict, seen: dict, jev) -> None:
+        """A non-pass outcome is terminal at first confident sighting (fail_fast): the picture is forced."""
+        final["outcome"] = seen
+        final["seen_at_step"] = step["n"]
+        step["outcome_seen"] = seen["name"]
+        finish(page, step, "outcome", dict(STOP))
+        final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]))
 
     timing: dict = {}  # where the wall-clock went: launch, navigation, setup, steps, final
 
@@ -452,7 +670,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     "visible_text": obs["visible_text"][:600],
                 }
                 state = build_state(spec, obs, n, history)
-                questions, meta = build_questions(spec, obs, last_operation)
+                questions, meta = build_questions(spec, obs, last_operation, outcomes, ask_stuck=last_page_changed is False)
                 offered = meta["offered"]
                 step["offered_operations"] = meta["operations"]
                 try:
@@ -483,25 +701,61 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                 op = read_choice(answers, "operation", offered["operation"])  # None iff op_problem
                 step["operation"] = op
 
-                bad = violated(checks)
+                # The results contract: which declared outcome does this page show?
+                outcome_answer = None
+                if "outcome" in offered:
+                    outcome_answer = read_outcome(answers, offered["outcome"])
+                    if outcome_answer is None:
+                        note_invalid(step, f"outcome: {validate_choice(answers.get('outcome'), offered['outcome'])}")
+                    step["outcome"] = outcome_answer
+                for reason_q in ("blocked_reason", "stuck_reason"):
+                    if reason_q in offered:
+                        got = read_choice(answers, reason_q, offered[reason_q])
+                        if got is None:
+                            note_invalid(step, f"{reason_q}: {validate_choice(answers.get(reason_q), offered[reason_q])}")
+                        step[reason_q] = got
+                seen = seen_outcomes(outcomes, checks, outcome_answer, th["outcome_true"])
+                non_pass = [s for s in seen if s["verdict"] != "pass"]
+                passes = [s for s in seen if s["verdict"] == "pass"]
+                bad = [n_ for n_ in spec["never"] if checks.get(n_, 0.0) >= th["never_true"]]
                 if bad:
-                    step["never_violated"] = bad
+                    step["never_violated"] = bad  # kept for readers of old traces; the outcome below is the verdict
+
+                if non_pass:
                     if spec["fail_fast"]:
-                        finish(page, step, "never_violated", dict(STOP))
+                        end_with_outcome(page, step, non_pass[0], jev)
                         break
+                    step["outcome_seen"] = non_pass[0]["name"]  # recorded; the run goes on
 
-                if pending_done:
-                    # Jev said DONE last step while done_when was unsatisfied; the page has now had a
-                    # full settle (reloads, toasts, redirects). This observation is the verdict.
-                    finish(page, step, "passed" if satisfied(checks) else "done_unverified",
-                           {"action": "DONE", "ok": True, "error": None, "confirmed": True})
-                    break
+                if pending:
+                    # A pass was in sight last step (or Jev said DONE); the page has now had a full settle
+                    # (reloads, toasts, redirects). This observation is the verdict.
+                    was = pending
+                    pending = None
+                    if passes:
+                        settle_pass(page, step, obs, passes[0], was["action"], jev)
+                        break
+                    if was["action"] == "DONE":
+                        finish(page, step, "done_unverified", {"action": "DONE", "ok": True, "error": None, "confirmed": True})
+                        break
+                    step["outcome_unconfirmed"] = was["name"]  # a transient sighting: carry on with this step's answers
 
-                if satisfied(checks) and spec["auto_done"]:
-                    finish(page, step, "passed", {"action": "AUTO_DONE", "ok": True, "error": None})
-                    if n == 1 and not spec["setup"]:
-                        trace["passed_without_actions"] = True
-                    break
+                def confirm_later(name: str | None, action: str, reason: str, entry_op: str) -> None:
+                    nonlocal pending
+                    pending = {"name": name, "action": action}
+                    step["executed"] = {"action": "WAIT", "ok": True, "error": None, "reason": reason}
+                    step["pending_outcome"] = name
+                    capture(page, step)
+                    record(wait_entry(n, entry_op, "checking the result before finishing"), step, sig)
+                    t_b = time.perf_counter()
+                    page.wait_for_timeout(spec["browser"]["settle_ms"])
+                    step["settle"] = settle(page, spec)
+                    step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
+                    trace["steps"].append(step)
+
+                if passes and spec["auto_done"]:
+                    confirm_later(passes[0]["name"], "AUTO_DONE", f"confirming outcome {passes[0]['name']}", "WAIT")
+                    continue
 
                 if op is None:
                     error = step["error"] = f"invalid operation answer: {op_problem}"
@@ -514,6 +768,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     # Not retried: the missing-target path below fails the action safely.
                     note_invalid(step, f"{target['question']}: {target['invalid']}")
                 value_key = None
+                tv = None
                 if operation == "TYPE_TEXT":
                     tv = read_choice(answers, "type_value", offered.get("type_value", []))
                     if tv is None:
@@ -584,23 +839,13 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                 stale_streak = 0
 
                 if operation == "DONE":
-                    if satisfied(checks):
-                        finish(page, step, "passed", {"action": "DONE", "ok": True, "error": None})
-                        break
-                    if n >= budget["max_steps"]:
+                    if n >= budget["max_steps"] and not passes:
                         finish(page, step, "done_unverified", {"action": "DONE", "ok": True, "error": None})
                         break
-                    # Confident DONE but the checks disagree: give the page one full settle and look
-                    # again before calling it (a reload or redirect is often still in flight).
-                    pending_done = True
-                    step["executed"] = {"action": "WAIT", "ok": True, "error": None, "reason": "confirming DONE"}
-                    capture(page, step)
-                    record(wait_entry(n, "DONE", "checking the result before finishing"), step, sig)
-                    t_b = time.perf_counter()
-                    page.wait_for_timeout(spec["browser"]["settle_ms"])
-                    step["settle"] = settle(page, spec)
-                    step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
-                    trace["steps"].append(step)
+                    # Jev says the goal is reached. Whether or not a pass outcome is already in sight, give the
+                    # page one full settle and look again before calling it (a reload or redirect is often
+                    # still in flight when Jev declares victory).
+                    confirm_later(passes[0]["name"] if passes else None, "DONE", "confirming DONE", "DONE")
                     continue
                 if operation == "BLOCKED":
                     finish(page, step, "blocked", {"action": "BLOCKED", "ok": True, "error": None})
@@ -632,21 +877,38 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
             t_lap = lap("steps_ms", t_lap)
 
             if status == "budget_exhausted":
-                # One last look: did the final action happen to reach the goal?
+                # One last look: did the final action happen to reach an outcome?
                 obs = look()
                 note_page_change(signature(obs))
-                questions, _ = build_questions(spec, obs, last_operation)
-                only_checks = {k: v for k, v in questions.items() if k in spec["checks"]}
-                final_checks = {}
-                if only_checks:
+                questions, meta = build_questions(spec, obs, last_operation, outcomes)
+                last_look = {k: v for k, v in questions.items() if k in spec["checks"] or k == "outcome"}
+                final_checks: dict = {}
+                final_outcome = None
+                if last_look:
                     try:
-                        resp = jev.system_one(build_state(spec, obs, len(trace["steps"]) + 1, history), only_checks)
+                        resp = jev.system_one(build_state(spec, obs, len(trace["steps"]) + 1, history), last_look)
                         final_checks = read_checks(resp["answers"], spec)
+                        if "outcome" in last_look:
+                            final_outcome = read_outcome(resp["answers"], meta["offered"]["outcome"])
                     except JevError as e:
                         error = str(e)
-                if satisfied(final_checks) and spec["auto_done"] and not violated(final_checks):
-                    status = "passed"
-                trace["final"] = {"url": obs["url"], "title": obs["title"], "checks": final_checks}
+                seen = seen_outcomes(outcomes, final_checks, final_outcome, th["outcome_true"])
+                non_pass = [s for s in seen if s["verdict"] != "pass"]
+                passes = [s for s in seen if s["verdict"] == "pass"]
+                trace["final"] = {"url": obs["url"], "title": obs["title"], "checks": final_checks, "outcome": final_outcome}
+                if non_pass:
+                    status = "outcome"
+                    final["outcome"] = non_pass[0]
+                    final["adjudication"] = adjudicate(page, jev, non_pass[0]["name"], outcome_when(non_pass[0]["name"]))
+                elif passes and spec["auto_done"]:
+                    final["outcome"] = passes[0]
+                    final["assertions"] = check_assertions(spec, page, obs)
+                    status = "passed" if all(a["ok"] for a in final["assertions"]) else "assert_failed"
+                    final["adjudication"] = adjudicate(page, jev, passes[0]["name"], outcome_when(passes[0]["name"]))
+                if trace["steps"]:
+                    last = trace["steps"][-1]
+                    final["typed"] = {"blocked_reason": (last.get("blocked_reason") or {}).get("choice"),
+                                      "stuck_reason": (last.get("stuck_reason") or {}).get("choice")}
             else:
                 last = trace["steps"][-1] if trace["steps"] else {}
                 trace["final"] = {
@@ -685,12 +947,14 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     trace["ended_at"] = now_iso()
     trace["duration_ms"] = int((time.perf_counter() - t_start) * 1000)
     trace["timing"] = timing
-    trace["actions_executed"] = sum(
-        1 for s in trace["steps"]
-        if s.get("executed", {}).get("action") not in (None, "STOP", "DONE", "AUTO_DONE", "BLOCKED")
-        and not s.get("executed", {}).get("reason")  # runner-inserted waits (low confidence, DONE recheck) are not actions
-    )
+    trace["actions_executed"] = sum(1 for s in trace["steps"] if is_action_step(s))
     trace["usage"] = jev.usage_summary()
+    trace["adjudication"] = final.get("adjudication")
+    result = build_result(trace, spec, outcomes, final, out_dir)
+    trace["outcome"], trace["verdict"] = result["outcome"], result["verdict"]
+    trace["result"] = result
+    with open(os.path.join(out_dir, "result.json"), "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2, ensure_ascii=False)
     with open(os.path.join(out_dir, "trace.json"), "w", encoding="utf-8") as f:
         json.dump(trace, f, indent=2, ensure_ascii=False)
     return trace

@@ -17,6 +17,20 @@ RESERVED_QUESTIONS = {
     "type_target",
     "type_value",
     "select_target",
+    "outcome",
+    "blocked_reason",
+    "stuck_reason",
+    "evidence_line",
+    "evidence_present",
+}
+OUTCOME_NONE = "none_yet"  # the outcome Choice's "nothing listed is visible yet" option; not a valid outcome name
+VERDICTS = ("pass", "bug", "test_issue", "needs_human")
+ASSERTIONS = {
+    "url_matches": str,       # Playwright-style glob over the final URL: ** any chars, * any chars but /, ? one char
+    "text_contains": str,     # substring of the final page's visible text (body.innerText)
+    "field_value": dict,      # {"label": ..., "equals": ...}: a text field / select found by its label
+    "element_present": dict,  # {"role": ..., "name"?: ...} in the final element table
+    "element_absent": dict,   # the same shape, must not be there
 }
 SETUP_ACTIONS = {"goto", "click", "fill", "press", "wait", "wait_for", "select"}
 ENV_RE = re.compile(r"\$\{([A-Z0-9_]+)\}")
@@ -30,6 +44,11 @@ DEFAULTS = {
     "checks": {},
     "done_when": [],
     "never": [],
+    # The results contract: the endings Claude accepts back, each with a pre-declared verdict, and exact
+    # expectations checked in code on the final page. See references/spec-format.md. When `outcomes` is
+    # empty the runner synthesizes them from done_when / never (see run_test.effective_outcomes).
+    "outcomes": {},
+    "assert": [],
     "auto_done": True,
     "fail_fast": True,
     # Attach the standing rules (scripts/rules.py) to every question. Measured on the demo site they lowered
@@ -40,6 +59,7 @@ DEFAULTS = {
     "thresholds": {
         "check_true": 0.8,
         "never_true": 0.8,
+        "outcome_true": 0.8,  # an outcome is seen when the outcome Choice gives it at least this probability
         "min_confidence": 0.5,
         "max_low_confidence_steps": 3,
         "max_repeat": 3,
@@ -149,8 +169,57 @@ def validate(spec: dict) -> list[str]:
         for name in spec.get(list_name, []):
             if name not in checks:
                 errors.append(f"'{list_name}' references unknown check '{name}'")
-    if not spec.get("done_when"):
-        errors.append("'done_when' must list at least one check; otherwise nothing defines success")
+
+    outcomes = spec.get("outcomes", {})
+    if not isinstance(outcomes, dict):
+        errors.append("'outcomes' must be an object mapping outcome_name -> {when, verdict, requires?, note?}")
+        outcomes = {}
+    for name, o in outcomes.items():
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or name == OUTCOME_NONE or name in RESERVED_QUESTIONS:
+            errors.append(f"outcome name '{name}' must be a simple identifier other than '{OUTCOME_NONE}' and the reserved "
+                          f"question names {sorted(RESERVED_QUESTIONS)}")
+        if not isinstance(o, dict):
+            errors.append(f"outcome '{name}' must be an object with 'verdict' and 'when' and/or 'requires'")
+            continue
+        if o.get("verdict") not in VERDICTS:
+            errors.append(f"outcome '{name}': 'verdict' must be one of {list(VERDICTS)}")
+        when = o.get("when")
+        if when is not None:
+            if not isinstance(when, str) or len(when.strip()) < 8:
+                errors.append(f"outcome '{name}': 'when' needs a statement about what is visible on the page")
+            elif when.strip().endswith("?"):
+                errors.append(f"outcome '{name}': 'when' should be a statement, not a question")
+        requires = o.get("requires", [])
+        if not isinstance(requires, list) or any(r not in checks for r in requires):
+            errors.append(f"outcome '{name}': 'requires' must list known check names")
+        if when is None and not requires:
+            errors.append(f"outcome '{name}' needs a 'when' statement and/or 'requires' checks")
+        if "note" in o and not isinstance(o["note"], str):
+            errors.append(f"outcome '{name}': 'note' must be a string")
+    has_pass_outcome = any(isinstance(o, dict) and o.get("verdict") == "pass" for o in outcomes.values())
+    if not spec.get("done_when") and not has_pass_outcome:
+        errors.append("'done_when' must list at least one check, or 'outcomes' must declare an outcome with verdict "
+                      "\"pass\"; otherwise nothing defines success")
+
+    assertions = spec.get("assert", [])
+    if not isinstance(assertions, list):
+        errors.append("'assert' must be a list of single-key objects")
+        assertions = []
+    for i, a in enumerate(assertions):
+        if not isinstance(a, dict) or len(a) != 1:
+            errors.append(f"assert[{i}] must be an object with exactly one key, one of {sorted(ASSERTIONS)}")
+            continue
+        (kind, arg), = a.items()
+        if kind not in ASSERTIONS:
+            errors.append(f"assert[{i}]: unknown assertion '{kind}' (one of {sorted(ASSERTIONS)})")
+        elif not isinstance(arg, ASSERTIONS[kind]) or (isinstance(arg, str) and not arg.strip()):
+            errors.append(f"assert[{i}] ({kind}): expected a {ASSERTIONS[kind].__name__}")
+        elif kind == "field_value" and not (isinstance(arg.get("label"), str) and isinstance(arg.get("equals"), str)):
+            errors.append(f"assert[{i}] (field_value): needs 'label' and 'equals' strings")
+        elif kind in ("element_present", "element_absent") and not (
+            isinstance(arg.get("role"), str) and arg["role"] and isinstance(arg.get("name", ""), str)
+        ):
+            errors.append(f"assert[{i}] ({kind}): needs a 'role' string and optionally a 'name' string")
 
     data = spec.get("data", {})
     if not isinstance(data, dict) or any(not isinstance(v, str) for v in data.values()):
@@ -195,10 +264,10 @@ def validate(spec: dict) -> list[str]:
     if cdp is not None and not (isinstance(cdp, str) and cdp.startswith(("http://", "https://", "ws://", "wss://"))):
         errors.append("'browser.cdp_url' must be an http(s):// or ws(s):// URL of a browser's remote-debugging endpoint")
     t = spec.get("thresholds", {})
-    for k in ("check_true", "never_true", "min_confidence"):
+    for k in ("check_true", "never_true", "outcome_true", "min_confidence"):
         v = t.get(k, 0.5)
-        if not (0.0 <= float(v) <= 1.0):
-            errors.append(f"'thresholds.{k}' must be between 0 and 1")
+        if not (isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= v <= 1.0):
+            errors.append(f"'thresholds.{k}' must be a number between 0 and 1")
     for k in ("max_low_confidence_steps", "max_repeat", "max_stale"):
         v = t.get(k, 1)
         if not (isinstance(v, int) and not isinstance(v, bool) and v >= 1):
@@ -217,6 +286,28 @@ def validate(spec: dict) -> list[str]:
         if not isinstance(spec.get(k, False), bool):
             errors.append(f"'{k}' must be true or false")
     return errors
+
+
+def effective_outcomes(spec: dict) -> dict:
+    """The outcomes the runner works with: the declared ones plus those synthesized from done_when / never.
+
+    `goal_reached` (verdict pass, requires every done_when check at check_true) and `never_<check>` (verdict
+    bug, requires that check at never_true) are added when the spec did not declare an outcome of that
+    name, so an old-style spec keeps its pass / fail semantics and a new-style spec may still use done_when
+    and never as shorthand. Every outcome comes back with `requires` (a list) and `requires_threshold`
+    filled in; synthesized ones carry `synthesized: true`. Declared outcomes come first, in declaration
+    order, which is also the order of preference when several are seen on the same page."""
+    th = spec["thresholds"]
+    out: dict = {}
+    for name, o in (spec.get("outcomes") or {}).items():
+        out[name] = {**o, "requires": list(o.get("requires") or []), "requires_threshold": th["check_true"]}
+    if spec.get("done_when") and "goal_reached" not in out:
+        out["goal_reached"] = {"verdict": "pass", "requires": list(spec["done_when"]),
+                               "requires_threshold": th["check_true"], "synthesized": True}
+    for n in spec.get("never") or []:
+        if f"never_{n}" not in out:
+            out[f"never_{n}"] = {"verdict": "bug", "requires": [n], "requires_threshold": th["never_true"], "synthesized": True}
+    return out
 
 
 def load_spec(path: str) -> dict:
@@ -248,6 +339,12 @@ def main(argv: list[str]) -> int:
     print(f"  goal: {spec['goal']}")
     print(f"  checks: {', '.join(spec['checks'])}")
     print(f"  done_when: {spec['done_when']}  never: {spec['never']}")
+    if spec["outcomes"]:
+        print("  outcomes: " + ", ".join(f"{k} -> {v.get('verdict')}" for k, v in spec["outcomes"].items()))
+    else:
+        print("  outcomes: none declared (goal_reached / never_<check> are synthesized from done_when / never)")
+    if spec["assert"]:
+        print(f"  assert: {len(spec['assert'])} assertion(s) on the final page")
     print(f"  data keys: {list(spec['data'])}  secrets: {spec['secrets']}")
     print(f"  budget: {spec['budget']}")
     return 0

@@ -424,18 +424,20 @@ class ReadAnswersTests(unittest.TestCase):
     def test_build_questions_reports_offered_keys(self) -> None:
         questions, meta = build_questions(SPEC, observation(ELEMENTS), last_operation="TYPE_TEXT")
         self.assertEqual(meta["operations"], ["CLICK", "TYPE_TEXT", "PRESS_ENTER", "SELECT", "WAIT", "DONE", "BLOCKED"])
+        from policy import BLOCKED_REASONS
         self.assertEqual(meta["offered"], {
             "operation": meta["operations"],
             "click_target": ["1"],
             "type_target": ["0"],
             "type_value": ["username", "password"],
             "select_target": ["2:0"],  # the disabled option is not offered
+            "blocked_reason": list(BLOCKED_REASONS),  # always asked; SPEC declares no outcome with a `when`, so no outcome Choice
         })
         for key, offered in meta["offered"].items():
             self.assertEqual(list(questions[key]["criteria"]), offered)
         self.assertNotIn("ok", meta["offered"])  # nouls have no option set
         _, meta = build_questions(SPEC, observation(ELEMENTS[:1]), last_operation=None)
-        self.assertEqual(set(meta["offered"]), {"operation", "type_target", "type_value"})
+        self.assertEqual(set(meta["offered"]), {"operation", "type_target", "type_value", "blocked_reason"})
         self.assertNotIn("CLICK", meta["offered"]["operation"])
 
     def test_select_with_only_disabled_options_is_withdrawn(self) -> None:
@@ -754,6 +756,179 @@ class ResolveTargetTests(unittest.TestCase):
         self.assertEqual((got["element"], got["option"]), (2, 0))
         self.assertEqual(got["label"], '[2] select "Size" -> "S"')
         self.assertIsNone(resolve_target("WAIT", answers, self.obs, self.meta))
+
+
+class OutcomeSpecTests(unittest.TestCase):
+    """spec.py: outcomes / assert validation and the synthesized outcomes."""
+
+    def problems(self, **overrides) -> list[str]:
+        from spec import validate
+        return validate(_merge(SPEC, overrides))
+
+    def test_defaults(self) -> None:
+        self.assertEqual((DEFAULTS["outcomes"], DEFAULTS["assert"], DEFAULTS["thresholds"]["outcome_true"]), ({}, [], 0.8))
+        self.assertEqual(self.problems(), [])
+
+    def test_outcome_shapes(self) -> None:
+        good = {"logged_in": {"when": "The page heading says Secure Area", "verdict": "pass"},
+                "err": {"requires": ["ok"], "verdict": "bug", "note": "n"}}
+        self.assertEqual(self.problems(outcomes=good), [])
+        self.assertTrue(any("verdict" in p for p in self.problems(outcomes={"x": {"when": "Something is shown here", "verdict": "maybe"}})))
+        self.assertTrue(any("statement" in p for p in self.problems(outcomes={"x": {"when": "short", "verdict": "pass"}})))
+        self.assertTrue(any("question" in p for p in self.problems(outcomes={"x": {"when": "Is the page shown now?", "verdict": "pass"}})))
+        self.assertTrue(any("requires" in p for p in self.problems(outcomes={"x": {"requires": ["nope"], "verdict": "pass"}})))
+        self.assertTrue(any("needs a 'when'" in p for p in self.problems(outcomes={"x": {"verdict": "pass"}})))
+        for bad_name in ("none_yet", "outcome", "blocked_reason", "1x", "a-b"):
+            self.assertTrue(any("outcome name" in p for p in self.problems(outcomes={bad_name: {"when": "Something is visible on the page", "verdict": "pass"}})), bad_name)
+        # an outcome may share its name with a check (the spec's own example does): different roles, no collision in the request
+        self.assertEqual(self.problems(outcomes={"ok": {"when": "The page says welcome to the user", "verdict": "pass"}}), [])
+
+    def test_done_when_optional_with_a_pass_outcome(self) -> None:
+        spec = dict(SPEC, done_when=[])
+        from spec import validate
+        self.assertTrue(any("nothing defines success" in p for p in validate(spec)))
+        spec["outcomes"] = {"fine": {"when": "The page says welcome to the user", "verdict": "pass"}}
+        self.assertEqual(validate(spec), [])
+        spec["outcomes"] = {"bad": {"when": "The page says welcome to the user", "verdict": "bug"}}
+        self.assertTrue(any("nothing defines success" in p for p in validate(spec)))
+
+    def test_assert_shapes(self) -> None:
+        good = [{"url_matches": "**/secure"}, {"text_contains": "You logged in"}, {"field_value": {"label": "Username", "equals": "tom"}},
+                {"element_present": {"role": "link", "name": "Logout"}}, {"element_absent": {"role": "alert"}}]
+        self.assertEqual(self.problems(**{"assert": good}), [])
+        for bad in ([{"url_matches": ""}], [{"nope": "x"}], [{"url_matches": "a", "text_contains": "b"}], ["x"],
+                    [{"field_value": {"label": "U"}}], [{"element_present": {"name": "x"}}]):
+            self.assertTrue(self.problems(**{"assert": bad}), bad)
+        self.assertTrue(any("outcome_true" in p for p in self.problems(thresholds={"outcome_true": 1.5})))
+
+    def test_effective_outcomes_synthesizes_from_done_when_and_never(self) -> None:
+        from spec import effective_outcomes
+        spec = _merge(SPEC, {"checks": {"ok": "The page says welcome", "err": "An error is shown"}, "never": ["err"],
+                             "thresholds": {"never_true": 0.9}})
+        out = effective_outcomes(spec)
+        self.assertEqual(list(out), ["goal_reached", "never_err"])
+        self.assertEqual(out["goal_reached"], {"verdict": "pass", "requires": ["ok"], "requires_threshold": 0.8, "synthesized": True})
+        self.assertEqual(out["never_err"], {"verdict": "bug", "requires": ["err"], "requires_threshold": 0.9, "synthesized": True})
+        declared = _merge(spec, {"outcomes": {"logged_in": {"when": "The user is greeted by name", "verdict": "pass"},
+                                              "never_err": {"when": "A red error box is shown", "verdict": "test_issue"}}})
+        out = effective_outcomes(declared)
+        self.assertEqual(list(out), ["logged_in", "never_err", "goal_reached"])  # declared first; a declared name is not overridden
+        self.assertEqual(out["never_err"]["verdict"], "test_issue")
+        self.assertEqual(out["logged_in"]["requires"], [])
+        self.assertEqual(effective_outcomes(_merge(SPEC, {"done_when": [], "outcomes": {"x": {"when": "Something is visible", "verdict": "pass"}}})).keys(), {"x"})
+
+
+class OutcomePolicyTests(unittest.TestCase):
+    OUTCOMES = {
+        "logged_in": {"when": "Secure Area", "verdict": "pass", "requires": [], "requires_threshold": 0.8},
+        "bad_pw": {"when": "invalid password", "verdict": "bug", "requires": ["login_error"], "requires_threshold": 0.8},
+        "goal_reached": {"verdict": "pass", "requires": ["ok", "ok2"], "requires_threshold": 0.8, "synthesized": True},
+        "never_err": {"verdict": "bug", "requires": ["err"], "requires_threshold": 0.9, "synthesized": True},
+    }
+
+    def test_outcome_question_offered_only_with_a_when(self) -> None:
+        from policy import BLOCKED_REASONS, STUCK_REASONS, outcome_criteria
+        crit = outcome_criteria(self.OUTCOMES)
+        self.assertEqual(list(crit), ["logged_in", "bad_pw", "none_yet"])
+        self.assertEqual(outcome_criteria({k: v for k, v in self.OUTCOMES.items() if not v.get("when")}), {})
+        questions, meta = build_questions(SPEC, observation(ELEMENTS), None, outcomes=self.OUTCOMES, ask_stuck=True)
+        self.assertEqual(meta["offered"]["outcome"], ["logged_in", "bad_pw", "none_yet"])
+        self.assertEqual(meta["offered"]["blocked_reason"], list(BLOCKED_REASONS))
+        self.assertEqual(meta["offered"]["stuck_reason"], list(STUCK_REASONS))
+        self.assertEqual(questions["outcome"]["criteria"]["logged_in"], "Secure Area")
+        questions, meta = build_questions(SPEC, observation(ELEMENTS), None, outcomes=self.OUTCOMES)
+        self.assertNotIn("stuck_reason", questions)
+
+    def test_seen_outcomes(self) -> None:
+        from policy import read_outcome, seen_outcomes
+        offered = ["logged_in", "bad_pw", "none_yet"]
+        ans = {"outcome": {"type": "choice", "choice": "bad_pw", "confidence": 0.88,
+                           "probabilities": {"logged_in": 0.05, "bad_pw": 0.91, "none_yet": 0.04}}}
+        got = read_outcome(ans, offered)
+        self.assertEqual(got, {"choice": "bad_pw", "confidence": 0.88, "probabilities": {"logged_in": 0.05, "bad_pw": 0.91, "none_yet": 0.04}})
+        self.assertIsNone(read_outcome({"outcome": {"type": "choice", "choice": "x"}}, offered))
+        # bad_pw needs its probability AND its required check; the check alone is not enough
+        self.assertEqual(seen_outcomes(self.OUTCOMES, {"login_error": 0.85}, got, 0.8),
+                         [{"name": "bad_pw", "verdict": "bug", "probability": 0.91, "confidence": 0.88}])
+        self.assertEqual(seen_outcomes(self.OUTCOMES, {"login_error": 0.5}, got, 0.8), [])
+        self.assertEqual(seen_outcomes(self.OUTCOMES, {"login_error": 0.85}, None, 0.8), [])
+        # synthesized outcomes are decided by their checks alone, at their own threshold, probability = weakest check
+        seen = seen_outcomes(self.OUTCOMES, {"ok": 0.95, "ok2": 0.82, "err": 0.85}, None, 0.8)
+        self.assertEqual(seen, [{"name": "goal_reached", "verdict": "pass", "probability": 0.82, "confidence": None}])
+        seen = seen_outcomes(self.OUTCOMES, {"ok": 0.95, "ok2": 0.5, "err": 0.95}, None, 0.8)
+        self.assertEqual([s["name"] for s in seen], ["never_err"])
+        # outcome_true is respected
+        self.assertEqual(seen_outcomes(self.OUTCOMES, {"login_error": 0.9}, got, 0.95), [])
+
+    def test_suggested_verdict_table(self) -> None:
+        from policy import suggested_verdict
+        self.assertEqual(suggested_verdict("blocked", ["missing_data_value"]), "test_issue")
+        self.assertEqual(suggested_verdict("stuck", ["control_had_no_effect", "nothing"]), "bug")
+        self.assertEqual(suggested_verdict("blocked", ["human_step_required"]), "needs_human")
+        self.assertEqual(suggested_verdict("stuck", ["still_loading"]), "flaky")
+        self.assertEqual(suggested_verdict("low_confidence", ["nothing"]), "test_issue")   # the status row when typed has none
+        self.assertEqual(suggested_verdict("budget_exhausted", [None]), "test_issue")
+        self.assertEqual(suggested_verdict("unstable_page", []), "flaky")
+        self.assertEqual(suggested_verdict("error", []), "flaky")
+        self.assertIsNone(suggested_verdict("done_unverified", ["other"]))
+        self.assertIsNone(suggested_verdict("assert_failed", []))
+        self.assertEqual(suggested_verdict("blocked", ["other", "wrong_page"]), "test_issue")  # first typed reason WITH a suggestion
+
+    def test_build_adjudication(self) -> None:
+        from policy import build_adjudication
+        lines = [f"line {i}" for i in range(250)]
+        state, questions, offered = build_adjudication("bad_pw", "A red flash says the password is invalid", lines)
+        self.assertEqual(len(state["lines"]), 200)
+        self.assertEqual(state["lines"][0], {"id": "1", "text": "line 0"})
+        self.assertEqual((state["outcome"], state["statement"]), ("bad_pw", "A red flash says the password is invalid"))
+        self.assertEqual(offered, [str(i) for i in range(1, 201)] + ["none"])
+        self.assertEqual(list(questions["evidence_line"]["criteria"]), offered)
+        self.assertEqual(questions["evidence_present"], {"type": "noul", "instructions": "A red flash says the password is invalid"})
+
+
+class AssertionTests(unittest.TestCase):
+    class FakePage:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def evaluate(self, js):
+            return self.text
+
+    def test_glob_to_regex(self) -> None:
+        import re as _re
+        from run_test import glob_to_regex
+        self.assertTrue(_re.fullmatch(glob_to_regex("**/secure"), "https://x.test/secure"))
+        self.assertFalse(_re.fullmatch(glob_to_regex("**/secure"), "https://x.test/secure/more"))
+        self.assertTrue(_re.fullmatch(glob_to_regex("https://x.test/*/edit"), "https://x.test/42/edit"))
+        self.assertFalse(_re.fullmatch(glob_to_regex("https://x.test/*/edit"), "https://x.test/a/b/edit"))
+        self.assertTrue(_re.fullmatch(glob_to_regex("**/item?"), "https://x.test/item7"))
+        self.assertTrue(_re.fullmatch(glob_to_regex("file://**/shop.html*"), "file:///tmp/a/shop.html?fail=1"))
+        self.assertFalse(_re.fullmatch(glob_to_regex("**/a.b"), "https://x.test/aXb"))  # the dot is literal
+
+    def test_check_assertions(self) -> None:
+        from run_test import check_assertions
+        obs = {"url": "https://x.test/secure", "visible_text": "fallback",
+               "elements": [{"idx": 0, "role": "textbox", "name": "Username", "value": "tomsmith"},
+                            {"idx": 1, "role": "link", "name": "Logout"},
+                            {"idx": 2, "role": "select", "name": "Size", "value": "M"}]}
+        spec = {"assert": [
+            {"url_matches": "**/secure"}, {"url_matches": "**/login"},
+            {"text_contains": "You logged into a secure area!"}, {"text_contains": "nope"},
+            {"field_value": {"label": "username", "equals": "tomsmith"}}, {"field_value": {"label": "Size", "equals": "S"}},
+            {"field_value": {"label": "Missing", "equals": "x"}},
+            {"element_present": {"role": "link", "name": "logout"}}, {"element_present": {"role": "button", "name": "Logout"}},
+            {"element_absent": {"role": "alert"}}, {"element_absent": {"role": "link"}},
+        ]}
+        got = check_assertions(spec, self.FakePage("Welcome\nYou logged into a secure area!\nLogout"), obs)
+        self.assertEqual([a["ok"] for a in got], [True, False, True, False, True, False, False, True, False, True, False])
+        self.assertEqual(got[1]["actual"], "https://x.test/secure")
+        self.assertIn("You logged into a secure area!", got[2]["actual"])
+        self.assertEqual(got[3]["actual"], "Welcome You logged into a secure area! Logout")
+        self.assertEqual(got[5]["actual"], {'[2] select "Size" value="M"': "M"})
+        self.assertEqual(got[6]["actual"], "no field with that label")
+        self.assertEqual(got[8]["actual"], "no such element")
+        self.assertEqual(got[10]["actual"], ['[1] link "Logout"'])
+        self.assertEqual(check_assertions({"assert": []}, self.FakePage(""), obs), [])
 
 
 class BenchTests(unittest.TestCase):

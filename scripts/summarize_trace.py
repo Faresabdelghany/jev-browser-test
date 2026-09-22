@@ -1,9 +1,10 @@
-"""Print a compact summary of a run trace.
+"""Print a compact summary of a run trace, or the run's result.json.
 
-    python scripts/summarize_trace.py runs/<id>/<ts>/trace.json [--checks] [--step N]
+    python scripts/summarize_trace.py runs/<id>/<ts>/trace.json [--step N] [--result]
 
-Read this first when judging a run; open trace.json or the step screenshots only for the steps
-the summary flags. `--step N` dumps one step in full (element table, probabilities, checks).
+Read result.json first when judging a run (`--result` prints it), then this summary; open trace.json
+or the step screenshots only for the steps the summary flags. `--step N` dumps one step in full
+(element table, probabilities, checks).
 """
 from __future__ import annotations
 
@@ -52,6 +53,14 @@ def _flags(step: dict) -> str:
         f.append(f"REPEAT×{step['repeat_count']}")
     if step.get("never_violated"):
         f.append("NEVER:" + ",".join(step["never_violated"]))
+    if step.get("outcome_seen"):
+        f.append("OUTCOME:" + step["outcome_seen"])
+    if step.get("pending_outcome"):
+        f.append("PENDING:" + step["pending_outcome"])
+    if step.get("outcome_unconfirmed"):
+        f.append("UNCONFIRMED:" + step["outcome_unconfirmed"])
+    if step.get("assertions") and not all(a.get("ok") for a in step["assertions"]):
+        f.append("ASSERT-FAILED")
     if step.get("stale"):
         f.append("STALE")
     if (step.get("target") or {}).get("missing"):
@@ -75,6 +84,21 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
         f"jev={usage.get('model')}  requests={usage.get('jev_requests')}  "
         f"tokens={usage.get('input_tokens', 0)} in / {usage.get('output_tokens', 0)} out"
     )
+    if trace.get("outcome"):
+        result = trace.get("result") or {}
+        verdict = trace.get("verdict")
+        head = f"  outcome: {trace['outcome']}" + (f"  verdict: {verdict}" if verdict else "")
+        if result.get("reason"):
+            r = result["reason"]
+            typed = ", ".join(f"{k}={v}" for k, v in (("blocked_reason", r.get("blocked_reason")), ("stuck_reason", r.get("stuck_reason"))) if v)
+            head += f"  ({r.get('status')}" + (f"; {typed}" if typed else "") + f"; suggested verdict: {r.get('suggested_verdict') or 'judge yourself'})"
+        elif result.get("seen_at_step"):
+            head += f"  seen at step {result['seen_at_step']}" + (" (confirmed)" if result.get("confirmed") else "")
+        lines.append(head)
+        if (result.get("evidence") or {}).get("line"):
+            lines.append(f"  evidence: \"{result['evidence']['line']}\"")
+        if result.get("note"):
+            lines.append(f"  note: {result['note']}")
     if trace.get("status_meaning"):
         lines.append(f"  meaning: {trace['status_meaning']}")
     if trace.get("error"):
@@ -96,12 +120,16 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
         if ex.get("action") in ("AUTO_DONE", "STOP", "DONE", "BLOCKED"):
             op = ex["action"] if ex["action"] != "STOP" else f"{op} (stopped)"
             if ex.get("confirmed"):
-                op = "DONE (confirmed)"
+                op = f"{ex['action']} (confirmed)"
         elif ex.get("action") == "WAIT" and ex.get("reason"):
             if s.get("stale"):
                 op = f"{op} (stale)"
+            elif ex["reason"] == "confirming DONE":
+                op = "DONE (checking)"
+            elif ex["reason"].startswith("confirming outcome"):
+                op = "outcome (checking)"
             else:
-                op = "DONE (checking)" if ex["reason"] == "confirming DONE" else f"{op} (not run)"
+                op = f"{op} (not run)"
         target = ""
         tg = s.get("target")
         if tg and not tg.get("missing"):
@@ -115,8 +143,12 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
         )
     lines.append("")
     lines.append("final checks: " + _fmt_checks(final.get("checks", {}), spec))
+    assertions = (trace.get("result") or {}).get("assertions") or []
+    if assertions:
+        lines.append("assertions: " + "  ".join(
+            f"{'✓' if a.get('ok') else '✗'} {next(k for k in a if k not in ('ok', 'actual'))}" for a in assertions))
     if out_dir:
-        lines.append(f"trace: {os.path.join(out_dir, 'trace.json')}" + _screenshot_hint(trace))
+        lines.append(f"result: {os.path.join(out_dir, 'result.json')}  trace: {os.path.join(out_dir, 'trace.json')}" + _screenshot_hint(trace))
     return "\n".join(lines)
 
 
@@ -155,15 +187,24 @@ def dump_step(trace: dict, n: int) -> str:
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("trace")
+    ap.add_argument("trace", help="a run's trace.json (or its result.json, or the run directory)")
     ap.add_argument("--step", type=int, help="dump one step in full")
+    ap.add_argument("--result", action="store_true", help="print the run's result.json instead of the step table")
     args = ap.parse_args(argv[1:])
-    with open(args.trace, encoding="utf-8") as f:
+    path = args.trace
+    if os.path.isdir(path):
+        path = os.path.join(path, "trace.json")
+    run_dir = os.path.dirname(path)
+    if args.result or os.path.basename(path) == "result.json":
+        with open(os.path.join(run_dir, "result.json"), encoding="utf-8") as f:
+            print(json.dumps(json.load(f), indent=2, ensure_ascii=False))
+        return 0
+    with open(path, encoding="utf-8") as f:
         trace = json.load(f)
     if args.step:
         print(dump_step(trace, args.step))
     else:
-        print(summarize(trace, os.path.dirname(args.trace)))
+        print(summarize(trace, run_dir))
     return 0
 
 

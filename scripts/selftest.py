@@ -404,13 +404,40 @@ class FakeJev:
                 return k
         return None
 
+    @staticmethod
+    def _keyword(statement: str) -> str | None:
+        """The fixture text that makes a check / outcome / adjudication statement true."""
+        s = statement.lower()
+        if "cart" in s:
+            return r"Cart: [1-9]"
+        if "error" in s or "wrong" in s:
+            return "Something went wrong"
+        return None
+
+    def _outcome(self, criteria: dict, text: str) -> str:
+        """The outcome Choice by rule: the first declared outcome whose statement is true of the text, else none_yet."""
+        for name, when in criteria.items():
+            if name == "none_yet":
+                continue
+            kw = self._keyword(when)
+            if kw and re.search(kw, text):
+                return name
+        return "none_yet"
+
     def system_one(self, state: dict, questions: dict) -> dict:
         self.requests += 1
         self.seen_states.append(state)
         if self.delay_ms:
             time.sleep(self.delay_ms / 1000)
-        text = state["visible_text"]
         answers: dict = {}
+        if "evidence_line" in questions:
+            # The adjudication request: pick the line that states the outcome, verbatim selection.
+            kw = self._keyword(state.get("statement", ""))
+            hit = next((ln["id"] for ln in state.get("lines", []) if kw and re.search(kw, ln["text"])), "none")
+            answers["evidence_line"] = self._choice(hit, questions["evidence_line"]["criteria"])
+            answers["evidence_present"] = {"type": "noul", "noul": 0.95 if hit != "none" else 0.1}
+            return {"answers": answers, "usage": {"input_tokens": 200, "output_tokens": 20}, "model": "fake-jev", "latency_ms": 1}
+        text = state.get("visible_text", "")
         for key, q in questions.items():
             if q["type"] == "noul":
                 if key == "cart_has_item":
@@ -419,6 +446,10 @@ class FakeJev:
                     answers[key] = {"type": "noul", "noul": 0.98 if "Something went wrong" in text else 0.01}
                 else:
                     answers[key] = {"type": "noul", "noul": 0.5}
+        if "outcome" in questions:
+            answers["outcome"] = self._choice(self._outcome(questions["outcome"]["criteria"], text), questions["outcome"]["criteria"])
+        if "stuck_reason" in questions:
+            answers["stuck_reason"] = self._choice("control_had_no_effect", questions["stuck_reason"]["criteria"])
         if "operation" not in questions:
             return {"answers": answers, "usage": {"input_tokens": 300, "output_tokens": 20}, "model": "fake-jev", "latency_ms": 1}
 
@@ -465,6 +496,9 @@ class FakeJev:
         if target:
             qkey, label = target
             answers[qkey] = self._choice(label, questions[qkey]["criteria"])
+        if "blocked_reason" in questions:
+            answers["blocked_reason"] = self._choice("missing_data_value" if op == "BLOCKED" else "nothing",
+                                                     questions["blocked_reason"]["criteria"])
         return {"answers": answers, "usage": {"input_tokens": 400, "output_tokens": 60}, "model": "fake-jev", "latency_ms": 1}
 
     def usage_summary(self) -> dict:
@@ -473,6 +507,11 @@ class FakeJev:
 
 STATE_KEYS = ["goal", "hints", "step", "page", "elements", "truncated_elements", "visible_text",
               "available_data_values", "recent_actions"]
+
+
+def step_states(jev: "FakeJev") -> list[dict]:
+    """The per-step states Jev saw (the final adjudication request has a different, smaller state)."""
+    return [s for s in jev.seen_states if "recent_actions" in s]
 
 
 def state_shape_check(state: dict, trace: dict) -> list[str]:
@@ -491,7 +530,7 @@ def state_shape_check(state: dict, trace: dict) -> list[str]:
         failures.append(f"available_data_values wrong: {state.get('available_data_values')}")
     recent = state.get("recent_actions") or []
     by_op = {a["operation"]: a for a in recent}
-    if set(by_op) != {"CLICK", "TYPE_TEXT", "PRESS_ENTER"}:
+    if not {"CLICK", "TYPE_TEXT", "PRESS_ENTER"} <= set(by_op):
         failures.append(f"recent_actions do not cover the executed operations: {recent}")
     click = next((a for a in recent if "Add to cart" in (a.get("target") or "")), None)
     if not click or click.get("page_changed") is not True or click.get("ok") is not True or click.get("value_key") is not None:
@@ -536,6 +575,53 @@ def base_spec(url: str) -> dict:
     return spec
 
 
+def outcome_spec(url: str) -> dict:
+    """The same flow written against the results contract: declared outcomes with verdicts, no done_when /
+    never, and exact assertions on the final page."""
+    from spec import validate
+
+    spec = base_spec(url)
+    spec["done_when"], spec["never"] = [], []
+    spec["outcomes"] = {
+        "item_added": {"when": "The header shows the cart contains at least one item", "verdict": "pass",
+                       "note": "the happy path"},
+        "app_error": {"when": "An error message such as 'something went wrong' is visible", "verdict": "bug",
+                      "note": "adding to the cart failed"},
+    }
+    spec["assert"] = [
+        {"url_matches": "file://**/shop.html*"},
+        {"text_contains": "Cart: 1 items"},
+        {"element_present": {"role": "button", "name": "Add to cart"}},
+        {"element_absent": {"role": "alert"}},
+        {"field_value": {"label": "Search products", "equals": "blue hoodie"}},
+    ]
+    problems = validate(spec)
+    assert not problems, problems
+    return spec
+
+
+RESULT_KEYS = ["spec_id", "outcome", "verdict", "note", "probability", "confidence", "seen_at_step", "confirmed",
+               "path_confidence", "reason", "evidence", "assertions", "outcomes_seen_earlier", "story", "status",
+               "duration_ms", "usage", "trace"]
+
+
+def result_shape_check(trace: dict, out: str) -> list[str]:
+    """result.json exists, equals trace["result"], and has exactly the documented keys."""
+    failures = []
+    path = os.path.join(out, "result.json")
+    if not os.path.exists(path):
+        return [f"result.json missing in {out}"]
+    with open(path, encoding="utf-8") as f:
+        result = json.load(f)
+    if result != trace.get("result"):
+        failures.append("result.json differs from trace.result")
+    if list(result) != RESULT_KEYS:
+        failures.append(f"result.json keys are {list(result)}, expected {RESULT_KEYS}")
+    if result["trace"] != os.path.join(out, "trace.json") or result["status"] != trace["status"]:
+        failures.append(f"result.json trace/status do not point at the run: {result['trace']} {result['status']}")
+    return failures
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="jev-selftest-")
     html = os.path.join(tmp, "shop.html")
@@ -565,8 +651,13 @@ def main() -> int:
     ops = [s.get("executed", {}).get("action") for s in trace["steps"]]
     if trace["status"] != "passed":
         failures.append(f"expected passed, got {trace['status']} ({trace.get('error')})")
-    if ops != ["CLICK", "TYPE_TEXT", "PRESS_ENTER", "CLICK", "AUTO_DONE"]:
-        failures.append(f"unexpected action sequence {ops}")
+    if ops != ["CLICK", "TYPE_TEXT", "PRESS_ENTER", "CLICK", "WAIT", "AUTO_DONE"] or not trace["steps"][-1]["executed"].get("confirmed"):
+        failures.append(f"unexpected action sequence {ops} (a pass sighting gets one settle-and-recheck, then is confirmed)")
+    if (trace["outcome"], trace["verdict"]) != ("goal_reached", "pass") or not trace["result"]["confirmed"]:
+        failures.append(f"an old-style spec should end in the synthesized goal_reached outcome: {trace['outcome']} {trace['verdict']}")
+    if trace["steps"][-2].get("pending_outcome") != "goal_reached" or "outcome" in trace["steps"][-1]:
+        failures.append("the sighting step should carry pending_outcome, and no outcome Choice is asked without a `when`")
+    failures += result_shape_check(trace, out)
     if trace["spec"]["data"]["password"] != "<secret>":
         failures.append("secret not redacted in trace spec")
     if any("hunter2" in json.dumps(st) for st in jev.seen_states):
@@ -575,7 +666,7 @@ def main() -> int:
         failures.append(f"screenshots=True should capture every step: {[s.get('screenshot') for s in trace['steps']]}")
     if not os.path.exists(os.path.join(out, "trace.json")):
         failures.append("trace.json missing")
-    failures += state_shape_check(jev.seen_states[-1], trace)
+    failures += state_shape_check(step_states(jev)[-1], trace)
     settles = [s.get("settle") for s in trace["steps"] if (s.get("executed") or {}).get("action") == "CLICK"]
     if not settles or not all(isinstance(s, dict) and s.get("ended") in ("quiet", "cap") and isinstance(s.get("ms"), int) for s in settles):
         failures.append(f"action steps do not carry a settle record: {settles}")
@@ -597,16 +688,21 @@ def main() -> int:
     if f"screenshots: steps {len(shots)} + final.png" not in summarize(trace, out):
         failures.append("summary does not say which steps have screenshots")
 
-    # 2. the app shows an error -> never_violated; in key mode the terminal step has a picture
+    # 2. the app shows an error -> the synthesized never_<check> outcome (verdict bug) ends the run with status
+    #    outcome at first sighting; in key mode the terminal step has a picture
     spec = base_spec(url + "?fail=1")
     out = os.path.join(tmp, "run-error")
     trace = run(spec, FakeJev(), out, screenshots="key")
     print(summarize(trace, out))
     print()
-    if trace["status"] != "never_violated":
-        failures.append(f"expected never_violated, got {trace['status']} ({trace.get('error')})")
+    if trace["status"] != "outcome" or (trace["outcome"], trace["verdict"]) != ("never_error_visible", "bug"):
+        failures.append(f"expected outcome never_error_visible/bug, got {trace['status']} {trace['outcome']} ({trace.get('error')})")
+    if trace["steps"][-1].get("never_violated") != ["error_visible"] or trace["steps"][-1].get("outcome_seen") != "never_error_visible":
+        failures.append(f"the terminal step should carry never_violated and outcome_seen: {trace['steps'][-1].get('never_violated')} {trace['steps'][-1].get('outcome_seen')}")
     if not trace["steps"][-1].get("screenshot") or any(s.get("screenshot") for s in trace["steps"][:-1]):
-        failures.append(f"key mode: only the never_violated step should have a screenshot: {[s.get('screenshot') for s in trace['steps']]}")
+        failures.append(f"key mode: only the outcome step should have a screenshot: {[s.get('screenshot') for s in trace['steps']]}")
+    if trace["result"]["evidence"]["line"] != "Something went wrong. Please try again later." or trace["result"]["confirmed"]:
+        failures.append(f"a bug outcome should quote its evidence line and not be 'confirmed': {trace['result']['evidence']}")
 
     # 3. needed data missing -> blocked; screenshots=False writes no picture at all
     spec = base_spec(url)
@@ -620,6 +716,9 @@ def main() -> int:
         failures.append(f"expected blocked, got {trace['status']} ({trace.get('error')})")
     if any(s.get("screenshot") for s in trace["steps"]) or trace["final"].get("screenshot") or os.listdir(os.path.join(out, "steps")):
         failures.append("screenshots=False still wrote pictures")
+    reason = (trace["result"] or {}).get("reason") or {}
+    if trace["outcome"] != "undetermined" or reason.get("blocked_reason") != "missing_data_value" or reason.get("suggested_verdict") != "test_issue":
+        failures.append(f"blocked should be undetermined with the typed reason missing_data_value -> test_issue: {trace['outcome']} {reason}")
 
     # 4. Jev unsure WHICH value to type -> nothing is typed, run ends low_confidence (was: typed anyway);
     #    in key mode every low-confidence step has a picture
@@ -638,6 +737,9 @@ def main() -> int:
     waited = [s for s in trace["steps"] if s.get("low_confidence") and (s.get("executed") or {}).get("action") == "WAIT"]
     if not waited or not all(isinstance(s.get("settle"), dict) and s["latency_ms"]["browser"] >= spec["browser"]["settle_ms"] for s in waited):
         failures.append(f"a low-confidence WAIT should wait settle_ms and record its settle: {[(s.get('settle'), s.get('latency_ms')) for s in waited]}")
+    reason = (trace["result"] or {}).get("reason") or {}
+    if reason.get("status") != "low_confidence" or reason.get("suggested_verdict") != "test_issue":
+        failures.append(f"low_confidence should suggest test_issue: {reason}")
 
     # 4b. a button that does nothing: the same click on an unchanged page three times -> stuck; the trace and
     #     Jev's recent_actions both say page_changed: false; in key mode the repeat (>= 2) and terminal steps
@@ -653,11 +755,16 @@ def main() -> int:
         failures.append(f"dead click: expected stuck after 2 executed clicks and 3 steps, got {trace['status']} {trace['actions_executed']} {len(steps)}")
     if [s.get("page_changed") for s in steps] != [False, False, None] or not all("Apply filter" in (s.get("target") or {}).get("label", "") for s in steps):
         failures.append(f"dead click: page_changed should be false on both executed clicks: {[(s.get('page_changed'), (s.get('target') or {}).get('label')) for s in steps]}")
-    recent = jev.seen_states[-1]["recent_actions"]
+    recent = step_states(jev)[-1]["recent_actions"]
     if len(recent) != 2 or any(a.get("page_changed") is not False for a in recent):
         failures.append(f"dead click: Jev was not told the clicks changed nothing: {recent}")
     if [bool(s.get("screenshot")) for s in steps] != [False, True, True] or [s.get("repeat_count") for s in steps] != [1, 2, 3]:
         failures.append(f"dead click: key mode should picture the repeat and terminal steps only: {[(s.get('repeat_count'), s.get('screenshot')) for s in steps]}")
+    if [("stuck_reason" in s) for s in steps] != [False, True, True] or (steps[-1].get("stuck_reason") or {}).get("choice") != "control_had_no_effect":
+        failures.append(f"stuck_reason should be asked only after an action with page_changed false: {[s.get('stuck_reason') for s in steps]}")
+    reason = (trace["result"] or {}).get("reason") or {}
+    if reason.get("stuck_reason") != "control_had_no_effect" or reason.get("suggested_verdict") != "bug":
+        failures.append(f"stuck with a dead control should suggest bug: {reason}")
 
     # 5. a low-confidence DONE is a WAIT, not a verdict -> the flow continues and passes
     spec = base_spec(url)
@@ -676,7 +783,7 @@ def main() -> int:
     print(summarize(trace, out))
     print()
     ops = [s.get("executed", {}).get("action") for s in trace["steps"]]
-    if trace["status"] != "passed" or ops[-2:] != ["WAIT", "DONE"] or not trace["steps"][-1]["executed"].get("confirmed"):
+    if trace["status"] != "passed" or ops[-2:] not in (["WAIT", "DONE"], ["WAIT", "AUTO_DONE"]) or not trace["steps"][-1]["executed"].get("confirmed"):
         failures.append(f"DONE race not recovered by confirmation pass: {trace['status']} {ops}")
 
     # 7. confident DONE and the checks really are unsatisfied -> done_unverified after one recheck
@@ -700,8 +807,8 @@ def main() -> int:
         failures.append(f"expected passed after one retried operation answer, got {trace['status']} ({trace.get('error')})")
     if not first.get("retried") or not str(first.get("invalid_answer", "")).startswith("operation: choice 'FLY'"):
         failures.append(f"step 1 not marked retried/invalid_answer: {first.get('retried')} {first.get('invalid_answer')!r}")
-    if jev.requests != len(trace["steps"]) + 1:
-        failures.append(f"expected exactly one extra request for the retry, got {jev.requests} for {len(trace['steps'])} steps")
+    if jev.requests != len(trace["steps"]) + 2:  # one retry, one adjudication
+        failures.append(f"expected exactly one extra request for the retry (plus the adjudication), got {jev.requests} for {len(trace['steps'])} steps")
     if any(s.get("retried") or s.get("invalid_answer") for s in trace["steps"][1:]):
         failures.append("later steps carry retried/invalid_answer flags")
     if first["latency_ms"]["jev"] != 2:
@@ -741,7 +848,7 @@ def main() -> int:
     if stale_steps and stale_steps[0]["executed"] != {"action": "WAIT", "ok": True, "error": None,
                                                         "reason": f"page changed during the decision: {stale_steps[0]['stale']}"}:
         failures.append(f"stale step not recorded as a WAIT with the reason: {stale_steps[0]['executed']}")
-    if stale_steps and any(a["step"] == stale_steps[0]["n"] for a in jev.seen_states[-1]["recent_actions"]):
+    if stale_steps and any(a["step"] == stale_steps[0]["n"] for a in step_states(jev)[-1]["recent_actions"]):
         failures.append("the stale step leaked into recent_actions")
     clicked = [s for s in trace["steps"] if (s.get("executed") or {}).get("action") == "CLICK" and "Add to cart" in (s.get("target") or {}).get("label", "")]
     if not clicked or clicked[-1]["target"]["element"] == stale_steps[0]["target"]["element"] if stale_steps else True:
@@ -793,6 +900,75 @@ def main() -> int:
 
     # 13. browser.cdp_url: attach to a browser we did not launch, leave its tabs alone
     failures += cdp_check(url, tmp)
+
+    # 15. the results contract, happy path: the declared pass outcome is seen, confirmed after a
+    #     settle-and-recheck, every assertion holds, the adjudication quotes the evidence line
+    spec = outcome_spec(url)
+    jev = FakeJev()
+    out = os.path.join(tmp, "run-outcome-pass")
+    trace = run(spec, jev, out, screenshots="key")
+    print(summarize(trace, out))
+    print()
+    res = trace["result"]
+    if trace["status"] != "passed" or (res["outcome"], res["verdict"], res["confirmed"]) != ("item_added", "pass", True):
+        failures.append(f"outcome pass: expected passed/item_added/confirmed, got {trace['status']} {res['outcome']} {res['verdict']} {res['confirmed']}")
+    if res["seen_at_step"] != len(trace["steps"]) or res["note"] != "the happy path" or not (res["probability"] or 0) >= 0.8:
+        failures.append(f"outcome pass: seen_at_step/note/probability wrong: {res['seen_at_step']} {res['note']} {res['probability']}")
+    if len(res["assertions"]) != 5 or not all(a["ok"] for a in res["assertions"]):
+        failures.append(f"outcome pass: every assertion should hold: {res['assertions']}")
+    if "Cart: 1 items" not in (res["evidence"]["line"] or "") or not (res["evidence"]["present"] or 0) >= 0.9 or res["evidence"]["checks"].get("cart_has_item") != 1.0:
+        failures.append(f"outcome pass: evidence should quote the header line with the cart count: {res['evidence']}")
+    story = res["story"]
+    story_ok = (len(story) == 4 and 'CLICK [' in story[0] and 'button "Accept cookies"' in story[0]
+                and story[1].startswith("2 TYPE_TEXT [") and story[1].endswith('textbox "Search products" <- search_query')
+                and story[2] == "3 PRESS_ENTER" and story[3].startswith("4 CLICK [") and 'button "Add to cart"' in story[3])
+    if not story_ok or res["path_confidence"] != 0.9 or res["reason"] is not None:
+        failures.append(f"outcome pass: story/path_confidence/reason wrong: {story} {res['path_confidence']} {res['reason']}")
+    first = trace["steps"][0]
+    if (first.get("outcome") or {}).get("choice") != "none_yet" or set((first["outcome"] or {}).get("probabilities", {})) != {"item_added", "app_error", "none_yet"}:
+        failures.append(f"outcome pass: the outcome Choice should be asked every step over the declared outcomes + none_yet: {first.get('outcome')}")
+    if (first.get("blocked_reason") or {}).get("choice") != "nothing" or "stuck_reason" in first:
+        failures.append(f"outcome pass: blocked_reason is asked every step, stuck_reason only after a no-op action: {first.get('blocked_reason')} {first.get('stuck_reason')}")
+    if jev.requests != len(trace["steps"]) + 1 or (trace.get("adjudication") or {}).get("line_id") is None:
+        failures.append(f"outcome pass: expected one adjudication request after the steps: {jev.requests} requests, {trace.get('adjudication')}")
+    failures += result_shape_check(trace, out)
+
+    # 16. the results contract, a bug outcome: terminal at first sighting, picture forced, no confirmation
+    spec = outcome_spec(url + "?fail=1")
+    out = os.path.join(tmp, "run-outcome-bug")
+    trace = run(spec, FakeJev(), out, screenshots="key")
+    print(summarize(trace, out))
+    print()
+    res = trace["result"]
+    last = trace["steps"][-1]
+    if trace["status"] != "outcome" or (res["outcome"], res["verdict"], res["confirmed"]) != ("app_error", "bug", False):
+        failures.append(f"outcome bug: expected outcome/app_error/bug, got {trace['status']} {res['outcome']} {res['verdict']}")
+    if last.get("outcome_seen") != "app_error" or not last.get("screenshot") or last["executed"]["action"] != "STOP":
+        failures.append(f"outcome bug: the sighting step should be terminal with a picture: {last.get('outcome_seen')} {last.get('screenshot')} {last.get('executed')}")
+    if res["evidence"]["line"] != "Something went wrong. Please try again later." or res["evidence"]["screenshot"] != last["screenshot"]:
+        failures.append(f"outcome bug: evidence should quote the error line and point at the sighting picture: {res['evidence']}")
+    if res["note"] != "adding to the cart failed" or res["assertions"] != [] or res["reason"] is not None:
+        failures.append(f"outcome bug: note/assertions/reason wrong: {res['note']} {res['assertions']} {res['reason']}")
+
+    # 17. a confirmed pass whose assertions do not hold -> assert_failed, undetermined with the failing
+    #     assertions and their actual values (Claude decides whether the assertion or the app is wrong)
+    spec = outcome_spec(url)
+    spec["assert"] = [{"text_contains": "Cart: 2 items"}, {"url_matches": "**/other.html"}, {"element_present": {"role": "button", "name": "Add to cart"}}]
+    out = os.path.join(tmp, "run-outcome-assert")
+    trace = run(spec, FakeJev(), out, screenshots="key")
+    print(summarize(trace, out))
+    print()
+    res = trace["result"]
+    if trace["status"] != "assert_failed" or res["outcome"] != "undetermined" or res["verdict"] is not None:
+        failures.append(f"assert: expected assert_failed/undetermined, got {trace['status']} {res['outcome']} {res['verdict']}")
+    reason = res["reason"] or {}
+    failed = reason.get("failed_assertions") or []
+    if reason.get("status") != "assert_failed" or reason.get("suggested_verdict") is not None or len(failed) != 2 or reason.get("outcome_seen") != "item_added":
+        failures.append(f"assert: reason should name the seen outcome and carry the two failing assertions, no suggestion: {reason}")
+    if not ("Cart: 1 items" in str(failed[0].get("actual")) and failed[1].get("actual", "").endswith("shop.html")) if len(failed) == 2 else True:
+        failures.append(f"assert: failing assertions should report actual values: {failed}")
+    if [a["ok"] for a in res["assertions"]] != [False, False, True]:
+        failures.append(f"assert: all three assertions should be reported: {res['assertions']}")
 
     # 14. .env in the working directory is loaded; already-exported variables win; quotes are stripped
     env_dir = os.path.join(tmp, "dotenv")
