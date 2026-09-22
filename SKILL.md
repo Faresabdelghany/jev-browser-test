@@ -10,10 +10,11 @@ Claude is the brain, Jev is the hands, Playwright is the body.
 - **Claude (you)** writes the test *spec* before the run and judges the *trace* after it. You never sit
   inside the step loop, so a 30-step flow costs you two turns of thinking, not thirty.
 - **Jev** (TypeSafe's System One model) makes one typed decision per step: which operation, which numbered
-  element, which prepared value. Measured on a real app: ~0.7–1.8 s per decision (median ~0.9 s, one
-  request carrying the operation, targets and all checks), ~1.8k tokens per step; Playwright's observe
-  and act is the bigger cost at ~2.4 s. Jev cannot invent an action that is not on the page because it
-  only ever chooses from options the runner offers.
+  element, which prepared value. Measured on the demo login (`scripts/bench.py`, 5 repeats): ~0.3 s per
+  decision on the warm connection (~0.8 s for the first request of a run), one request carrying the
+  operation, targets and all checks, ~1.3k tokens per step; the browser's execute-and-settle is ~0.15 s
+  per action, so a 3-action flow is ~5 s of which ~2 s is the site's own page load. Jev cannot invent an
+  action that is not on the page because it only ever chooses from options the runner offers.
 - **Playwright** turns the live page into a numbered element table and executes the chosen action.
 
 Only the outcomes come back to you: `passed`, `blocked`, a `never` check firing, low confidence, a stuck

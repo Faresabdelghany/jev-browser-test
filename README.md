@@ -74,12 +74,24 @@ undecided answers on an unchanged page end the run as `low_confidence`. A confid
 checks gets one settle-and-recheck before the verdict. Both rules came from real runs: Jev split 0.68/0.32
 over which value to type into a password field, and once declared DONE at 0.36 mid-reload.
 
-## Measured (real app, Chromium, Sept 2026)
+## Measured (the-internet.herokuapp.com login, Chromium, `jev-1.13.0`, Sept 2026)
 
-- Jev decision: median ~0.9 s (0.7–1.8 s), one request per step carrying all questions, ~1.8k tokens
-- Playwright observe + act: median ~1.3–2.4 s — the browser is the bottleneck, not the model
-- A 5-step login → impersonate flow: 20–35 s, 5–7 requests, a fraction of a cent
-- Oracle discrimination: a true check read 0.86–0.92, the same check reworded to a false statement 0.01
+Five repeats before and after the jev-ultrafast-style loop work, `scripts/bench.py`, medians
+(`docs/superpowers/measurements/2026-09-21-track1-{baseline,after}.json`):
+
+| `smoke-login` (3 actions, passed 5/5 both times) | before | after |
+|---|---:|---:|
+| wall-clock per run | 8.9 s | 5.2 s (−42%) |
+| Jev request, warm connection | 770 ms | 307 ms |
+| browser work per action (execute + settle) | 646 ms | 147 ms |
+| decision confidence | 0.94 | 0.95 |
+| input tokens per run | 3.9k | 5.1k |
+
+Of the remaining 5.2 s about 2.0 s is the initial page load of the remote site and 0.15 s the browser
+launch (`trace.timing`). One connection per run instead of one per request is where the Jev time went;
+observing as soon as the DOM is quiet instead of a fixed pause is where the browser time went. The
+structured state costs about a third more input tokens. Things that were tried and measured worse are in
+`docs/superpowers/measurements/` too (the standing rules text, see `references/runner-design.md`).
 
 ## Layout
 
