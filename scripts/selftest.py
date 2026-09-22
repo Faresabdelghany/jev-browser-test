@@ -1088,6 +1088,7 @@ def main() -> int:
     # 12. viewport-first text: a long filler that comes first in the DOM but sits below the fold is
     #     moved after what is on screen, not lost; the flow still passes
     spec = base_spec(url + "?longtext=1")
+    spec["observation"]["max_text_chars"] = 4000  # the scenario is about the ORDER of the text, so it needs all of it (the default is 2000 since lever F5)
     jev = FakeJev()
     out = os.path.join(tmp, "run-longtext")
     trace = run(spec, jev, out, screenshots=False)

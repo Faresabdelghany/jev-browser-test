@@ -86,7 +86,8 @@ DEFAULTS = {
         "cdp_url": None,    # attach to a running browser (Chrome started with --remote-debugging-port) instead of launching
     },
     # 200 elements: the Choice cap is 255 and the table-row "stuck" seen in real runs was truncation at 60.
-    # 4000 chars of viewport-first text: the toast the checks look for must not be crowded out by the header.
+    # 2000 chars of viewport-first text (lever F5; was 4000): what is on screen comes first, so the toast the checks
+    # look for is not crowded out by the header; a long article's four steps each saved ~450 tokens at no change.
     # screenshots "key": only terminal and flagged steps (plus final.png); true = every step; false = none.
     "observation": {"max_elements": 200, "max_text_chars": 2000, "screenshots": "key"},  # lever F5: was 4000
 }
