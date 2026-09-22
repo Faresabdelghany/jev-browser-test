@@ -41,7 +41,36 @@
             0.97
           ],
           "stale_steps": 0,
-          "low_confidence_steps": 0
+          "low_confidence_steps": 0,
+          "jev_first_ms": 828,
+          "jev_warm_ms": 354,
+          "browser_per_action_ms": 139,
+          "step_jev_ms": [
+            828,
+            315,
+            354,
+            316,
+            479,
+            463
+          ],
+          "step_browser_ms": [
+            185,
+            139,
+            137,
+            123,
+            541,
+            null
+          ],
+          "action_browser_ms": [
+            185,
+            139,
+            137,
+            123,
+            541
+          ],
+          "launch_ms": null,
+          "navigation_ms": null,
+          "setup_ms": null
         },
         {
           "out_dir": "runs/bench/smoke-login/20260922-083521-02",
@@ -69,7 +98,36 @@
             0.97
           ],
           "stale_steps": 0,
-          "low_confidence_steps": 0
+          "low_confidence_steps": 0,
+          "jev_first_ms": 736,
+          "jev_warm_ms": 322,
+          "browser_per_action_ms": 125,
+          "step_jev_ms": [
+            736,
+            319,
+            316,
+            360,
+            325,
+            322
+          ],
+          "step_browser_ms": [
+            184,
+            116,
+            125,
+            114,
+            539,
+            null
+          ],
+          "action_browser_ms": [
+            184,
+            116,
+            125,
+            114,
+            539
+          ],
+          "launch_ms": null,
+          "navigation_ms": null,
+          "setup_ms": null
         },
         {
           "out_dir": "runs/bench/smoke-login/20260922-083521-03",
@@ -97,7 +155,36 @@
             0.97
           ],
           "stale_steps": 0,
-          "low_confidence_steps": 0
+          "low_confidence_steps": 0,
+          "jev_first_ms": 771,
+          "jev_warm_ms": 313,
+          "browser_per_action_ms": 125,
+          "step_jev_ms": [
+            771,
+            299,
+            313,
+            315,
+            290,
+            328
+          ],
+          "step_browser_ms": [
+            163,
+            121,
+            125,
+            108,
+            457,
+            null
+          ],
+          "action_browser_ms": [
+            163,
+            121,
+            125,
+            108,
+            457
+          ],
+          "launch_ms": null,
+          "navigation_ms": null,
+          "setup_ms": null
         }
       ],
       "medians": {
@@ -113,7 +200,15 @@
         "decision_confidence": 0.97,
         "min_decision_confidence": 0.59,
         "stale_steps": 0,
-        "decision_confidence_all_steps": 0.97
+        "jev_first_ms": 771,
+        "jev_warm_ms": 322,
+        "browser_per_action_ms": 125,
+        "launch_ms": null,
+        "navigation_ms": null,
+        "setup_ms": null,
+        "decision_confidence_all_steps": 0.97,
+        "jev_warm_ms_all_steps": 319,
+        "browser_per_action_ms_all_steps": 137
       },
       "status_counts": {
         "passed": 3
@@ -154,7 +249,39 @@
             0.37
           ],
           "stale_steps": 0,
-          "low_confidence_steps": 4
+          "low_confidence_steps": 4,
+          "jev_first_ms": 810,
+          "jev_warm_ms": 317,
+          "browser_per_action_ms": 156,
+          "step_jev_ms": [
+            810,
+            315,
+            335,
+            314,
+            355,
+            317,
+            370,
+            308
+          ],
+          "step_browser_ms": [
+            108,
+            107,
+            136,
+            176,
+            118,
+            460,
+            108,
+            108
+          ],
+          "action_browser_ms": [
+            136,
+            176,
+            118,
+            460
+          ],
+          "launch_ms": null,
+          "navigation_ms": null,
+          "setup_ms": null
         },
         {
           "out_dir": "runs/bench/smoke-login-badpw/20260922-083521-02",
@@ -180,7 +307,24 @@
             0.44
           ],
           "stale_steps": 0,
-          "low_confidence_steps": 3
+          "low_confidence_steps": 3,
+          "jev_first_ms": 751,
+          "jev_warm_ms": 312,
+          "browser_per_action_ms": null,
+          "step_jev_ms": [
+            751,
+            302,
+            322
+          ],
+          "step_browser_ms": [
+            105,
+            109,
+            null
+          ],
+          "action_browser_ms": [],
+          "launch_ms": null,
+          "navigation_ms": null,
+          "setup_ms": null
         },
         {
           "out_dir": "runs/bench/smoke-login-badpw/20260922-083521-03",
@@ -206,7 +350,24 @@
             0.39
           ],
           "stale_steps": 0,
-          "low_confidence_steps": 3
+          "low_confidence_steps": 3,
+          "jev_first_ms": 716,
+          "jev_warm_ms": 380.5,
+          "browser_per_action_ms": null,
+          "step_jev_ms": [
+            716,
+            300,
+            461
+          ],
+          "step_browser_ms": [
+            106,
+            111,
+            null
+          ],
+          "action_browser_ms": [],
+          "launch_ms": null,
+          "navigation_ms": null,
+          "setup_ms": null
         }
       ],
       "medians": {
@@ -222,7 +383,15 @@
         "decision_confidence": 0.44,
         "min_decision_confidence": 0.33,
         "stale_steps": 0,
-        "decision_confidence_all_steps": 0.435
+        "jev_first_ms": 751,
+        "jev_warm_ms": 317,
+        "browser_per_action_ms": 156,
+        "launch_ms": null,
+        "navigation_ms": null,
+        "setup_ms": null,
+        "decision_confidence_all_steps": 0.435,
+        "jev_warm_ms_all_steps": 317,
+        "browser_per_action_ms_all_steps": 156
       },
       "status_counts": {
         "budget_exhausted": 1,
@@ -232,5 +401,6 @@
       "stale_steps_total": 0,
       "passes": 0
     }
-  }
+  },
+  "backfilled": "2026-09-22: per-step latency and timing fields (jev_first_ms, jev_warm_ms, browser_per_action_ms, step_jev_ms, step_browser_ms, action_browser_ms, launch_ms, navigation_ms, setup_ms and the pooled *_all_steps medians) recomputed from the run traces by scripts/bench.py; every other field is as recorded"
 }

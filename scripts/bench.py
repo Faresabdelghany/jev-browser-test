@@ -6,8 +6,13 @@
 Each repeat is a fresh `run_test.py` subprocess (its own browser, its own Jev connection), so the
 numbers are what a user of the skill sees. Per run it records the subprocess wall-clock, the trace's
 `duration_ms`, Jev ms (sum of `latency_ms.jev`), browser ms (sum of `latency_ms.browser`), requests,
-tokens, decision confidence (median over the steps that carry one), status, outcome and stale steps.
-Per spec it reports the medians of those plus status, outcome and stale-step counts.
+tokens, decision confidence (median over the steps that carry one), status, outcome and stale steps,
+plus the per-step figures the README quotes: the first request's latency (`jev_first_ms`, the one that
+pays for the connection), the median warm request (`jev_warm_ms`, steps 2..n), the median browser time
+per executed action (`browser_per_action_ms`), and `trace.timing` (`launch_ms`, `navigation_ms`,
+`setup_ms`). The per-step lists (`step_jev_ms`, `step_browser_ms`, `step_confidences`) are kept so any
+of it can be recomputed. Per spec it reports the medians of those, medians pooled over all steps of all
+runs (`*_all_steps`), and status, outcome and stale-step counts.
 
 Every number quoted in the README or the references comes from this script's `--json` output; the
 before/after files live under docs/superpowers/measurements/.
@@ -29,7 +34,16 @@ RUN_TEST = os.path.join(HERE, "run_test.py")
 RUN_FIELDS = (
     "wall_ms", "duration_ms", "jev_ms", "browser_ms", "requests", "input_tokens", "output_tokens",
     "steps", "actions_executed", "decision_confidence", "min_decision_confidence", "stale_steps",
+    "jev_first_ms", "jev_warm_ms", "browser_per_action_ms", "launch_ms", "navigation_ms", "setup_ms",
 )
+# executed.action values that are not browser actions (the same rule run_test uses for actions_executed)
+NON_ACTIONS = (None, "STOP", "DONE", "AUTO_DONE", "BLOCKED")
+
+
+def is_action_step(step: dict) -> bool:
+    """True for a step whose action changed the browser: not a terminal marker, not a runner-inserted WAIT."""
+    ex = step.get("executed") or {}
+    return ex.get("action") not in NON_ACTIONS and not ex.get("reason")
 
 
 def _median(values: list) -> float | None:
@@ -45,13 +59,18 @@ def measure_trace(trace: dict) -> dict:
     steps = trace.get("steps") or []
     confs = [s["decision_confidence"] for s in steps if isinstance(s.get("decision_confidence"), (int, float))]
     usage = trace.get("usage") or {}
+    timing = trace.get("timing") or {}
+    step_jev = [(s.get("latency_ms") or {}).get("jev") for s in steps]
+    step_browser = [(s.get("latency_ms") or {}).get("browser") for s in steps]
+    warm = [v for v in step_jev[1:] if isinstance(v, (int, float))]
+    per_action = [(s.get("latency_ms") or {}).get("browser") for s in steps if is_action_step(s)]
     return {
         "status": trace.get("status"),
         "pass": bool(trace.get("pass")),
         "error": trace.get("error"),
         "duration_ms": trace.get("duration_ms"),
-        "jev_ms": sum(int((s.get("latency_ms") or {}).get("jev") or 0) for s in steps),
-        "browser_ms": sum(int((s.get("latency_ms") or {}).get("browser") or 0) for s in steps),
+        "jev_ms": sum(int(v or 0) for v in step_jev),
+        "browser_ms": sum(int(v or 0) for v in step_browser),
         "requests": usage.get("jev_requests"),
         "input_tokens": usage.get("input_tokens"),
         "output_tokens": usage.get("output_tokens"),
@@ -63,6 +82,16 @@ def measure_trace(trace: dict) -> dict:
         "step_confidences": confs,
         "stale_steps": sum(1 for s in steps if s.get("stale")),
         "low_confidence_steps": sum(1 for s in steps if s.get("low_confidence")),
+        # per-step latencies: the first request pays for the TCP + TLS handshake, the rest are "warm"
+        "jev_first_ms": step_jev[0] if step_jev and isinstance(step_jev[0], (int, float)) else None,
+        "jev_warm_ms": _median(warm),
+        "browser_per_action_ms": _median(per_action),
+        "step_jev_ms": step_jev,
+        "step_browser_ms": step_browser,
+        "action_browser_ms": per_action,
+        "launch_ms": timing.get("launch_ms"),
+        "navigation_ms": timing.get("navigation_ms"),
+        "setup_ms": timing.get("setup_ms"),
     }
 
 
@@ -90,8 +119,12 @@ def run_once(spec_path: str, out_dir: str, python: str, run_args: list[str]) -> 
 def aggregate(runs: list[dict]) -> dict:
     """Pure: medians and counts over the per-run records of one spec."""
     medians = {k: _median([r.get(k) for r in runs]) for k in RUN_FIELDS}
+    # Pooled over every step of every run (not a median of per-run medians): these are the per-request and
+    # per-action figures the README quotes.
     all_confs = [c for r in runs for c in (r.get("step_confidences") or [])]
     medians["decision_confidence_all_steps"] = _median(all_confs)
+    medians["jev_warm_ms_all_steps"] = _median([v for r in runs for v in (r.get("step_jev_ms") or [])[1:]])
+    medians["browser_per_action_ms_all_steps"] = _median([v for r in runs for v in (r.get("action_browser_ms") or [])])
     counts: dict = {}
     for r in runs:
         counts[str(r.get("status"))] = counts.get(str(r.get("status")), 0) + 1
@@ -137,6 +170,9 @@ def format_spec(spec_id: str, runs: list[dict], agg: dict) -> str:
     lines.append(f"    status: {agg['status_counts']}  outcomes: {agg['outcome_counts'] or '-'}  "
                  f"stale steps total: {agg['stale_steps_total']}  "
                  f"conf (all steps) median: {m['decision_confidence_all_steps']}")
+    lines.append(f"    per step, pooled over runs: first request {m['jev_first_ms']} ms, warm request "
+                 f"{m['jev_warm_ms_all_steps']} ms, browser per action {m['browser_per_action_ms_all_steps']} ms; "
+                 f"launch {m['launch_ms']} ms, navigation {m['navigation_ms']} ms")
     return "\n".join(lines)
 
 

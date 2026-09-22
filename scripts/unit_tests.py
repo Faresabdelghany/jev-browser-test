@@ -699,5 +699,66 @@ class ResolveTargetTests(unittest.TestCase):
         self.assertIsNone(resolve_target("WAIT", answers, self.obs, self.meta))
 
 
+class BenchTests(unittest.TestCase):
+    """bench.py's pure parts: the per-run record derived from a trace and the per-spec aggregate."""
+
+    TRACE = {
+        "status": "passed", "pass": True, "duration_ms": 5000, "actions_executed": 2,
+        "usage": {"jev_requests": 3, "input_tokens": 3000, "output_tokens": 300, "model": "jev-1"},
+        "timing": {"launch_ms": 150, "navigation_ms": 2000, "setup_ms": 0, "steps_ms": 2500, "final_ms": 30},
+        "steps": [
+            {"n": 1, "latency_ms": {"jev": 800, "browser": 600}, "decision_confidence": 0.9,
+             "executed": {"action": "TYPE_TEXT", "ok": True}},
+            {"n": 2, "latency_ms": {"jev": 300, "browser": 110}, "decision_confidence": 0.4, "low_confidence": True,
+             "executed": {"action": "WAIT", "ok": True, "reason": "low confidence; CLICK not executed"}},
+            {"n": 3, "latency_ms": {"jev": 320, "browser": 140}, "decision_confidence": 0.95, "stale": "target [1] changed: value",
+             "executed": {"action": "WAIT", "ok": True, "reason": "page changed during the decision"}},
+            {"n": 4, "latency_ms": {"jev": 310, "browser": 200}, "decision_confidence": 0.85,
+             "executed": {"action": "CLICK", "ok": True}},
+            {"n": 5, "latency_ms": {"jev": 290}, "executed": {"action": "AUTO_DONE", "ok": True}},
+        ],
+    }
+
+    def test_measure_trace_per_step_fields(self) -> None:
+        from bench import measure_trace
+        m = measure_trace(self.TRACE)
+        self.assertEqual((m["status"], m["pass"], m["duration_ms"], m["requests"], m["input_tokens"]), ("passed", True, 5000, 3, 3000))
+        self.assertEqual((m["jev_ms"], m["browser_ms"], m["steps"], m["actions_executed"]), (2020, 1050, 5, 2))
+        self.assertEqual((m["decision_confidence"], m["min_decision_confidence"]), (0.875, 0.4))
+        self.assertEqual((m["stale_steps"], m["low_confidence_steps"]), (1, 1))
+        self.assertEqual(m["jev_first_ms"], 800)                      # the request that pays for the handshake
+        self.assertEqual(m["jev_warm_ms"], 305)                       # median of 300, 320, 310, 290
+        self.assertEqual(m["browser_per_action_ms"], 400)             # median of 600 and 200: WAITs are not actions
+        self.assertEqual(m["action_browser_ms"], [600, 200])
+        self.assertEqual(m["step_jev_ms"], [800, 300, 320, 310, 290])
+        self.assertEqual(m["step_browser_ms"], [600, 110, 140, 200, None])
+        self.assertEqual((m["launch_ms"], m["navigation_ms"], m["setup_ms"]), (150, 2000, 0))
+
+    def test_measure_trace_tolerates_an_empty_trace(self) -> None:
+        from bench import measure_trace
+        m = measure_trace({"status": "error", "error": "boom"})
+        self.assertEqual((m["status"], m["pass"], m["jev_ms"], m["browser_ms"], m["steps"]), ("error", False, 0, 0, 0))
+        for k in ("decision_confidence", "jev_first_ms", "jev_warm_ms", "browser_per_action_ms", "launch_ms"):
+            self.assertIsNone(m[k], k)
+
+    def test_aggregate_pools_steps_across_runs(self) -> None:
+        from bench import RUN_FIELDS, aggregate, measure_trace
+        r1 = dict(measure_trace(self.TRACE), wall_ms=5200, outcome="logged_in")
+        other = json.loads(json.dumps(self.TRACE))
+        other["status"], other["pass"] = "blocked", False
+        other["steps"][3]["latency_ms"]["browser"] = 1000
+        r2 = dict(measure_trace(other), wall_ms=6000, outcome="undetermined")
+        agg = aggregate([r1, r2])
+        self.assertEqual(set(RUN_FIELDS) | {"decision_confidence_all_steps", "jev_warm_ms_all_steps", "browser_per_action_ms_all_steps"},
+                         set(agg["medians"]))
+        self.assertEqual(agg["medians"]["wall_ms"], 5600)
+        self.assertEqual(agg["medians"]["jev_warm_ms_all_steps"], 305)          # 8 warm requests pooled
+        self.assertEqual(agg["medians"]["browser_per_action_ms_all_steps"], 600)  # 600, 200, 600, 1000 pooled
+        self.assertEqual(agg["medians"]["browser_per_action_ms"], 600)           # median of per-run medians 400 and 800
+        self.assertEqual(agg["status_counts"], {"passed": 1, "blocked": 1})
+        self.assertEqual(agg["outcome_counts"], {"logged_in": 1, "undetermined": 1})
+        self.assertEqual((agg["passes"], agg["stale_steps_total"]), (1, 2))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
