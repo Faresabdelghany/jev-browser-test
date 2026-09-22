@@ -498,3 +498,36 @@ the last row takes them out to show the runner's own time.
   against 2 questions' 313 ms: the ~300 ms is the API's floor from this machine, and the number of questions per
   request is free, as the docs say. The stdlib client stays; the levers are round trips and waiting.
 - Decisions and evidence lines are the same in all fifteen runs of each spec; confidence 0.95–0.96 / 0.92 / 0.96.
+
+## The examples suite after the speed levers (2026-09-22): the ten specs at `0a8727c`
+
+`2026-09-22-examples-suite-after-speed.json` / `.md`: `run_suite.py specs/examples/*.json --repeat 3 --workers 2`
+from a clean export of `0a8727c`. Against the previous suite at `188e50e`:
+
+| spec | verdict | requests | input tokens a run | evidence line |
+|---|---|---|---|---|
+| `shop-checkout` | pass → **pass** | 11 → 10 | 26,523 → 24,392 | "Checkout: Complete!" 3/3 |
+| `shop-add-second-item` | pass → **pass** | 5 → 4 | 12,193 → 10,312 | "Sauce Labs Bike Light" 3/3 |
+| `shop-checkout-problem-account` | bug → **bug** | 9 → 9 | 22,740 → 22,740 | "Error: Last Name is required" 3/3 |
+| `shop-checkout-error-account` | undetermined (suggested bug 3) → **expected 3/3** (the same undetermined/blocked/`control_had_no_effect`, now declared in `expect`) | 10 → 10 | 25,660 → 25,660 | none 3/3 |
+| `wiki-search` | pass → **pass** | 5 → 4 | 43,990 → 34,470 (−22%) | "Playwright (software)" 3/3 |
+| `todo-add-filter` | pass → **pass** | 9 → 8 | 17,469 → 15,120 | "1 item left" 3/3 |
+| `load-wait` | pass → **pass** | 8 → 7 | 8,059 → 6,949 | "Hello World!" 3/3 |
+| `notify-random` | flaky (bug 2, pass 1) → **flaky (pass 2, bug 1)** | 3 → 3 | 2,692 → 2,663 | "Action successful" 2/3; "Action unsuccesful, please try again" 1/3 |
+| `modal-close` | pass → **pass** | 5 → 4 | 4,572 → 3,506 | "If closed, it will not appear on subsequent page loads." 3/3 |
+| `menu-random` | flaky (pass 1, bug 2) → **flaky (pass 1, bug 2)** | 2 → 2 | 1,893 → 1,893 | none 3/3 |
+
+- **Every pass is confirmed by its assertions** on the sighting page (`confirmed_by: assertions` 21/21 pass runs):
+  the confirmation step is gone, so six specs need one request fewer (205 → 183 requests in all) and the
+  encyclopedia spec, whose confirmation observation carried a 40k-token page, saves 22% of its tokens.
+- **`shop-checkout-error-account` reads `expected`**: the same blocked ending as before, now declared in the spec's
+  `expect`, so the suite is green on it and would go red if the Finish button started working. A first attempt put
+  the explanation of `expect` into the spec's `notes`; Jev read it as a hint about the page and its confidence in
+  BLOCKED after the dead click fell from 0.85 to 0.3–0.4 (the run ended `low_confidence` 3/3, `suite-7b93b47` in
+  the scratchpad, not kept). The sentence moved to the human-only `comment` field and the ending came back 3/3.
+- **`notify-random`** asserts `text_in {"selector": "#flash", "contains": "Action successful"}` instead of a
+  page-wide `text_contains` that the page's own paragraph made true on every load (found by the skill eval); the
+  two pass runs confirm through it, the failing run quotes the page's own "unsuccesful".
+- **Wall-clock is not a measurement in this file**: three eval subagents were starting on the same machine while
+  the suite ran (122 s against 94 s for the same suite at `7b93b47` an hour earlier); the request and token
+  counts, verdicts, confidence and evidence lines are the comparison.

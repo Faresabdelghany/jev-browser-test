@@ -97,22 +97,22 @@ format, rubric and runner design.
 ## Examples
 
 `specs/examples/` holds ten specs against public sites: the nine the real-application trial ran
-(`docs/superpowers/plans/2026-09-22-handoff-after-real-app.md`) and one more. Their suite run at `b3996fa`, 3
-repeats each, is `docs/superpowers/measurements/2026-09-22-examples-suite.md` (97 s on 2 workers, 205 Jev
-requests in all).
+(`docs/superpowers/plans/2026-09-22-handoff-after-real-app.md`) and one more. Their latest suite run, at `0a8727c`
+with 3 repeats each on 2 workers, is `docs/superpowers/measurements/2026-09-22-examples-suite-after-speed.md`
+(183 Jev requests in all, was 205 at `188e50e`; every pass confirmed by its assertions).
 
-| spec | site | flow | it exercises | at `b3996fa`, 3 repeats |
+| spec | site | flow | it exercises | at `0a8727c`, 3 repeats |
 |---|---|---|---|---|
-| `shop-checkout` | saucedemo.com, `standard_user` | login in `setup`, add a named product from six cards with identical "Add to cart" buttons, cart, a three-field form, overview, finish | identical labels told apart by their card, a multi-page path, three `data` values | pass 3/3, 11 requests |
-| `shop-add-second-item` | saucedemo.com | add the second card's product, open the cart | a wrong pick shows up as an outcome; the product name is the evidence line | pass 3/3 |
+| `shop-checkout` | saucedemo.com, `standard_user` | login in `setup`, add a named product from six cards with identical "Add to cart" buttons, cart, a three-field form, overview, finish | identical labels told apart by their card, a multi-page path, three `data` values | pass 3/3, 10 requests, "Checkout: Complete!" |
+| `shop-add-second-item` | saucedemo.com | add the second card's product, open the cart | a wrong pick shows up as an outcome; the product name is the evidence line | pass 3/3, 4 requests |
 | `shop-checkout-problem-account` | saucedemo.com, `problem_user` | the checkout with the account the site documents as broken: a form field drops its input | a declared `bug` outcome with the app's own error as its evidence line | bug 3/3, "Error: Last Name is required" |
-| `shop-checkout-error-account` | saucedemo.com, `error_user` | the checkout with the account whose Finish button does nothing | `stuck_reason: control_had_no_effect` after a no-op click, then BLOCKED with a suggested verdict | undetermined 3/3, suggested bug 3/3 |
-| `wiki-search` | en.wikipedia.org | type a term into the search box, the suggestions open, reach the article | a real autocomplete (`settle` ends on `options`), a very long page | pass 3/3, 47,872 input tokens a run |
-| `todo-add-filter` | demo.playwright.dev/todomvc | add two todos, complete one, open the Active filter | TYPE_TEXT then PRESS_ENTER, two values into one field, hidden checkboxes under styled boxes, hash routing, a two-sentence outcome statement | pass 3/3, "1 item left" |
-| `load-wait` | the-internet.herokuapp.com/dynamic_loading/1 | press Start, a loader runs for 5 s, a text appears | Jev choosing WAIT on a page with a timer (6 WAITs, 10 requests) | pass 3/3 |
-| `notify-random` | the-internet.herokuapp.com/notification_message_rendered | click once; the notification is a random success or a random failure | the computed `flaky` verdict, each run keeping its own declared verdict | flaky (bug 2, pass 1) |
-| `modal-close` | the-internet.herokuapp.com/entry_ad | close the modal that opens on load | an overlay that hides the page; an absence as the pass statement | pass 3/3 |
-| `menu-random` | the-internet.herokuapp.com/disappearing_elements | nothing to click: is every menu entry listed? | an outcome decided on the start page (one step, two requests); an entry the page drops at random | bug 3/3 (the entry was missing on every load) |
+| `shop-checkout-error-account` | saucedemo.com, `error_user` | the checkout with the account whose Finish button does nothing | `stuck_reason: control_had_no_effect` after a no-op click (flag `NO-EFFECT`), then BLOCKED with a suggested verdict; an **`expect`** spec: the documented breakage is its declared result | **expected** 3/3 (undetermined/blocked/control_had_no_effect, as declared), 10 requests |
+| `wiki-search` | en.wikipedia.org | type a term into the search box, the suggestions open, reach the article | a real autocomplete (`settle` ends on `options`), a very long page | pass 3/3, 4 requests, 34,470 input tokens a run |
+| `todo-add-filter` | demo.playwright.dev/todomvc | add two todos, complete one, open the Active filter | TYPE_TEXT then PRESS_ENTER, two values into one field, hidden checkboxes under styled boxes, hash routing, a two-sentence outcome statement | pass 3/3, 8 requests, "1 item left" |
+| `load-wait` | the-internet.herokuapp.com/dynamic_loading/1 | press Start, a loader runs for 5 s, a text appears | Jev choosing WAIT on a page with a timer; each WAIT ends the moment the page changes | pass 3/3, 7 requests, "Hello World!" |
+| `notify-random` | the-internet.herokuapp.com/notification_message_rendered | click once; the notification is a random success or a random failure | the computed `flaky` verdict, each run keeping its own declared verdict; `text_in` on the notification element (`#flash`), because the page's own copy contains both messages and a page-wide `text_contains` could never fail | flaky (pass 2, bug 1), 3 requests |
+| `modal-close` | the-internet.herokuapp.com/entry_ad | close the modal that opens on load | an overlay that hides the page; an absence as the pass statement | pass 3/3, 4 requests |
+| `menu-random` | the-internet.herokuapp.com/disappearing_elements | nothing to click: is every menu entry listed? | an outcome decided on the start page (one step, two requests); an entry the page drops at random | flaky (bug 2, pass 1) |
 
 The shop specs' credentials are the demo accounts the site prints on its own login page. Run them all with
 `scripts/run_suite.py specs/examples/*.json --repeat 3 --workers 2`, one with `scripts/run_test.py
