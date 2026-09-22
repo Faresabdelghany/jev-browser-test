@@ -2,6 +2,7 @@
   "id": "notify-random",
   "start_url": "https://the-internet.herokuapp.com/notification_message_rendered",
   "goal": "Click the 'Click here' link once, so that a notification message about the action appears at the top of the page.",
+  "comment": "The failure message is declared `bug` on purpose, to show the computed `flaky` verdict on a page that is random by design. For a real smoke check of this page make both messages `pass` outcomes (the page guarantees a notification, not which one) and keep `text_in` on #flash; see SKILL.md, Suites.",
   "checks": {
     "notification": "A notification message is shown above the heading"
   },

@@ -433,8 +433,12 @@ def load_spec(path: str) -> dict:
 
 
 def main(argv: list[str]) -> int:
+    if len(argv) == 2 and argv[1] in ("-h", "--help"):
+        print("usage: python scripts/spec.py path/to/spec.json\n\nValidates a spec without opening a browser: exit 0 and a summary when it is "
+              "valid, exit 1 with the list of problems otherwise. The format is documented in references/spec-format.md.")
+        return 0
     if len(argv) != 2:
-        print("usage: python scripts/spec.py path/to/spec.json")
+        print("usage: python scripts/spec.py path/to/spec.json", file=sys.stderr)
         return 2
     load_dotenv()
     try:

@@ -12,7 +12,7 @@
         "Evidence names the actual first item after sorting (Sauce Labs Backpack, $29.99) and the expected one (Sauce Labs Onesie, $7.99)",
         "A screenshot of the list after choosing Price (low to high) is saved in outputs and referenced by the report",
         "The flow really ran in a browser as problem_user: a run artifact (trace, log or result file) shows the login and the sort action",
-        "A rerunnable regression test is left in outputs as a goal-level spec: it names the goal in plain language and declares the endings it accepts (a pass and a bug outcome with the page's own wording), with no CSS or XPath selector outside a scripted login setup",
+        "A rerunnable regression test is left in outputs as a goal-level spec: it names the goal in plain language and declares the endings it accepts (a pass and a bug outcome with the page's own wording); CSS or XPath selectors drive nothing in the flow and appear only in the scripted login setup and in the code assertions on the final page",
         "The regression test's passing condition is the correct order (Onesie / $7.99 first), so it fails today and passes once fixed, and the report gives the exact command to rerun it",
         "The report quotes at least one line of the page's own text as evidence (an evidence line copied verbatim, such as the dropdown's text or the first product's name), not only a paraphrase",
         "Login is done deterministically (scripted setup), not delegated to the AI decision step, and the demo password appears nowhere but the setup step",
@@ -63,6 +63,6 @@
     }
   ],
   "iteration_notes": {
-    "2": "Assertions reworked after iteration 1: the two verdict-label checks that alone separated the arms are kept but joined by checks on what the skill promises (a goal-level selector-free spec, a verbatim evidence line, bounded runs, flake signals from the trace, no source archaeology). Prompts unchanged so iteration-1 outputs can be re-graded as the baseline."
+    "2": "Assertions reworked after iteration 1: the two verdict-label checks that alone separated the arms are kept but joined by checks on what the skill promises (a goal-level selector-free spec, a verbatim evidence line, bounded runs, flake signals from the trace, no source archaeology). Prompts unchanged so iteration-1 outputs can be re-graded as the baseline. Assertion 5 of the ticket eval reworded before grading iteration 2 (both arms): selectors in the code assertions (text_in) are allowed; only the flow must be selector-free."
   }
 }

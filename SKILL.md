@@ -108,6 +108,8 @@ python $SKILL/scripts/summarize_trace.py runs/<id>/<ts>/trace.json --step 7   # 
 `result.json` first: `outcome`, `verdict`, `evidence.line` (the page's own words, chosen by Jev and copied
 verbatim), `confirmed_by` (`assertions` or `recheck`), `path_confidence`, `assertions`, `story`, and for
 `undetermined` the `reason` with its typed cause and `suggested_verdict`; `expected` for a spec with `expect`.
+`confirmed_by: recheck` on a spec that has assertions means the pass was not yet in sight when Jev chose DONE
+(the outcome read below 0.8), so the runner took the checking step and saw it there: correct, one request more.
 Open the step table only for `undetermined` or a surprising outcome. Flags worth knowing: `NO-EFFECT` (an
 action landed and the page did not change: the classic dead control; the next step's picture shows it),
 `DEFERRED:<outcome>` (true before any action, not counted), `LOW-CONF`, `STALE`, `EVIDENCE-ASKED`. With the
@@ -145,7 +147,10 @@ an outcome anchored on better text. **NEEDS_HUMAN**: stop and ask the specific q
 Write the spec from the ticket: the reproduction steps as the **goal**, the acceptance criteria as the **`pass`
 outcome** (in the app's own words) with the exact expectations in **`assert`**, the reported wrong behaviour as
 the **`bug` outcome** (with `requires_action` when it describes a missing effect). A bug ticket's spec comes back
-**BUG before the fix and PASS after**, and stays in `specs/` as the regression test. Say how to rerun it.
+**BUG before the fix and PASS after**, and stays in `specs/` as the regression test. Say how to rerun it. Two
+habits make the first run the evidence run: `--screenshots all` (a ticket wants the picture of every step, and a
+rerun for pictures is a wasted run), and a **control** with a known-good account or the flow's healthy sibling,
+which shows in one run that the spec is sound and the defect is the app's.
 
 ## Triage-only mode
 
@@ -178,7 +183,9 @@ When a suite reads `flaky`, say which kind: **environment** (load timeouts, stal
 that varies by design** (every run a confident declared outcome, different evidence lines: a random notification,
 an A/B page). The second is not noise to retry away: if the spec asserts one ending of a legitimate variation, fix
 the spec (`text_in` on the element accepting either message, or an either/or pass outcome); if the product's
-contract forbids the variation, it is a BUG with a measured rate.
+contract forbids the variation, it is a BUG with a measured rate. Before spending browser runs on a page you
+suspect is random, sample it without a browser: a loop of plain HTTP requests to the link's target shows a
+server-side coin flip in seconds and costs the demo host nothing.
 
 For a human reader (a PR, a ticket), `python $SKILL/scripts/report.py runs/<id>/<ts>` writes a self-contained
 `report.html` beside the trace (step table, probabilities, checks, screenshots inline); given a suite directory
@@ -212,6 +219,8 @@ request change nothing), so what *you* control is the number of round trips and 
 | An assertion on a message passes on every load | `text_contains` searches the whole page and the page's copy mentions the words. Use `text_in` with the element's selector |
 | The outcome that came back does not match what the screenshot shows | The spec mislabelled it: fix that outcome's `when` or `verdict`, rerun, say so |
 | Two outcomes hover at 0.4–0.5 while the page clearly shows one | Both `when`s are true of that page; reword them with a string unique to each |
+| A pass outcome hovers at 0.7–0.85 although the page plainly shows it | The page's copy repeats the same words elsewhere (an example sentence, a menu). Anchor the `when` on the element as well as the text ("the blue bar above the heading reads …"), and put the exact text in a `text_in` assertion |
+| A "first item / top of the list" statement reads 0.6 when it is plainly true | Positional facts are soft for Jev; state them in `assert` (`text_in` on the first item's selector, `text_order`) and keep the outcome `when` on what the page says |
 | `evidence.line` is null although the outcome is right | The `when` mixes several facts or history in one sentence. One plain page fact per sentence, history in its own sentence; an absence has no line to quote, `evidence.present` is its evidence |
 | `low_confidence` with `type_value` split between two keys | Rename `data` keys to the field labels the app shows |
 | `low_confidence` over several elements with the same label | The observer names them by their card or row; if the table still shows bare duplicates, say which one in `notes` ("the third Add to cart") or script that click in `setup` |

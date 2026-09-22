@@ -14,7 +14,8 @@ evidence, the file Claude reads first. The trace is the *evidence* behind it; th
   "note": "the wrong password is deliberate: ...",             // the outcome's note, copied for Claude
   "probability": 0.91, "confidence": 0.88,                      // the outcome Choice at the step it was seen (null for a checks-only outcome's confidence)
   "seen_at_step": 5, "first_seen_at_step": 4, "confirmed": true, // first_seen: the sighting; seen_at: the confirming step for a pass (the same step for other verdicts)
-  "confirmed_by": "recheck",                                    // "assertions": every assertion held on the sighting page (spec.confirm "assert"); "recheck": a settle, a second observation and Jev again; null unless confirmed
+  "confirmed_by": "recheck",                                    // "assertions": every assertion held on the sighting page (spec.confirm "assert"); "recheck": a settle, a second observation and Jev again
+                                                                //   (also when Jev chose DONE before the pass was in sight, so the sighting happened on the checking step); null unless confirmed
   "path_confidence": 0.89,                                      // the weakest executed decision on the way: report the least certain judgment
   "reason": null,                                               // for undetermined: see below
   "evidence": { "line": "Your password is invalid!",            // the page line Jev selected in the adjudication request (verbatim), or null

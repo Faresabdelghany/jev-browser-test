@@ -218,6 +218,9 @@ Checks are Noul questions: Jev returns the probability that the statement is tru
   footer says '1 item left'") is what gets quoted, even beside a longer clause; "the list shows X, with Y
   in the footer" as one clause often gets no line at all. An absence ("no modal covers the page") has no
   line to quote; `evidence.present` is its evidence.
+- Positional facts ("the first product is X", "Y comes before Z") are soft as Noul checks (a plainly true "Backpack
+  is first" read 0.65 on a live run) and exact as code: put them in `assert` with `text_in` on the first item's
+  selector or `text_order`, and let the outcome `when` name what the page says.
 - Name `data` keys after the field labels the app shows. Jev picks a key per field; `username`/`password`
   for fields labelled Username/Password is unambiguous, `user`/`pw` is a coin flip it will refuse to call.
 - Check names are identifiers (`cart_has_item`), not sentences, and must not be one of the reserved question

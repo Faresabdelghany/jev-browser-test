@@ -15,6 +15,7 @@ import sys
 
 # executed.action values that are not browser actions: terminal markers. Runner-inserted WAITs carry a `reason`.
 NON_ACTIONS = (None, "STOP", "DONE", "AUTO_DONE", "BLOCKED")
+NO_EFFECT_ACTIONS = ("CLICK", "TYPE_TEXT", "SELECT", "PRESS_ENTER")  # the same set run_test flags; older traces lack `no_effect`
 
 
 def is_action_step(step: dict) -> bool:
@@ -74,8 +75,8 @@ def _flags(step: dict) -> str:
         f.append("UNCONFIRMED:" + step["outcome_unconfirmed"])
     if step.get("assertions") and not all(a.get("ok") for a in step["assertions"]):
         f.append("ASSERT-FAILED")
-    if step.get("no_effect"):
-        f.append("NO-EFFECT")  # the action landed and the page Jev sees did not change (a dead control?)
+    if step.get("no_effect") or (step.get("page_changed") is False and ex.get("action") in NO_EFFECT_ACTIONS and ex.get("ok")):
+        f.append("NO-EFFECT")  # the action landed and the page Jev sees did not change (a dead control?); derived for older traces
     if step.get("outcome_deferred"):
         f.append("DEFERRED:" + ",".join(step["outcome_deferred"]))  # true of the page, but no action was taken yet (requires_action)
     if step.get("adjudication_merged"):

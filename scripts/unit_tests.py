@@ -1519,6 +1519,10 @@ class SummarizeTests(unittest.TestCase):
     def test_new_flags(self) -> None:
         from summarize_trace import _flags
         self.assertEqual(_flags({"no_effect": True, "executed": {"action": "CLICK", "ok": True}}), "NO-EFFECT")
+        # a trace written before the field existed: derived from page_changed false on an executed action
+        self.assertEqual(_flags({"page_changed": False, "executed": {"action": "CLICK", "ok": True}}), "NO-EFFECT")
+        self.assertEqual(_flags({"page_changed": False, "executed": {"action": "WAIT", "ok": True}}), "")
+        self.assertEqual(_flags({"page_changed": True, "executed": {"action": "CLICK", "ok": True}}), "")
         self.assertEqual(_flags({"outcome_deferred": ["unchanged"]}), "DEFERRED:unchanged")
         self.assertEqual(_flags({"adjudication_merged": True}), "EVIDENCE-ASKED")
         self.assertEqual(_flags({}), "")

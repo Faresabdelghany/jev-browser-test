@@ -12,7 +12,7 @@ runs are independent and the pool only bounds how many browsers are open at once
     outcome), medians (wall, Jev ms, browser ms, requests, input tokens, decision confidence), and a
     **suite verdict**: unanimous -> that outcome's verdict (or `undetermined` when every run was
     undetermined); any disagreement -> `flaky`, with the distribution. Flaky is computed, not diagnosed.
-  * for the suite: `all_pass` (every spec unanimously ended in a pass outcome) and the elapsed time.
+  * for the suite (`suite.all_pass`, `suite.verdicts`, `suite.flaky`, ...): all_pass iff every spec is `pass` or `expected`; and the elapsed time.
 
 A run that wrote no `trace.json` at all is an **environment failure**, not an outcome: the runner exited 2
 (a spec or environment problem: missing key, unreachable browser), could not be launched, or was killed
@@ -196,7 +196,7 @@ def aggregate_spec(runs: list[dict]) -> dict:
 
 
 def suite_verdict(specs: dict) -> dict:
-    """Pure: the whole suite. all_pass iff every spec is unanimously pass; environment failures counted per spec."""
+    """Pure: the whole suite. all_pass iff every spec's verdict is pass or expected; environment failures counted per spec."""
     verdicts = {sid: s["verdict"] for sid, s in specs.items()}
     all_pass = bool(specs) and all(v in GREEN for v in verdicts.values())
     flaky = sorted(sid for sid, v in verdicts.items() if v == FLAKY)
