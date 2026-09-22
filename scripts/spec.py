@@ -34,10 +34,16 @@ def is_reserved_question(name: str) -> bool:
 OUTCOME_NONE = "none_yet"  # the outcome Choice's "nothing listed is visible yet" option; not a valid outcome name
 UNDETERMINED = "undetermined"  # result.outcome when the run ended in no declared outcome
 VERDICTS = ("pass", "bug", "test_issue", "needs_human")
+# every status a run can end in (run_test.TERMINAL_STATUSES has the meanings); `expect.status` is validated against it
+STATUSES = ("passed", "outcome", "assert_failed", "done_unverified", "blocked", "never_violated", "stuck", "low_confidence",
+            "budget_exhausted", "unstable_page", "error")
+EXPECT_FIELDS = ("outcome", "status", "verdict", "blocked_reason", "stuck_reason", "suggested_verdict")
 ASSERTIONS = {
     "url_matches": str,       # Playwright's URL glob over the final URL: ** any chars, * any chars but /, {a,b} either
     "text_contains": str,     # substring of the final page's visible text (body.innerText)
-    "field_value": dict,      # {"label": ..., "equals": ...}: a text field / select found by its label
+    "text_in": dict,          # {"selector": css, "contains" | "equals": ...}: text inside the matched element(s) only
+    "text_order": list,       # strings that must appear in the page text in this order (a sorted list, a menu)
+    "field_value": dict,      # {"label": ..., "equals": ...}: a text field / select found by its accessible name
     "element_present": dict,  # {"role": ..., "name"?: ...} in the final element table
     "element_absent": dict,   # the same shape, must not be there
 }
@@ -81,6 +87,7 @@ DEFAULTS = {
         "settle_ms": 400,   # cap on the event-based settle after every action
         "quiet_ms": 100,    # the DOM must stay unchanged this long (and 2 animation frames) before observing
         "action_timeout_ms": 8000,
+        "navigation_timeout_ms": 30000,  # the start URL and setup `goto`s: a slow shared host is not a flow outcome
         "storage_state": None,
         "channel": None,
         "cdp_url": None,    # attach to a running browser (Chrome started with --remote-debugging-port) instead of launching
@@ -207,6 +214,8 @@ def validate(spec: dict) -> list[str]:
             errors.append(f"outcome '{name}' needs a 'when' statement and/or 'requires' checks")
         if "note" in o and not isinstance(o["note"], str):
             errors.append(f"outcome '{name}': 'note' must be a string")
+        if "requires_action" in o and not isinstance(o["requires_action"], bool):
+            errors.append(f"outcome '{name}': 'requires_action' must be true or false")
     has_pass_outcome = any(isinstance(o, dict) and o.get("verdict") == "pass" for o in outcomes.values())
     if outcomes and not has_pass_outcome:
         errors.append("'outcomes' must declare an outcome with verdict \"pass\" (done_when / never are shorthand for "
@@ -230,6 +239,13 @@ def validate(spec: dict) -> list[str]:
             errors.append(f"assert[{i}] ({kind}): expected a {ASSERTIONS[kind].__name__}")
         elif kind == "field_value" and not (isinstance(arg.get("label"), str) and isinstance(arg.get("equals"), str)):
             errors.append(f"assert[{i}] (field_value): needs 'label' and 'equals' strings")
+        elif kind == "text_in" and not (isinstance(arg.get("selector"), str) and arg["selector"].strip()
+                                        and ("contains" in arg) != ("equals" in arg)
+                                        and isinstance(arg.get("contains", arg.get("equals")), str)
+                                        and arg.get("contains", arg.get("equals")).strip()):
+            errors.append(f"assert[{i}] (text_in): needs a 'selector' string and exactly one of 'contains' / 'equals' (a non-empty string)")
+        elif kind == "text_order" and not (len(arg) >= 2 and all(isinstance(t, str) and t.strip() for t in arg)):
+            errors.append(f"assert[{i}] (text_order): needs a list of at least two non-empty strings, in the order they must appear")
         elif kind in ("element_present", "element_absent") and not (
             isinstance(arg.get("role"), str) and arg["role"] and isinstance(arg.get("name", ""), str)
         ):
@@ -279,6 +295,9 @@ def validate(spec: dict) -> list[str]:
     at = br.get("action_timeout_ms", 1)
     if not (isinstance(at, int) and not isinstance(at, bool) and at >= 1):
         errors.append("'browser.action_timeout_ms' must be an integer number of milliseconds >= 1")
+    nt = br.get("navigation_timeout_ms", 1)
+    if not (isinstance(nt, int) and not isinstance(nt, bool) and nt >= 1):
+        errors.append("'browser.navigation_timeout_ms' must be an integer number of milliseconds >= 1")
     settle_ms, quiet_ms = br.get("settle_ms", 0), br.get("quiet_ms", 0)
     if not (isinstance(settle_ms, int) and not isinstance(settle_ms, bool) and 0 <= settle_ms <= 10000):
         errors.append("'browser.settle_ms' must be an integer between 0 and 10000 (the cap on the post-action settle)")
@@ -309,7 +328,39 @@ def validate(spec: dict) -> list[str]:
     for k in ("auto_done", "fail_fast", "rules"):
         if not isinstance(spec.get(k, False), bool):
             errors.append(f"'{k}' must be true or false")
+    expect = spec.get("expect")
+    if expect is not None:
+        if not isinstance(expect, dict) or not expect:
+            errors.append(f"'expect' must be a non-empty object with some of {list(EXPECT_FIELDS)} (the result this spec is expected to end in)")
+        else:
+            for k, v in expect.items():
+                if k not in EXPECT_FIELDS:
+                    errors.append(f"'expect.{k}' is not a result field; use {list(EXPECT_FIELDS)}")
+                elif k == "verdict" and v is not None and v not in VERDICTS:
+                    errors.append(f"'expect.verdict' must be one of {list(VERDICTS)} or null")
+                elif k != "verdict" and not isinstance(v, str):
+                    errors.append(f"'expect.{k}' must be a string")
+            if isinstance(expect.get("status"), str) and expect["status"] not in STATUSES:
+                errors.append(f"'expect.status' must be one of {list(STATUSES)}")
+            declared = set(outcomes) | {UNDETERMINED} if outcomes else None
+            if declared is not None and isinstance(expect.get("outcome"), str) and expect["outcome"] not in declared:
+                errors.append(f"'expect.outcome' must be a declared outcome or '{UNDETERMINED}', got '{expect['outcome']}'")
     return errors
+
+
+def match_expect(result: dict, expect: dict) -> dict:
+    """Pure: does a run's result.json match the spec's `expect`? An expected-red spec (a documented breakage, a
+    demo account that is broken by design) is green when the result is the one declared, so it can sit in a suite
+    gate and go red only when the behaviour changes. Compares the fields named in `expect` (`outcome`, `status`,
+    `verdict`, `blocked_reason`, `stuck_reason`, `suggested_verdict`) against the result; returns {expect, actual,
+    matched, mismatches} with the actual values of the compared fields."""
+    reason = result.get("reason") or {}
+    actual_all = {"outcome": result.get("outcome"), "status": result.get("status"), "verdict": result.get("verdict"),
+                  "blocked_reason": reason.get("blocked_reason"), "stuck_reason": reason.get("stuck_reason"),
+                  "suggested_verdict": reason.get("suggested_verdict")}
+    actual = {k: actual_all.get(k) for k in expect}
+    mismatches = {k: actual_all.get(k) for k, v in expect.items() if actual_all.get(k) != v}
+    return {"expect": dict(expect), "actual": actual, "matched": not mismatches, "mismatches": mismatches}
 
 
 def spec_warnings(spec: dict) -> list[str]:

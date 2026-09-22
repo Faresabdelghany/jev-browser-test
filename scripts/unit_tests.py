@@ -158,6 +158,20 @@ class JevClientTests(unittest.TestCase):
         self.assertEqual(self.server.connections, 2)
         self.assertEqual(self.server.requests, 3)
 
+    def test_warm_up_opens_the_connection_before_the_first_call(self) -> None:
+        c = self.client
+        c.warm_up()
+        c.warm_up()  # idempotent while a warm-up is in flight or done
+        if c._warm:
+            c._warm.join(timeout=5)
+        self.assertIsNotNone(c._conn)  # the socket is open before any request (the fake server counts connections on the first request)
+        self.assertIsInstance(c.connect_ms, int)
+        self.call()
+        self.call()
+        self.assertEqual(self.server.connections, 1)  # the warmed socket carried both requests
+        c.close()
+        self.assertIsNone(c._conn)
+
     def test_request_shape(self) -> None:
         self.call()
         seen = self.server.seen[0]
@@ -616,6 +630,87 @@ class SpecValidationTests(unittest.TestCase):
         self.assertTrue(any("settle_ms" in p for p in self.problems(browser={"settle_ms": 20000})))
         self.assertTrue(any("settle_ms" in p for p in self.problems(browser={"settle_ms": "400"})))
         self.assertTrue(any("quiet_ms" in p for p in self.problems(browser={"quiet_ms": -1})))
+
+
+class NewSpecFieldsTests(unittest.TestCase):
+    def _spec(self, **over) -> dict:
+        from spec import DEFAULTS, _merge
+        base = {"id": "t", "start_url": "http://x/", "goal": "do the thing so that it is done",
+                "outcomes": {"ok": {"when": "The page says done", "verdict": "pass"},
+                             "bad": {"when": "The page shows an error", "verdict": "bug"}}}
+        base.update(over)
+        return _merge(DEFAULTS, base)
+
+    def test_text_in_and_text_order_shapes(self) -> None:
+        from spec import validate
+        self.assertEqual(validate(self._spec(**{"assert": [{"text_in": {"selector": "#flash", "contains": "Action successful"}},
+                                                           {"text_in": {"selector": ".badge", "equals": "1"}},
+                                                           {"text_order": ["Onesie", "Bike Light", "Backpack"]}]})), [])
+        for bad in ({"text_in": {"selector": "#flash"}}, {"text_in": {"selector": "", "contains": "x"}},
+                    {"text_in": {"selector": "#a", "contains": "x", "equals": "x"}}, {"text_in": {"selector": "#a", "contains": ""}},
+                    {"text_order": ["only one"]}, {"text_order": ["a", ""]}, {"text_order": "a,b"}):
+            self.assertTrue(validate(self._spec(**{"assert": [bad]})), bad)
+
+    def test_requires_action_and_navigation_timeout(self) -> None:
+        from spec import DEFAULTS, validate
+        spec = self._spec()
+        spec["outcomes"]["bad"]["requires_action"] = True
+        self.assertEqual(validate(spec), [])
+        spec["outcomes"]["bad"]["requires_action"] = "yes"
+        self.assertTrue(any("requires_action" in e for e in validate(spec)))
+        self.assertEqual(DEFAULTS["browser"]["navigation_timeout_ms"], 30000)
+        spec = self._spec(browser={"navigation_timeout_ms": 0})
+        self.assertTrue(any("navigation_timeout_ms" in e for e in validate(spec)))
+
+    def test_expect_shapes_and_match(self) -> None:
+        from spec import match_expect, validate
+        self.assertEqual(validate(self._spec(expect={"outcome": "bad", "verdict": "bug"})), [])
+        self.assertEqual(validate(self._spec(expect={"outcome": "undetermined", "status": "blocked", "stuck_reason": "control_had_no_effect"})), [])
+        for bad in ({}, [], {"outcome": "nope"}, {"status": "exploded"}, {"verdict": "maybe"}, {"colour": "red"}, {"outcome": 3}):
+            self.assertTrue(validate(self._spec(expect=bad)), bad)
+        result = {"outcome": "undetermined", "verdict": None, "status": "blocked",
+                  "reason": {"status": "blocked", "blocked_reason": "other", "stuck_reason": "control_had_no_effect", "suggested_verdict": "bug"}}
+        got = match_expect(result, {"outcome": "undetermined", "status": "blocked", "stuck_reason": "control_had_no_effect"})
+        self.assertEqual((got["matched"], got["mismatches"]), (True, {}))
+        self.assertEqual(got["actual"], {"outcome": "undetermined", "status": "blocked", "stuck_reason": "control_had_no_effect"})
+        got = match_expect(result, {"outcome": "form_error", "suggested_verdict": "bug"})
+        self.assertEqual((got["matched"], got["mismatches"]), (False, {"outcome": "undetermined"}))
+        got = match_expect({"outcome": "ok", "verdict": "pass", "status": "passed", "reason": None}, {"verdict": "pass"})
+        self.assertTrue(got["matched"])
+
+    def test_exit_code(self) -> None:
+        from run_test import exit_code
+        self.assertEqual(exit_code({"pass": True}), 0)
+        self.assertEqual(exit_code({"pass": False}), 1)
+        self.assertEqual(exit_code({"pass": False, "expected": {"matched": True}}), 0)
+        self.assertEqual(exit_code({"pass": True, "expected": {"matched": False}}), 1)
+        self.assertEqual(exit_code({"pass": False, "failed_before_observation": "navigation"}), 2)
+
+    def test_text_assertions_against_a_fake_page(self) -> None:
+        from run_test import check_assertions
+
+        class Page:
+            url = "https://x.test/list"
+            body = "Header\nSauce Labs Onesie $7.99\nSauce Labs Bike Light $9.99\nSauce Labs Backpack $29.99\nAction successful, Action unsuccessful"
+
+            def evaluate(self, js, *args):
+                if args:  # the element-text script takes a selector
+                    return {"#flash": ["Action unsuccesful, please try again\n×"], ".price": ["$7.99", "$9.99", "$29.99"]}.get(args[0], [])
+                return self.body
+
+        obs = {"url": Page.url, "visible_text": Page.body, "elements": []}
+        got = check_assertions({"assert": [
+            {"text_in": {"selector": "#flash", "contains": "Action successful"}},
+            {"text_in": {"selector": "#flash", "contains": "Action unsuccesful"}},
+            {"text_in": {"selector": ".price", "equals": "$9.99"}},
+            {"text_order": ["Onesie", "Bike Light", "Backpack"]},
+            {"text_order": ["Backpack", "Onesie"]},
+            {"text_contains": "Action successful"},  # the page-wide check is true whatever the notification says
+        ]}, Page(), obs)
+        self.assertEqual([a["ok"] for a in got], [False, True, True, True, False, True])
+        self.assertEqual(got[0]["actual"], ["Action unsuccesful, please try again ×"])
+        self.assertEqual(got[4]["actual"], [{"text": "Backpack", "at": 70}, {"text": "Onesie", "at": None}])
+        self.assertEqual(got[3][ "text_order"], ["Onesie", "Bike Light", "Backpack"])
 
 
 class SecretWarningTests(unittest.TestCase):
@@ -1273,6 +1368,25 @@ class SuiteTests(unittest.TestCase):
         self.assertIn("environment", agg["reason"])
         self.assertEqual(aggregate_spec([e, b, p])["verdict"], "flaky")   # a real disagreement still is
         self.assertEqual(aggregate_spec([e, b, b])["verdict"], "bug")
+        # agreement is on verdicts: two legitimate pass endings agree (the outcome distribution is still reported)
+        p2 = {**p, "outcome": "logged_in_via_sso"}
+        agg = aggregate_spec([p, p2, p])
+        self.assertEqual((agg["verdict"], agg["agreement"], agg["outcome_agreement"], agg["outcome_counts"]),
+                         ("pass", 1.0, 0.667, {"logged_in": 2, "logged_in_via_sso": 1}))
+        # a pre-observation failure (start URL or setup, exit 2 with a trace) is an environment failure like a launch failure
+        n = {"run": 3, "environment_failure": True, "phase": "navigation", "status": "error", "exit_code": 2, "error": "navigation failed: Timeout"}
+        agg = aggregate_spec([p, n, p])
+        self.assertEqual((agg["verdict"], agg["agreement"], agg["outcome_counts"]), ("pass", 1.0, {"logged_in": 2}))
+        # a spec with `expect`: green when every run ended in the declared result, flaky when only some did
+        x = {"outcome": "undetermined", "verdict": None, "status": "blocked", "expected": True, "wall_ms": 7000}
+        y = {"outcome": "order_complete", "verdict": "pass", "status": "passed", "expected": False, "wall_ms": 7000}
+        agg = aggregate_spec([x, x, x])
+        self.assertEqual((agg["verdict"], agg["agreement"], agg["expected_matched"]), ("expected", 1.0, 3))
+        agg = aggregate_spec([x, y, x])
+        self.assertEqual((agg["verdict"], agg["agreement"], agg["expected_matched"]), ("flaky", 0.667, 2))
+        agg = aggregate_spec([y, y])
+        self.assertEqual((agg["verdict"], agg["expected_matched"]), ("pass", 0))  # the same unexpected outcome every time: its verdict
+        self.assertTrue(suite_verdict({"a": {"verdict": "expected"}, "b": {"verdict": "pass"}})["all_pass"])
         sv = suite_verdict({"a": {"verdict": "pass"}, "b": {"verdict": "pass"}})
         self.assertEqual((sv["all_pass"], sv["flaky"], sv["undetermined"], sv["environment_failures"]), (True, [], [], {}))
         sv = suite_verdict({"a": {"verdict": "pass", "environment_failures": [{"run": 1}]}, "b": {"verdict": "flaky"},
@@ -1337,11 +1451,11 @@ class SuiteTests(unittest.TestCase):
         with open(os.path.join(out, "results.md"), encoding="utf-8") as f:
             md = f.read()
         self.assertIn("**NOT ALL PASS**", md)
-        self.assertIn("**5 environment failure(s)**", md)
+        self.assertIn("**5 environment/setup failure(s)**", md)
         self.assertIn("| `flaky` | **FLAKY** | 50% | logged_in 2/4, bad_pw 2/4 |", md)
         self.assertIn("| `blocked` | **UNDETERMINED (suggested: test_issue 4)** | 100% |", md)
-        self.assertIn("| `launch-flake` | **PASS (environment failures 1/4)** | 100% | logged_in 3/3 |", md)
-        self.assertIn("| `broken` | **UNDETERMINED (environment failures 4/4)** | 0% | - |", md)
+        self.assertIn("| `launch-flake` | **PASS (environment/setup failures 1/4)** | 100% | logged_in 3/3 |", md)
+        self.assertIn("| `broken` | **UNDETERMINED (environment/setup failures 4/4)** | 0% | - |", md)
         self.assertIn("| 2 | environment failure | - | error |", md)
         self.assertIn("Open a trace only for: `flaky` (flaky), `truncated` (flaky), `blocked` (undetermined), `broken` (undetermined)", md)
         # a multi-line stderr tail stays inside its table cell
@@ -1402,6 +1516,13 @@ class SuiteTests(unittest.TestCase):
 
 
 class SummarizeTests(unittest.TestCase):
+    def test_new_flags(self) -> None:
+        from summarize_trace import _flags
+        self.assertEqual(_flags({"no_effect": True, "executed": {"action": "CLICK", "ok": True}}), "NO-EFFECT")
+        self.assertEqual(_flags({"outcome_deferred": ["unchanged"]}), "DEFERRED:unchanged")
+        self.assertEqual(_flags({"adjudication_merged": True}), "EVIDENCE-ASKED")
+        self.assertEqual(_flags({}), "")
+
     def test_result_flag_without_result_json(self) -> None:
         import tempfile
         from summarize_trace import main as summarize_main

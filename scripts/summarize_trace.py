@@ -74,6 +74,12 @@ def _flags(step: dict) -> str:
         f.append("UNCONFIRMED:" + step["outcome_unconfirmed"])
     if step.get("assertions") and not all(a.get("ok") for a in step["assertions"]):
         f.append("ASSERT-FAILED")
+    if step.get("no_effect"):
+        f.append("NO-EFFECT")  # the action landed and the page Jev sees did not change (a dead control?)
+    if step.get("outcome_deferred"):
+        f.append("DEFERRED:" + ",".join(step["outcome_deferred"]))  # true of the page, but no action was taken yet (requires_action)
+    if step.get("adjudication_merged"):
+        f.append("EVIDENCE-ASKED")  # the evidence questions rode in this confirmation request
     if step.get("stale"):
         f.append("STALE")
     if (step.get("target") or {}).get("missing"):
@@ -112,8 +118,15 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
             lines.append(f"  evidence: \"{result['evidence']['line']}\"")
         if result.get("note"):
             lines.append(f"  note: {result['note']}")
+    if trace.get("expected") is not None:
+        ex = trace["expected"]
+        lines.append(f"  expected result: {'MATCHED' if ex.get('matched') else 'NOT MATCHED'}  expect={ex.get('expect')}"
+                     + ("" if ex.get("matched") else f"  actual={ex.get('mismatches')}"))
     if trace.get("status_meaning"):
         lines.append(f"  meaning: {trace['status_meaning']}")
+    if trace.get("failed_before_observation"):
+        lines.append(f"  not a verdict: the {trace['failed_before_observation']} failed before the flow was observed "
+                     f"({'a slow or unreachable host: environment' if trace['failed_before_observation'] == 'navigation' else 'a setup step: fix the spec'}); exit 2")
     if trace.get("error"):
         lines.append(f"  error: {trace['error']}")
     if trace.get("passed_without_actions"):

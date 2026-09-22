@@ -38,7 +38,7 @@ from policy import (
     evidence_line_keys, is_field, quoted_pick, read_checks, read_choice, read_outcome, resolve_target, seen_outcomes,
     suggested_verdict, validate_choice,
 )
-from spec import UNDETERMINED, effective_outcomes, load_dotenv, load_spec, spec_warnings, validate
+from spec import UNDETERMINED, effective_outcomes, load_dotenv, load_spec, match_expect, spec_warnings, validate
 from summarize_trace import is_action_step, summarize
 
 
@@ -171,16 +171,17 @@ def settle(page, spec: dict, after: tuple[str | None, str | None] | None = None)
     return result
 
 
-def run_setup(page, spec: dict) -> list[dict]:
-    """Deterministic Playwright steps before Jev takes over (login, cookie banner, fixtures)."""
-    results = []
+def run_setup(page, spec: dict, results: list[dict] | None = None) -> list[dict]:
+    """Deterministic Playwright steps before Jev takes over (login, cookie banner, fixtures). Records land in
+    `results` as they run (pass the trace's list, so a failing step is recorded even though this raises)."""
+    results = [] if results is None else results
     timeout = spec["browser"]["action_timeout_ms"]
     for i, step in enumerate(spec["setup"]):
         act = step["action"]
         rec = {"n": i, "action": act, "selector": step.get("selector"), "ok": True, "error": None}
         try:
             if act == "goto":
-                page.goto(step["url"], wait_until="domcontentloaded")
+                page.goto(step["url"], wait_until="domcontentloaded", timeout=spec["browser"]["navigation_timeout_ms"])
                 rec["url"] = step["url"]
             elif act == "click":
                 page.locator(step["selector"]).first.click(timeout=timeout)
@@ -209,9 +210,35 @@ def run_setup(page, spec: dict) -> list[dict]:
 
 
 WAIT_BACKOFF_MAX = 4  # lever F4: consecutive WAITs on an unchanged page pause settle_ms x 1, 2, 4, 4, ... (never more than x4)
+WAIT_POLL_MS = 100  # a WAIT re-reads the page's fingerprint this often and ends as soon as the page has changed
+NO_EFFECT_ACTIONS = {"CLICK", "TYPE_TEXT", "SELECT", "PRESS_ENTER"}  # an executed one of these that changed nothing is flagged
 
 
-def execute(page, spec: dict, operation: str, target: dict | None, value_key: str | None, wait_ms: int | None = None) -> dict:
+def wait_for_change(page, before: dict | None, wait_ms: int) -> dict:
+    """A WAIT that ends early. Instead of sleeping the whole pause, re-read the page's fingerprint every WAIT_POLL_MS
+    and return as soon as it no longer matches the one Jev decided on (the whole-page comparison: url, title, text
+    head, every tagged node), else when `wait_ms` is up. Lever F4's doubling pauses overshot a 5 s loader's end by
+    up to 1.6 s; polling caps the overshoot at one poll interval, and the pause is still the ceiling.
+    Returns {"ended": "changed" | "timeout" | "navigated", "ms": wall-clock spent}."""
+    t0 = time.perf_counter()
+    while True:
+        elapsed = (time.perf_counter() - t0) * 1000
+        if elapsed >= wait_ms:
+            return {"ended": "timeout", "ms": int(elapsed)}
+        page.wait_for_timeout(min(WAIT_POLL_MS, wait_ms - elapsed))
+        if before is None:
+            continue
+        try:
+            changed = compare_fingerprint(before, fingerprint(page), "DONE") is not None
+        except Exception:  # noqa: BLE001 - the document navigated: that is a change
+            return {"ended": "navigated", "ms": int((time.perf_counter() - t0) * 1000)}
+        if changed:
+            return {"ended": "changed", "ms": int((time.perf_counter() - t0) * 1000)}
+
+
+def execute(page, spec: dict, operation: str, target: dict | None, value_key: str | None, wait_ms: int | None = None,
+            before: dict | None = None) -> dict:
+    """Perform one operation. `before` is the observation's fingerprint: a WAIT ends as soon as the page differs from it."""
     timeout = spec["browser"]["action_timeout_ms"]
     res: dict = {"action": operation, "ok": True, "error": None}
     try:
@@ -256,8 +283,8 @@ def execute(page, spec: dict, operation: str, target: dict | None, value_key: st
         elif operation == "SCROLL_UP":
             page.evaluate("window.scrollBy(0, -Math.round(window.innerHeight * 0.8))")
         elif operation == "WAIT":
-            res["wait_ms"] = spec["browser"]["settle_ms"] if wait_ms is None else wait_ms  # the loop's backoff, else settle_ms
-            page.wait_for_timeout(res["wait_ms"])  # then the loop's normal settle
+            res["wait_ms"] = spec["browser"]["settle_ms"] if wait_ms is None else wait_ms  # the ceiling: the loop's backoff, else settle_ms
+            res["wait"] = wait_for_change(page, before, res["wait_ms"])  # ends when the page changes; then the loop's normal settle
         else:
             raise RuntimeError(f"unknown operation {operation}")
     except Exception as e:  # noqa: BLE001
@@ -350,6 +377,7 @@ def glob_to_regex(glob: str) -> str:
 
 ASSERT_MAX_ELEMENTS = 5000  # the assertion oracle is not a Choice: no need to cut the page to 255 rows
 ELEMENT_ASSERTIONS = ("field_value", "element_present", "element_absent")
+ELEMENT_TEXTS_JS = "(sel) => Array.from(document.querySelectorAll(sel)).map(e => e.innerText !== undefined ? e.innerText : (e.textContent || ''))"
 
 
 def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = None) -> list[dict]:
@@ -357,8 +385,12 @@ def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = No
 
     Each record repeats the assertion, adds `ok` and `actual` (the value found, or what was there instead).
     `url_matches` is a Playwright glob over the final URL; `text_contains` looks in the whole page text;
-    `field_value` matches a text field / select whose label contains the given label (case-insensitive) and
-    compares its value; `element_present` / `element_absent` match role and, when given, a name substring.
+    `text_in` looks only inside the elements a CSS selector matches (`{selector, contains}` or `{selector, equals}`),
+    which is how a notification's text is asserted on a page whose body copy also mentions it; `text_order` is a
+    list of strings that must appear in the page text in that order, each found after the previous one (a sorted
+    list); `field_value` matches a text field / select whose accessible name contains the given label
+    (case-insensitive) and compares its value; `element_present` / `element_absent` match role and, when given,
+    a name substring.
     The element assertions look at the WHOLE document (observe(..., whole_document=True)), not at the
     viewport-and-hit-tested table Jev chose from, so a Logout link below the fold is present and an alert
     below the fold is not absent. Comparisons use the real page; `actual` is masked with `secrets` before
@@ -371,7 +403,12 @@ def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = No
     url = page.url
     for a in spec.get("assert") or []:
         (kind, arg), = a.items()
-        shown = mask_text(arg, secrets) if isinstance(arg, str) else {k: mask_text(v, secrets) for k, v in arg.items()}
+        if isinstance(arg, str):
+            shown = mask_text(arg, secrets)
+        elif isinstance(arg, list):
+            shown = [mask_text(v, secrets) for v in arg]
+        else:
+            shown = {k: mask_text(v, secrets) for k, v in arg.items()}
         rec: dict = {kind: shown, "ok": False, "actual": None}
         if kind in ELEMENT_ASSERTIONS and elements is None:
             try:
@@ -381,16 +418,39 @@ def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = No
         if kind == "url_matches":
             rec["actual"] = mask_text(url, secrets)
             rec["ok"] = re.fullmatch(glob_to_regex(arg), url) is not None
-        elif kind == "text_contains":
+        elif kind in ("text_contains", "text_order"):
             if body_text is None:
                 try:
                     body_text = page.evaluate(BODY_TEXT_JS)
                 except Exception:  # noqa: BLE001 - fall back to what the observer saw
                     body_text = obs["visible_text"]
-            at = body_text.find(arg)
-            rec["ok"] = at >= 0
-            excerpt = body_text[max(0, at - 60):at + len(arg) + 60] if at >= 0 else re.sub(r"\s+", " ", body_text)[:200]
-            rec["actual"] = mask_text(excerpt, secrets)
+            if kind == "text_contains":
+                at = body_text.find(arg)
+                rec["ok"] = at >= 0
+                excerpt = body_text[max(0, at - 60):at + len(arg) + 60] if at >= 0 else re.sub(r"\s+", " ", body_text)[:200]
+                rec["actual"] = mask_text(excerpt, secrets)
+            else:
+                # each string must be found after the end of the previous one: the order of a list, a table, a menu
+                pos, ok, found = 0, True, []
+                for needle in arg:
+                    at = body_text.find(needle, pos) if ok else -1
+                    found.append({"text": mask_text(needle, secrets), "at": at if at >= 0 else None})
+                    if at < 0:
+                        ok = False
+                    else:
+                        pos = at + len(needle)
+                rec["ok"] = ok
+                rec["actual"] = found
+        elif kind == "text_in":
+            try:
+                texts = [t for t in page.evaluate(ELEMENT_TEXTS_JS, arg["selector"]) if isinstance(t, str)]
+            except Exception:  # noqa: BLE001 - a selector the page rejects, or the page is gone
+                texts = []
+            if "equals" in arg:
+                rec["ok"] = any(t.strip() == arg["equals"] for t in texts)
+            else:
+                rec["ok"] = any(arg["contains"] in t for t in texts)
+            rec["actual"] = [mask_text(re.sub(r"\s+", " ", t).strip()[:200], secrets) for t in texts[:5]] or "no element matches the selector"
         elif kind == "field_value":
             fields = [e for e in elements if is_field(e) and arg["label"].lower() in (e.get("name") or "").lower()]
             values = [e.get("value") or "" for e in fields]
@@ -406,50 +466,73 @@ def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = No
     return results
 
 
-def adjudicate(page, jev, name: str, when: str, secrets: list[str] | None = None) -> dict:
-    """One extra request after a seen outcome (spec §5.4): Jev selects the line of the final page that states
-    the outcome (`evidence_line`; one Choice per sentence of a compound statement, the most confident
-    sentence's line is quoted) and re-judges the statement (`evidence_present`). The chosen line is copied
-    verbatim into the result: selection is how a quote is produced. The lines are masked like every
-    observation, so a secret the page echoes reaches neither Jev nor the result. Never fatal: the run was
-    already decided when this is asked, so any failure (transport, a non-JSON body, a malformed answer) is
-    recorded on the record instead of raised."""
-    rec: dict = {"outcome": name, "statement": when, "line": None, "line_id": None, "present": None, "confidence": None}
+def adjudication_request(page, name: str, when: str, secrets: list[str] | None = None) -> dict | None:
+    """The evidence questions for a seen outcome (spec §5.4) over the current page's numbered lines, ready to send
+    alone (`adjudicate`) or riding in a confirmation step's request (the loop merges them: one round trip fewer
+    for every pass). None when the page text cannot be read. The lines are masked like every observation."""
     try:
         lines = [mask_text(ln, secrets or []) for ln in page.evaluate(LINES_JS, ADJUDICATION_MAX_LINES)]
-    except Exception as e:  # noqa: BLE001
-        rec["error"] = f"could not read the page text: {type(e).__name__}"
-        return rec
+    except Exception:  # noqa: BLE001 - the page is gone or navigating
+        return None
     state, questions, offered = build_adjudication(name, when, lines)
-    keys = evidence_line_keys(questions)  # one key for a one-sentence statement, one per sentence otherwise
+    # one key for a one-sentence statement, one per sentence otherwise
+    return {"name": name, "state": state, "questions": questions, "offered": offered, "keys": evidence_line_keys(questions)}
+
+
+def read_adjudication(rec: dict, answers: dict, req: dict) -> None:
+    """Fill `rec` (line, line_id, confidence, present, sentences, invalid_answer) from the answers to `req`."""
+    state, questions, offered, keys = req["state"], req["questions"], req["offered"], req["keys"]
+    picks: list[dict | None] = []
+    invalid = []
+    for key in keys:
+        picked = read_choice(answers, key, offered)
+        if picked is None:
+            invalid.append(f"{key}: {validate_choice(answers.get(key), offered)}")
+            picks.append(None)
+            continue
+        line = state["lines"][int(picked["choice"]) - 1]["text"] if picked["choice"] != ADJUDICATION_NONE else None
+        picks.append({"line_id": picked["choice"], "line": line, "confidence": picked["confidence"]})
+    if invalid:
+        rec["invalid_answer"] = "; ".join(invalid)
+    if len(keys) > 1:
+        # every sentence's pick is kept; `line` below is the most confident sentence's line (`quoted_pick`)
+        rec["sentences"] = [{"sentence": questions[k]["instructions"]["sentence"],
+                             **(p or {"line_id": None, "line": None, "confidence": None})} for k, p in zip(keys, picks)]
+    quoted = quoted_pick(picks)
+    if quoted:
+        rec["line_id"], rec["line"], rec["confidence"] = quoted["line_id"], quoted["line"], quoted["confidence"]
+    present = answers.get("evidence_present")
+    if isinstance(present, dict) and isinstance(present.get("noul"), (int, float)) and 0 <= present["noul"] <= 1:
+        rec["present"] = round(float(present["noul"]), 3)
+
+
+def adjudicate(page, jev, name: str, when: str, secrets: list[str] | None = None, prefetched: dict | None = None) -> dict:
+    """The evidence for a seen outcome (spec §5.4): Jev selects the line of the final page that states the outcome
+    (`evidence_line`; one Choice per sentence of a compound statement, the most confident sentence's line is
+    quoted) and re-judges the statement (`evidence_present`). The chosen line is copied verbatim into the result:
+    selection is how a quote is produced. With `prefetched` (the request the loop merged into the confirmation
+    step plus that step's `answers`) no request is made at all; otherwise it is one extra request. Never fatal:
+    the run was already decided when this is asked, so any failure (transport, a non-JSON body, a malformed
+    answer) is recorded on the record instead of raised."""
+    rec: dict = {"outcome": name, "statement": when, "line": None, "line_id": None, "present": None, "confidence": None}
+    if prefetched is not None:
+        rec["merged"] = True  # rode in the confirmation step's request: its tokens are on that step, no extra latency
+        try:
+            read_adjudication(rec, prefetched["answers"], prefetched)
+        except Exception as e:  # noqa: BLE001
+            rec["error"] = f"{type(e).__name__}: {str(e)[:300]}"
+        return rec
+    req = adjudication_request(page, name, when, secrets)
+    if req is None:
+        rec["error"] = "could not read the page text"
+        return rec
     t0 = time.perf_counter()
     try:
-        resp = jev.system_one(state, questions)
+        resp = jev.system_one(req["state"], req["questions"])
         rec["latency_ms"] = latency_of(resp, t0)
         rec["usage"] = resp.get("usage")
         answers = resp["answers"] if isinstance(resp.get("answers"), dict) else {}
-        picks: list[dict | None] = []
-        invalid = []
-        for key in keys:
-            picked = read_choice(answers, key, offered)
-            if picked is None:
-                invalid.append(f"{key}: {validate_choice(answers.get(key), offered)}")
-                picks.append(None)
-                continue
-            line = state["lines"][int(picked["choice"]) - 1]["text"] if picked["choice"] != ADJUDICATION_NONE else None
-            picks.append({"line_id": picked["choice"], "line": line, "confidence": picked["confidence"]})
-        if invalid:
-            rec["invalid_answer"] = "; ".join(invalid)
-        if len(keys) > 1:
-            # every sentence's pick is kept; `line` below is the most confident sentence's line (`quoted_pick`)
-            rec["sentences"] = [{"sentence": questions[k]["instructions"]["sentence"],
-                                 **(p or {"line_id": None, "line": None, "confidence": None})} for k, p in zip(keys, picks)]
-        quoted = quoted_pick(picks)
-        if quoted:
-            rec["line_id"], rec["line"], rec["confidence"] = quoted["line_id"], quoted["line"], quoted["confidence"]
-        present = answers.get("evidence_present")
-        if isinstance(present, dict) and isinstance(present.get("noul"), (int, float)) and 0 <= present["noul"] <= 1:
-            rec["present"] = round(float(present["noul"]), 3)
+        read_adjudication(rec, answers, req)
     except Exception as e:  # noqa: BLE001 - JevError or anything the seam returned that is not the expected shape
         rec["error"] = f"{type(e).__name__}: {str(e)[:300]}"
     return rec
@@ -555,6 +638,13 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
             result["reason"]["pending_outcome"] = terminal["pending_outcome"]
         if status == "error":
             result["reason"]["error"] = trace.get("error")
+            phase = trace.get("failed_before_observation")
+            if phase:
+                # the start page never loaded (navigation) or a scripted setup step failed (setup): the flow was
+                # not exercised, so this is the environment or the spec, never the app; exit 2, and run_suite keeps
+                # it out of the outcome distribution
+                result["reason"]["phase"] = phase
+                result["reason"]["suggested_verdict"] = "flaky" if phase == "navigation" else "test_issue"
     return result
 
 
@@ -596,6 +686,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     last_operation: str | None = None
     last_page_changed: bool | None = None  # of the last executed action, once the next observation exists
     wait_streak, last_wait_sig = 0, None  # lever F4: consecutive Jev WAITs on the same page signature
+    after_no_effect = False  # the last executed action changed nothing: the next step shows that page (a key picture)
     low_streak = 0
     stale_streak = 0
     # A pass outcome (or Jev's DONE) gets one settle-and-recheck before it counts: {name, action}
@@ -616,11 +707,17 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         pending_change = (entry, step, sig)
 
     def note_page_change(sig: str) -> None:
-        nonlocal pending_change, last_page_changed
+        nonlocal pending_change, last_page_changed, after_no_effect
+        after_no_effect = False
         if pending_change:
             entry, prev_step, before = pending_change
             entry["page_changed"] = prev_step["page_changed"] = sig != before
             last_page_changed = entry["page_changed"] if "reason" not in entry else None
+            if last_page_changed is False and (prev_step.get("executed") or {}).get("action") in NO_EFFECT_ACTIONS:
+                # the action landed and nothing Jev can see changed: the classic dead control. Flagged on the step
+                # (NO-EFFECT in the summary) and the next observation, which shows that unchanged page, gets a picture.
+                prev_step["no_effect"] = True
+                after_no_effect = True
             pending_change = None
 
     def shot(page, name: str, holder: dict | None = None) -> str | None:
@@ -641,7 +738,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         """The steps worth a picture in "key" mode: something went wrong or the runner refused to act."""
         return bool(step.get("never_violated") or step.get("low_confidence") or step.get("stale")
                     or step.get("outcome_seen") or step.get("pending_outcome") or step.get("outcome_unconfirmed")
-                    or step.get("repeat_count", 0) >= 2)
+                    or step.get("repeat_count", 0) >= 2 or step.get("after_no_effect") or step.get("outcome_deferred"))
 
     def capture(page, step: dict, terminal: bool = False) -> None:
         """Screenshot policy. Taken after Jev's answer and before execution, so the picture is the page
@@ -706,8 +803,9 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         o = outcomes[name]
         return o.get("when") or " and ".join(spec["checks"][r] for r in o["requires"])
 
-    def settle_pass(page, step: dict, obs: dict, seen: dict, action: str, jev) -> None:
-        """A confirmed pass: run the assertions on this final observation and end passed / assert_failed."""
+    def settle_pass(page, step: dict, obs: dict, seen: dict, action: str, jev, prefetched: dict | None = None) -> None:
+        """A confirmed pass: run the assertions on this final observation and end passed / assert_failed. With
+        `prefetched` (the evidence questions rode in this step's request) the adjudication costs no request."""
         final["outcome"] = seen
         final["seen_at_step"] = step["n"]
         final.setdefault("first_seen_at_step", step["n"])
@@ -718,7 +816,18 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         finish(page, step, "passed" if ok else "assert_failed", {"action": action, "ok": True, "error": None, "confirmed": True})
         if ok and not spec["setup"] and not any("reason" not in h for h in history):
             trace["passed_without_actions"] = True
-        final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]), secret_values)
+        final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]), secret_values, prefetched)
+
+    def accepted(seen: list[dict], step: dict) -> list[dict]:
+        """Outcomes with `requires_action` do not count before the first executed action: a statement such as
+        "nothing changed" is true of the untouched start page too, and only pass outcomes were guarded until now
+        (`passed_without_actions`). Deferred sightings are recorded on the step and the run goes on."""
+        if any("reason" not in h for h in history):
+            return seen
+        deferred = [s["name"] for s in seen if outcomes[s["name"]].get("requires_action")]
+        if deferred:
+            step["outcome_deferred"] = deferred
+        return [s for s in seen if s["name"] not in deferred]
 
     def end_with_outcome(page, step: dict, seen: dict, jev) -> None:
         """A non-pass outcome is terminal at first confident sighting (fail_fast): the picture is forced."""
@@ -747,6 +856,12 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         return {"url": mask_text(url, secret_values), "title": mask_text(title, secret_values), "checks": checks}
 
     os.makedirs(os.path.join(out_dir, "steps"), exist_ok=True)  # before any tab is opened: nothing to close if it fails
+    warm = getattr(jev, "warm_up", None)  # JevClient opens its connection now, while the browser launches; a test double may lack it
+    if callable(warm):
+        try:
+            warm()
+        except Exception:  # noqa: BLE001 - the first request opens the connection itself, as before
+            pass
     with sync_playwright() as p:
         t_lap = time.perf_counter()
         cdp_url = spec["browser"]["cdp_url"]
@@ -798,11 +913,20 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         page.set_default_timeout(spec["browser"]["action_timeout_ms"])
         t_lap = lap("launch_ms", t_lap)
         try:
-            page.goto(spec["start_url"], wait_until="domcontentloaded")
-            settle(page, spec)
-            t_lap = lap("navigation_ms", t_lap)
-            trace["setup"] = run_setup(page, spec)
-            t_lap = lap("setup_ms", t_lap)
+            phase = "navigation"
+            try:
+                page.goto(spec["start_url"], wait_until="domcontentloaded", timeout=spec["browser"]["navigation_timeout_ms"])
+                settle(page, spec)
+                t_lap = lap("navigation_ms", t_lap)
+                phase = "setup"
+                run_setup(page, spec, trace["setup"])  # records into trace["setup"] as it goes, so a failed step is kept
+                t_lap = lap("setup_ms", t_lap)
+            except Exception:
+                # Nothing was observed, so the flow was not exercised: a slow or unreachable host (navigation), a setup
+                # selector that did not match (setup). Reported apart from the flow's outcomes: result.reason.phase,
+                # exit 2, and run_suite lists it as an environment/setup failure instead of a flow outcome.
+                trace["failed_before_observation"] = phase
+                raise
 
             for n in range(1, budget["max_steps"] + 1):
                 if time.perf_counter() - t_start > budget["max_seconds"]:
@@ -821,10 +945,21 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     "truncated_elements": obs["truncated"],
                     "visible_text": obs["visible_text"][:600],
                 }
+                if after_no_effect:
+                    step["after_no_effect"] = True  # this is the page the previous action failed to change
                 state = build_state(spec, obs, n, history)
                 questions, meta = build_questions(spec, obs, last_operation, outcomes, ask_stuck=last_page_changed is False)
                 offered = meta["offered"]
                 step["offered_operations"] = meta["operations"]
+                merged_adj = None
+                if pending and pending.get("name"):
+                    # The confirmation of a pass sighting: ask the evidence questions in the same request (speculative
+                    # fan-out), so a confirmed pass needs no adjudication round trip. The Choices point at state.lines.
+                    merged_adj = adjudication_request(page, pending["name"], outcome_when(pending["name"]), secret_values)
+                    if merged_adj:
+                        state["lines"] = merged_adj["state"]["lines"]
+                        questions.update(merged_adj["questions"])
+                        step["adjudication_merged"] = True
                 try:
                     t_jev = time.perf_counter()
                     resp = jev.system_one(state, questions)
@@ -868,7 +1003,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                         if got is None:
                             note_invalid(step, f"{reason_q}: {validate_choice(answers.get(reason_q), offered[reason_q])}")
                         step[reason_q] = got
-                seen = seen_outcomes(outcomes, checks, outcome_answer, th["outcome_true"])
+                seen = accepted(seen_outcomes(outcomes, checks, outcome_answer, th["outcome_true"]), step)
                 non_pass = [s for s in seen if s["verdict"] != "pass"]
                 passes = [s for s in seen if s["verdict"] == "pass"]
                 bad = [n_ for n_ in spec["never"] if checks.get(n_, 0.0) >= th["never_true"]]
@@ -887,7 +1022,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     was = pending
                     pending = None
                     if passes:
-                        settle_pass(page, step, obs, passes[0], was["action"], jev)
+                        pre = {**merged_adj, "answers": answers} if merged_adj and merged_adj["name"] == passes[0]["name"] else None
+                        settle_pass(page, step, obs, passes[0], was["action"], jev, pre)
                         break
                     if was["action"] == "DONE":
                         finish(page, step, "done_unverified", {"action": "DONE", "ok": True, "error": None, "confirmed": True})
@@ -1022,7 +1158,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                 # for the budget (the for-else below), so it gets its picture like every terminal step.
                 capture(page, step, terminal=(n == budget["max_steps"]))
                 t_b = time.perf_counter()
-                executed = execute(page, spec, operation, target, value_key, wait_ms)
+                executed = execute(page, spec, operation, target, value_key, wait_ms, obs.get("fingerprint"))
                 if not executed["ok"]:
                     step["screenshot_after_failure"] = shot(page, f"{n:03d}-failed.png", step)
                 target_el = next((e for e in obs["elements"] if e["idx"] == (target or {}).get("element")), {})
@@ -1068,7 +1204,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                 except JevError as e:
                     error = step["error"] = str(e)
                 step["checks"] = checks
-                seen = seen_outcomes(outcomes, checks, outcome_answer, th["outcome_true"])
+                seen = accepted(seen_outcomes(outcomes, checks, outcome_answer, th["outcome_true"]), step)
                 non_pass = [s for s in seen if s["verdict"] != "pass"]
                 passes = [s for s in seen if s["verdict"] == "pass"]
                 trace["final"] = {"url": obs["url"], "title": obs["title"], "checks": checks}
@@ -1115,11 +1251,18 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     trace["error"] = error
     trace["ended_at"] = now_iso()
     trace["duration_ms"] = int((time.perf_counter() - t_start) * 1000)
+    connect_ms = getattr(jev, "connect_ms", None)
+    if isinstance(connect_ms, int):
+        timing["jev_connect_ms"] = connect_ms  # paid while the browser launched, not on the first request
     trace["timing"] = timing
     trace["actions_executed"] = sum(1 for s in trace["steps"] if is_action_step(s))
     trace["usage"] = jev.usage_summary()
     trace["adjudication"] = final.get("adjudication")
     result = build_result(trace, spec, outcomes, final, out_dir)
+    if spec.get("expect"):
+        # an expected-red spec (a documented breakage): the run is green when the result matches what was declared
+        result["expected"] = match_expect(result, spec["expect"])
+    trace["expected"] = result.get("expected")
     trace["outcome"], trace["verdict"] = result["outcome"], result["verdict"]
     trace["result"] = result
     with open(os.path.join(out_dir, "result.json"), "w", encoding="utf-8") as f:
@@ -1177,7 +1320,18 @@ def main(argv: list[str]) -> int:
         if close:
             close()
     print(summarize(trace, out_dir))
-    return 0 if trace["pass"] else 1
+    return exit_code(trace)
+
+
+def exit_code(trace: dict) -> int:
+    """0 = green, 1 = red, 2 = never a verdict. Green is a pass, or for a spec with `expect` the declared result;
+    a start page that never loaded or a setup step that failed (`failed_before_observation`) is 2, like a spec or
+    environment problem, because the flow was not exercised."""
+    if trace.get("failed_before_observation"):
+        return 2
+    if trace.get("expected") is not None:
+        return 0 if trace["expected"].get("matched") else 1
+    return 0 if trace.get("pass") else 1
 
 
 if __name__ == "__main__":

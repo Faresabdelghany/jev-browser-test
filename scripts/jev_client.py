@@ -7,7 +7,10 @@ Standard library only (`http.client`), so the runner has no dependency beyond Pl
     {"state": ..., "model": "jev-latest", "questions": {...}}
 
 One connection is opened lazily on the first call and kept alive for the rest of the run, so only
-the first step pays for the TCP + TLS handshake. Every response body is read to the end so the
+the first step pays for the TCP + TLS handshake; `warm_up()` opens it in a background thread instead,
+so a runner can pay that handshake while the browser launches and the start page loads (measured on the
+demo login: the first request took ~800 ms against ~300 ms warm; `connect_ms` reports what the warm-up
+took, `trace.timing.jev_connect_ms` in a run). Every response body is read to the end so the
 socket can carry the next request. If the kept-alive socket has died under us (server idle
 timeout, load-balancer reset) the request is retried once, immediately, on a fresh connection:
 Jev calls are read-only, so a retry cannot double-act. The number of such reconnects is reported
@@ -30,6 +33,7 @@ import base64
 import http.client
 import json
 import os
+import threading
 import time
 import urllib.request
 from urllib.parse import SplitResult, unquote, urlsplit
@@ -130,6 +134,9 @@ class JevClient:
                 self._target = f"http://{hostport}{self._path}"
                 self._headers.update(proxy_auth_headers(self._proxy))
         self._conn: http.client.HTTPConnection | None = None
+        self._lock = threading.Lock()  # `_conn` is handed over from the warm-up thread under it
+        self._warm: threading.Thread | None = None
+        self.connect_ms: int | None = None  # what warm_up() spent on TCP + TLS, once it has finished
         self._sleep = time.sleep  # injectable so tests do not wait out the backoff
         self.timeout = timeout
         self.retries = retries
@@ -148,19 +155,55 @@ class JevClient:
             conn.set_tunnel(self._host, self._port, headers=self._tunnel_headers)  # TLS runs inside the tunnel
         return conn
 
+    def warm_up(self) -> None:
+        """Open the connection now, in a background thread: TCP + TLS (or the proxy CONNECT tunnel) run while the
+        caller does something else, and the first `system_one` call finds a live socket. A warm-up that fails is
+        simply dropped: the first call then opens the connection itself, as before. Idempotent."""
+        with self._lock:
+            if self._conn is not None or (self._warm is not None and self._warm.is_alive()):
+                return
+
+            def open_now() -> None:
+                t0 = time.perf_counter()
+                try:
+                    conn = self._open()
+                    conn.connect()
+                except Exception:  # noqa: BLE001 - lazy open on the first request, as before
+                    return
+                with self._lock:
+                    if self._conn is None:
+                        self._conn = conn
+                        self.connect_ms = int((time.perf_counter() - t0) * 1000)
+                    else:
+                        conn.close()
+
+            self._warm = threading.Thread(target=open_now, name="jev-warm-up", daemon=True)
+            self._warm.start()
+
     def _post(self, body: bytes) -> tuple[int, bytes]:
-        """One request on the kept-alive connection (opened on first use). Returns (status, body)."""
-        if self._conn is None:
-            self._conn = self._open()
-        self._conn.request("POST", self._target, body=body, headers=self._headers)
-        resp = self._conn.getresponse()
+        """One request on the kept-alive connection (opened on first use, or by warm_up). Returns (status, body)."""
+        warm = self._warm
+        if warm is not None:
+            warm.join(timeout=self.timeout)  # let a warm-up in flight hand its socket over first
+            self._warm = None
+        with self._lock:
+            if self._conn is None:
+                self._conn = self._open()
+            conn = self._conn
+        conn.request("POST", self._target, body=body, headers=self._headers)
+        resp = conn.getresponse()
         return resp.status, resp.read()  # read to the end so the connection is ready for the next call
 
     def close(self) -> None:
-        """Drop the kept-alive connection, if any. The next call opens a fresh one."""
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        """Drop the kept-alive connection, if any (after a warm-up in flight has finished). The next call opens a fresh one."""
+        warm = self._warm
+        if warm is not None:
+            warm.join(timeout=self.timeout)
+            self._warm = None
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
 
     def system_one(self, state, questions: dict[str, dict]) -> dict:
         """Evaluate all `questions` against `state` in one call.

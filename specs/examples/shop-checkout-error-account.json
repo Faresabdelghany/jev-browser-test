@@ -2,7 +2,7 @@
   "id": "shop-checkout-error-account",
   "start_url": "https://www.saucedemo.com/",
   "goal": "Add the Sauce Labs Bolt T-Shirt to the cart, open the cart, check out with the given first name, last name and postal code, and finish the order, so that the confirmation 'Thank you for your order!' is shown.",
-  "notes": "Every product card has its own Add to cart button; use the one in the Sauce Labs Bolt T-Shirt card. The cart icon in the top-right corner opens the cart. Checkout asks for First Name, Last Name and Zip/Postal Code, then Continue, then Finish. This demo account is documented as broken: the finish button is expected not to work.",
+  "notes": "Every product card has its own Add to cart button; use the one in the Sauce Labs Bolt T-Shirt card. The cart icon in the top-right corner opens the cart. Checkout asks for First Name, Last Name and Zip/Postal Code, then Continue, then Finish. This demo account is documented as broken: the finish button is expected not to work. `expect` declares that ending, so the suite reads this spec as green (expected) until the site's behaviour changes.",
   "data": {
     "first_name": "Ada",
     "last_name": "Lovelace",
@@ -66,5 +66,10 @@
   "budget": {
     "max_steps": 16,
     "max_seconds": 180
+  },
+  "expect": {
+    "outcome": "undetermined",
+    "status": "blocked",
+    "stuck_reason": "control_had_no_effect"
   }
 }

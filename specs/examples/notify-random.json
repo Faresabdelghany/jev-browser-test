@@ -2,12 +2,33 @@
   "id": "notify-random",
   "start_url": "https://the-internet.herokuapp.com/notification_message_rendered",
   "goal": "Click the 'Click here' link once, so that a notification message about the action appears at the top of the page.",
-  "checks": { "notification": "A notification message is shown above the heading" },
-  "outcomes": {
-    "action_successful": { "when": "A notification above the heading says 'Action successful'", "verdict": "pass" },
-    "action_unsuccessful": { "when": "A notification above the heading says the action was unsuccessful and asks to try again", "verdict": "bug",
-                             "note": "this page fails at random by design: across repeats the suite should report it flaky" }
+  "checks": {
+    "notification": "A notification message is shown above the heading"
   },
-  "assert": [ { "text_contains": "Action successful" } ],
-  "budget": { "max_steps": 6, "max_seconds": 60 }
+  "outcomes": {
+    "action_successful": {
+      "when": "A notification above the heading says 'Action successful'",
+      "verdict": "pass"
+    },
+    "action_unsuccessful": {
+      "when": "A notification above the heading says the action was unsuccessful and asks to try again",
+      "verdict": "bug",
+      "note": "this page fails at random by design: across repeats the suite should report it flaky"
+    }
+  },
+  "assert": [
+    {
+      "url_matches": "**/notification_message_rendered"
+    },
+    {
+      "text_in": {
+        "selector": "#flash",
+        "contains": "Action successful"
+      }
+    }
+  ],
+  "budget": {
+    "max_steps": 6,
+    "max_seconds": 60
+  }
 }
