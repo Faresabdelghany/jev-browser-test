@@ -3,13 +3,58 @@
 Every step produces a *fresh* table (indices are not stable across steps). Each
 included element is tagged with `data-jev-idx="<n>"` so the runner can act on it
 with a plain Playwright locator. Only the main frame is observed.
+
+The observation also records a *fingerprint* (url, title, text head, one identity/meaning
+tuple per tagged node). Right before acting, `fingerprint()` re-reads the same tuples and
+`compare_fingerprint()` decides whether the page still means what Jev decided on.
 """
 from __future__ import annotations
 
 import hashlib
 
-OBSERVE_JS = r"""
-(args) => {
+# Shared by OBSERVE_JS and FINGERPRINT_JS so the freshness guard compares tuples produced by the very same
+# functions at observe time and at act time. Identity and meaning only: no geometry, because animations
+# move boxes without changing what an element means, and Playwright re-resolves geometry at click time.
+JS_HELPERS = r"""
+  const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+  // FNV-1a over UTF-16 code units, as 8 hex chars: small, deterministic, good enough to spot a changed row/form.
+  const strHash = s => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return (h >>> 0).toString(16).padStart(8, '0');
+  };
+  const scopeOf = el => el.closest('form, dialog, [role="dialog"], tr, [role="row"], li, label') || el.parentElement || el;
+  const valueOf = el => {
+    const tag = (el.tagName || '').toLowerCase();
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    if (tag === 'input' && type !== 'checkbox' && type !== 'radio') {
+      return type === 'password' ? (el.value ? '(filled)' : '') : String(el.value || '').slice(0, 40);
+    }
+    if (tag === 'textarea') return String(el.value || '').slice(0, 40);
+    if (tag === 'select') { const o = el.options[el.selectedIndex]; return o ? clean(o.text).slice(0, 40) : ''; }
+    return '';
+  };
+  const checkedOf = el => {
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    if (type === 'checkbox' || type === 'radio') return !!el.checked;
+    if (el.hasAttribute('aria-checked')) return el.getAttribute('aria-checked') === 'true';
+    return null;
+  };
+  const disabledOf = el => !!(el.disabled || el.getAttribute('aria-disabled') === 'true');
+  const visibleOf = el => {
+    if (!el.isConnected) return false;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return false;
+    const cs = getComputedStyle(el);
+    return cs.display !== 'none' && cs.visibility !== 'hidden';
+  };
+  // [connected, visible, value, checked, disabled, hash of the surrounding form/dialog/row/item text]
+  const nodeTuple = el => [el.isConnected, visibleOf(el), valueOf(el), checkedOf(el), disabledOf(el),
+                           strHash(clean(scopeOf(el).innerText || '').slice(0, 2000))];
+  const visibleText = maxChars => (document.body ? clean(document.body.innerText) : '').slice(0, maxChars);
+"""
+
+OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
   const { maxElements, maxTextChars } = args;
   document.querySelectorAll('[data-jev-idx]').forEach(e => e.removeAttribute('data-jev-idx'));
   const SEL = [
@@ -20,7 +65,6 @@ OBSERVE_JS = r"""
     '[tabindex]:not([tabindex="-1"])'
   ].join(',');
   const vw = window.innerWidth, vh = window.innerHeight;
-  const clean = s => (s || '').replace(/\s+/g, ' ').trim();
   const candidates = [];
   const seen = new Set();
 
@@ -143,14 +187,20 @@ OBSERVE_JS = r"""
   }
   candidates.sort((a, b) => (a.y - b.y) || (a.x - b.x));
   const kept = candidates.slice(0, maxElements);
-  kept.forEach((c, i) => { c.el.setAttribute('data-jev-idx', String(i)); c.idx = i; delete c.el; });
-  const body = document.body ? clean(document.body.innerText) : '';
+  const nodes = {};
+  kept.forEach((c, i) => {
+    c.el.setAttribute('data-jev-idx', String(i));
+    c.idx = i;
+    nodes[String(i)] = nodeTuple(c.el);
+    delete c.el;
+  });
   return {
     url: location.href,
     title: document.title,
     elements: kept,
     truncated: candidates.length - kept.length,
-    visible_text: body.slice(0, maxTextChars),
+    visible_text: visibleText(maxTextChars),
+    fingerprint: { url: location.href, title: document.title, text_head: visibleText(500), nodes },
     scroll: {
       y: Math.round(window.scrollY),
       viewport: vh,
@@ -160,14 +210,80 @@ OBSERVE_JS = r"""
 }
 """
 
+# Cheap re-read of what the observation recorded, without re-tagging: the nodes still carry data-jev-idx.
+FINGERPRINT_JS = "() => {\n" + JS_HELPERS + r"""
+  const nodes = {};
+  for (const el of document.querySelectorAll('[data-jev-idx]')) nodes[el.getAttribute('data-jev-idx')] = nodeTuple(el);
+  return { url: location.href, title: document.title, text_head: visibleText(500), nodes };
+}
+"""
+
+TUPLE_FIELDS = ("connected", "visible", "value", "checked", "disabled", "context")
+GUARD_SKIPPED = {"SCROLL_DOWN", "SCROLL_UP", "WAIT"}
+TARGET_OPERATIONS = {"CLICK", "TYPE_TEXT", "SELECT"}
+
 
 def observe(page, max_elements: int = 60, max_text_chars: int = 2000) -> dict:
-    """Run the observation script on the current page and return the observation dict."""
+    """Run the observation script on the current page and return the observation dict.
+
+    Besides the element table it carries `fingerprint`: url, title, the first 500 chars of visible text and
+    one identity/meaning tuple per tagged node, which `fingerprint()` + `compare_fingerprint()` check again
+    right before acting.
+    """
     obs = page.evaluate(OBSERVE_JS, {"maxElements": max_elements, "maxTextChars": max_text_chars})
     s = obs["scroll"]
     obs["can_scroll_down"] = s["y"] + s["viewport"] < s["height"] - 8
     obs["can_scroll_up"] = s["y"] > 8
     return obs
+
+
+def fingerprint(page) -> dict:
+    """The current identity/meaning fingerprint of the tagged nodes (same functions as observe())."""
+    return page.evaluate(FINGERPRINT_JS)
+
+
+def _tuple_diff(before: list, after: list) -> str | None:
+    for name, b, a in zip(TUPLE_FIELDS, before, after):
+        if b != a:
+            return name
+    return None if len(before) == len(after) else "shape"
+
+
+def compare_fingerprint(before: dict, after: dict, operation: str, target_idx=None) -> str | None:
+    """Why the page no longer means what Jev saw, or None if the decision can be executed.
+
+    Scroll and WAIT never go stale. CLICK / TYPE_TEXT / SELECT compare the url and only the target node's
+    tuple: unrelated content may change (a clock, a notification count) without invalidating a click on a
+    still-identical control. DONE / BLOCKED / PRESS_ENTER and anything else compare url, title, the text head
+    and every node tuple, because those decisions are about the whole page.
+    """
+    if operation in GUARD_SKIPPED:
+        return None
+    if before.get("url") != after.get("url"):
+        return "url changed"
+    b_nodes, a_nodes = before.get("nodes") or {}, after.get("nodes") or {}
+    if operation in TARGET_OPERATIONS:
+        key = str(target_idx)
+        if key not in b_nodes:
+            return f"target [{key}] was not in the observation"
+        if key not in a_nodes:
+            return f"target [{key}] is no longer on the page"
+        diff = _tuple_diff(b_nodes[key], a_nodes[key])
+        return f"target [{key}] changed: {diff}" if diff else None
+    if before.get("title") != after.get("title"):
+        return "title changed"
+    if before.get("text_head") != after.get("text_head"):
+        return "visible text changed"
+    for key, tup in b_nodes.items():
+        if key not in a_nodes:
+            return f"element [{key}] is no longer on the page"
+        diff = _tuple_diff(tup, a_nodes[key])
+        if diff:
+            return f"element [{key}] changed: {diff}"
+    extra = [k for k in a_nodes if k not in b_nodes]
+    if extra:
+        return f"element [{extra[0]}] appeared"
+    return None
 
 
 def element_label(e: dict) -> str:

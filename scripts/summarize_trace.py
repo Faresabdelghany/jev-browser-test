@@ -52,6 +52,8 @@ def _flags(step: dict) -> str:
         f.append(f"REPEAT×{step['repeat_count']}")
     if step.get("never_violated"):
         f.append("NEVER:" + ",".join(step["never_violated"]))
+    if step.get("stale"):
+        f.append("STALE")
     if (step.get("target") or {}).get("missing"):
         f.append("NO-TARGET-ANSWER")
     if step.get("invalid_answer"):
@@ -96,7 +98,10 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
             if ex.get("confirmed"):
                 op = "DONE (confirmed)"
         elif ex.get("action") == "WAIT" and ex.get("reason"):
-            op = "DONE (checking)" if ex["reason"] == "confirming DONE" else f"{op} (not run)"
+            if s.get("stale"):
+                op = f"{op} (stale)"
+            else:
+                op = "DONE (checking)" if ex["reason"] == "confirming DONE" else f"{op} (not run)"
         target = ""
         tg = s.get("target")
         if tg and not tg.get("missing"):

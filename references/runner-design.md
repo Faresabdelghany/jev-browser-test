@@ -50,7 +50,18 @@ secrets out of any model that does not need them, and turns a missing value into
 
 time budget → observe → ask Jev (re-ask once if the `operation` answer fails validation) → `never`
 violated (fail_fast) → `done_when` satisfied (`auto_done`) → invalid `operation` after the retry (`error`) →
-DONE / BLOCKED chosen → repeat detection (`stuck`) → low-confidence streak → execute → settle → next step.
+low-confidence streak → freshness guard (stale → WAIT and re-observe; `max_stale` in a row →
+`unstable_page`) → DONE / BLOCKED chosen → repeat detection (`stuck`) → execute → settle → next step.
+
+**Freshness guard.** Jev decides on an observation, but the page may move on while it decides. Before
+executing, `observe.fingerprint()` re-reads what the observation recorded, without re-tagging: url, title,
+the first 500 chars of visible text, and for every tagged node `[connected, visible, value, checked,
+disabled, hash of its form/dialog/row/item text]`. `compare_fingerprint()` checks only the target node
+(plus url) for CLICK / TYPE_TEXT / SELECT, and everything for DONE / BLOCKED / PRESS_ENTER; SCROLL and WAIT
+never go stale. The same JS helpers produce the tuples at both times. Identity and meaning, not geometry:
+animations move boxes without changing what a control means, and Playwright's actionability checks resolve
+geometry and hit-testing at click time anyway. A stale decision executes nothing (`step.stale` has the
+reason, `executed` is a WAIT), is not an action and is not shown to Jev as one; mutations are never retried.
 
 Repeat detection keys on `(page signature, operation, target, value_key)`. The signature hashes URL, title,
 the element table and the first 500 chars of visible text, so a page that changes only far below the fold

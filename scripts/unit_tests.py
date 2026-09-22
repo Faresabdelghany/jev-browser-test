@@ -560,6 +560,59 @@ class SpecValidationTests(unittest.TestCase):
         self.assertTrue(any("quiet_ms" in p for p in self.problems(browser={"quiet_ms": -1})))
 
 
+class FingerprintCompareTests(unittest.TestCase):
+    def fp(self, **changes) -> dict:
+        base = {"url": "http://x/a", "title": "A", "text_head": "hello",
+                "nodes": {"0": [True, True, "", None, False, "aaaa"], "1": [True, True, "tom", None, False, "bbbb"]}}
+        nodes = dict(base["nodes"])
+        for k, v in changes.pop("nodes", {}).items():
+            if v is None:
+                nodes.pop(k, None)
+            else:
+                nodes[k] = v
+        base["nodes"] = nodes
+        base.update(changes)
+        return base
+
+    def test_scroll_and_wait_never_stale(self) -> None:
+        from observe import compare_fingerprint
+        for op in ("SCROLL_DOWN", "SCROLL_UP", "WAIT"):
+            self.assertIsNone(compare_fingerprint(self.fp(), self.fp(url="http://y/", title="B", nodes={"0": None}), op))
+
+    def test_target_operations_compare_only_the_target(self) -> None:
+        from observe import compare_fingerprint
+        before = self.fp()
+        other_changed = self.fp(title="B", text_head="bye", nodes={"1": [True, True, "tom!", None, False, "cccc"]})
+        self.assertIsNone(compare_fingerprint(before, other_changed, "CLICK", 0))
+        self.assertEqual(compare_fingerprint(before, other_changed, "TYPE_TEXT", 1), "target [1] changed: value")
+        self.assertEqual(compare_fingerprint(before, self.fp(nodes={"0": [True, True, "", None, True, "aaaa"]}), "CLICK", 0),
+                         "target [0] changed: disabled")
+        self.assertEqual(compare_fingerprint(before, self.fp(nodes={"0": [True, True, "", None, False, "zzzz"]}), "SELECT", 0),
+                         "target [0] changed: context")
+        self.assertEqual(compare_fingerprint(before, self.fp(nodes={"0": None}), "CLICK", 0), "target [0] is no longer on the page")
+        self.assertEqual(compare_fingerprint(before, self.fp(url="http://x/b"), "CLICK", 0), "url changed")
+        self.assertEqual(compare_fingerprint(before, self.fp(), "CLICK", 7), "target [7] was not in the observation")
+
+    def test_whole_page_operations_compare_everything(self) -> None:
+        from observe import compare_fingerprint
+        before = self.fp()
+        for op in ("DONE", "BLOCKED", "PRESS_ENTER"):
+            self.assertIsNone(compare_fingerprint(before, self.fp(), op))
+            self.assertEqual(compare_fingerprint(before, self.fp(title="B"), op), "title changed")
+            self.assertEqual(compare_fingerprint(before, self.fp(text_head="bye"), op), "visible text changed")
+            self.assertEqual(compare_fingerprint(before, self.fp(nodes={"1": [True, False, "tom", None, False, "bbbb"]}), op),
+                             "element [1] changed: visible")
+            self.assertEqual(compare_fingerprint(before, self.fp(nodes={"1": None}), op), "element [1] is no longer on the page")
+            self.assertEqual(compare_fingerprint(before, self.fp(nodes={"2": [True, True, "", None, False, "dddd"]}), op),
+                             "element [2] appeared")
+
+    def test_max_stale_is_validated(self) -> None:
+        from spec import validate
+        self.assertEqual(DEFAULTS["thresholds"]["max_stale"], 3)
+        self.assertTrue(any("max_stale" in p for p in validate(_merge(SPEC, {"thresholds": {"max_stale": 0}}))))
+        self.assertTrue(any("max_repeat" in p for p in validate(_merge(SPEC, {"thresholds": {"max_repeat": "3"}}))))
+
+
 class RulesTests(unittest.TestCase):
     def test_questions_carry_structured_instructions(self) -> None:
         from rules import CHECK, NEXT_ACTION, TARGET, VALUE

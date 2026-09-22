@@ -43,6 +43,7 @@ it without opening a browser. Unknown fields are ignored; every optional field h
 | `thresholds.min_confidence` | 0–1 | 0.5 | If the operation, the target, or (for TYPE_TEXT) the `type_value` choice is below this, the decision is **not executed**: the step becomes a WAIT and is flagged `low_confidence` |
 | `thresholds.max_low_confidence_steps` | int | 3 | Consecutive undecided steps before stopping with `low_confidence` |
 | `thresholds.max_repeat` | int | 3 | Same action on an unchanged page this many times → `stuck` |
+| `thresholds.max_stale` | int | 3 | Consecutive decisions invalidated because the page changed while Jev was deciding (nothing executed) → `unstable_page` |
 | `browser.headless` | bool | `true` | `--headed` on the CLI overrides |
 | `browser.viewport` | [w, h] | [1280, 800] | |
 | `browser.settle_ms` | int | 400 | **Cap** on the wait after every action: the runner observes as soon as two animation frames have passed and the DOM has been quiet for `quiet_ms`, or when this cap is reached. Raise for slow apps (specs that raised it for the old fixed pause just get a longer cap) |

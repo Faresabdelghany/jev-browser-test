@@ -39,6 +39,7 @@ DEFAULTS = {
         "min_confidence": 0.5,
         "max_low_confidence_steps": 3,
         "max_repeat": 3,
+        "max_stale": 3,  # consecutive decisions invalidated by the page changing -> unstable_page
     },
     "browser": {
         "headless": True,
@@ -187,6 +188,10 @@ def validate(spec: dict) -> list[str]:
         v = t.get(k, 0.5)
         if not (0.0 <= float(v) <= 1.0):
             errors.append(f"'thresholds.{k}' must be between 0 and 1")
+    for k in ("max_low_confidence_steps", "max_repeat", "max_stale"):
+        v = t.get(k, 1)
+        if not (isinstance(v, int) and not isinstance(v, bool) and v >= 1):
+            errors.append(f"'thresholds.{k}' must be an integer >= 1")
     return errors
 
 

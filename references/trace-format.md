@@ -22,6 +22,7 @@ the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to re
 | `stuck` | Same action on an unchanged page `max_repeat` times | The action had no effect: dead button (bug), or Jev is confused by the page (test issue: add a note or a `setup` step) |
 | `low_confidence` | `max_low_confidence_steps` consecutive uncertain decisions, none of them executed | Jev could not choose between the offered options: look at `decision_confidence` and the probabilities in `--step N`. A split over `type_value` means the `data` key names do not match the field labels (rename them); a split over targets means the goal/notes do not say which of several similar controls to use |
 | `budget_exhausted` | Ran out of steps or seconds | Wandering (test issue, tighten the goal) or a very long flow (raise the budget) |
+| `unstable_page` | `thresholds.max_stale` consecutive decisions were stale: the page changed between the observation and Jev's answer every time, so nothing was executed | Environment: the page never holds still (animation, polling, a slow render). Raise `browser.quiet_ms` / `settle_ms`, or add a `setup` `wait_for` for the thing that keeps changing. Each stale step's `stale` says what moved |
 | `error` | Runner, browser or API failure (`trace.error`). `invalid operation answer: <reason>` means Jev's `operation` answer failed validation twice in a row for one step (the step carries `invalid_answer` and `retried`) | Environment issue; rerun before concluding anything |
 
 `trace.pass` is `true` only for `passed`.
@@ -56,6 +57,7 @@ the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to re
       "never_violated": ["error_visible"],                           // only when a never check fired
       "invalid_answer": "operation: choice 'FLY' was not offered",   // only when an answer failed validation
       "retried": true,                                               // only when the request was re-sent
+      "stale": "target [3] changed: disabled",                       // only when the page changed during the decision; nothing was executed
       "executed": { "action": "CLICK", "ok": true, "error": null, "element": 3 },
       "settle": { "ended": "quiet", "ms": 118 },                     // how the post-action wait ended: quiet | options | options_timeout | cap | navigated
       "latency_ms": { "jev": 131, "browser": 640 }
@@ -89,6 +91,13 @@ Notes that matter when judging:
   `{ "question": ..., "missing": true, "invalid": "<reason>" }` (flag `NO-TARGET-ANSWER`) and the action
   fails safely with `executed.ok == false`. A check whose Noul value is malformed is simply absent from
   `checks` for that step. None of this is evidence about the page; it is evidence about the API answer.
+- `stale` means the freshness guard fired: after Jev answered and before anything was executed, the runner
+  re-read the identity and meaning of what the decision depends on (for CLICK/TYPE_TEXT/SELECT the target
+  node: connected, visible, value, checked, disabled and the text of its form/dialog/row; for DONE, BLOCKED
+  and PRESS_ENTER the url, title, text head and every node) and it differed. `executed` is a WAIT with the
+  reason, the step is not an action and is not in Jev's `recent_actions`; the loop observed again. Geometry
+  is deliberately not compared: animations move boxes without changing meaning, and Playwright resolves
+  position at click time. `max_stale` in a row ends the run as `unstable_page`.
 - `page_changed` on a step compares the page signature (URL, title, element table, first 500 chars of text)
   the decision was made on with the **next** observation. `false` after a CLICK means the click did nothing
   Jev could see; Jev gets the same flag in `recent_actions`, so a repeated no-op is its mistake, not blindness.

@@ -21,7 +21,7 @@ import time
 from datetime import datetime, timezone
 
 from jev_client import JevClient, JevError
-from observe import observe, signature
+from observe import GUARD_SKIPPED, TARGET_OPERATIONS, compare_fingerprint, fingerprint, observe, signature
 from policy import build_questions, build_state, read_checks, read_choice, resolve_target, validate_choice
 from spec import load_dotenv, load_spec
 from summarize_trace import summarize
@@ -34,6 +34,7 @@ TERMINAL_STATUSES = {
     "stuck": "the same action on the same page repeated max_repeat times",
     "low_confidence": "max_low_confidence_steps consecutive low-confidence decisions (none of them executed): Jev could not choose between the offered options",
     "budget_exhausted": "max_steps or max_seconds reached",
+    "unstable_page": "the page kept changing while Jev was deciding: max_stale consecutive decisions were stale and nothing was executed",
     "error": "the runner, browser or TypeSafe API failed",
 }
 
@@ -283,6 +284,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
     history: list[dict] = []
     last_operation: str | None = None
     low_streak = 0
+    stale_streak = 0
     pending_done = False  # a confident DONE with unsatisfied checks gets one settle-and-recheck
     pending_change: tuple[dict, dict, str] | None = None  # (history entry, trace step, signature decided on)
     repeats: dict = {}
@@ -461,6 +463,36 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
                     trace["steps"].append(step)
                     continue
                 low_streak = 0
+
+                # Freshness guard. Jev decided on the observation; the page may have moved on while it
+                # was deciding (a toast, a re-render, a redirect). Re-read identity and meaning of what the
+                # decision depends on - the target node for CLICK/TYPE_TEXT/SELECT, the whole page for
+                # DONE/BLOCKED/PRESS_ENTER - and if it differs, execute nothing and observe again. A
+                # mutation is never retried; max_stale consecutive stale decisions end the run.
+                guard = operation not in GUARD_SKIPPED and not (
+                    operation in TARGET_OPERATIONS and (not target or target.get("missing"))
+                )
+                if guard:
+                    try:
+                        reason = compare_fingerprint(obs["fingerprint"], fingerprint(page), operation, (target or {}).get("element"))
+                    except Exception:  # noqa: BLE001 - the document navigated under us
+                        reason = "document navigated"
+                    if reason:
+                        stale_streak += 1
+                        step["stale"] = reason
+                        if stale_streak >= th["max_stale"]:
+                            status = "unstable_page"
+                            step["executed"] = {"action": "STOP", "ok": True, "error": None}
+                            trace["steps"].append(step)
+                            break
+                        step["executed"] = {"action": "WAIT", "ok": True, "error": None,
+                                            "reason": f"page changed during the decision: {reason}"}
+                        t_b = time.perf_counter()
+                        step["settle"] = settle(page, spec)
+                        step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
+                        trace["steps"].append(step)
+                        continue
+                stale_streak = 0
 
                 if operation == "DONE":
                     if satisfied(checks):

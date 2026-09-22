@@ -8,7 +8,9 @@ blocked (needed data missing), low_confidence (Jev unsure which value to type: n
 plus the two DONE rules: a low-confidence DONE is a WAIT, and a confident DONE with unsatisfied
 checks gets one settle-and-recheck before the verdict, and the answer validation: an operation
 answer that fails validation is re-asked once (the run goes on), twice ends the run as error.
-Also checks that a ./.env is loaded.
+The freshness guard is exercised with a slow fake Jev: a target that changes during the decision
+makes the step stale (nothing executed, re-observe, the run still passes) and a page that never
+holds still ends as unstable_page. Also checks that a ./.env is loaded.
 Run this after installing to confirm Playwright + Chromium work before spending TypeSafe credit.
 """
 from __future__ import annotations
@@ -18,6 +20,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 
 from run_test import run
 from spec import load_dotenv
@@ -43,7 +46,22 @@ PAGE = """<!doctype html><html><head><title>Mini Shop</title>
 <div id="banner">We use cookies. <button onclick="document.getElementById('banner').remove()">Accept cookies</button></div>
 <script>
  const FAIL = location.search.includes('fail=1');
- function showResults(){ document.getElementById('results').hidden = false; }
+ const STALE_ONCE = location.search.includes('stale_once=1');
+ function showResults(){
+   document.getElementById('results').hidden = false;
+   if (STALE_ONCE) {
+     // The first "Add to cart" button goes disabled 200 ms after the results appear (long after the
+     // observation, well before a 400 ms decision lands) and comes back 2 s later.
+     const first = document.querySelector('#results button');
+     setTimeout(() => { first.disabled = true; }, 200);
+     setTimeout(() => { first.disabled = false; }, 2000);
+   }
+ }
+ if (location.search.includes('unstable=1')) {
+   // The cookie banner's text changes every 70 ms, so the Accept button's surroundings never hold still.
+   let tick = 0;
+   setInterval(() => { document.getElementById('banner').firstChild.textContent = 'We use cookies (' + (++tick) + '). '; }, 70);
+ }
  let count = 0;
  const SLOW = location.search.includes('slow=1');
  function addToCart(){
@@ -192,10 +210,11 @@ def observer_check(url: str) -> list[str]:
 class FakeJev:
     """Rule-based stand-in for Jev. Answers exactly the shapes the real API returns."""
 
-    def __init__(self, mode: str = "normal") -> None:
+    def __init__(self, mode: str = "normal", delay_ms: int = 0) -> None:
         # normal | hedge_value | early_low_done | early_confident_done | done_after_add
         # | invalid_operation_once | invalid_operation_always
         self.mode = mode
+        self.delay_ms = delay_ms  # a slow "model", so a page mutation can land between observation and decision
         self.requests = 0
         self.op_requests = 0
         self.seen_states: list[dict] = []
@@ -222,6 +241,8 @@ class FakeJev:
     def system_one(self, state: dict, questions: dict) -> dict:
         self.requests += 1
         self.seen_states.append(state)
+        if self.delay_ms:
+            time.sleep(self.delay_ms / 1000)
         text = state["visible_text"]
         answers: dict = {}
         for key, q in questions.items():
@@ -487,7 +508,42 @@ def main() -> int:
     if trace["actions_executed"] != 0:
         failures.append("an unvalidated operation answer was counted as an action")
 
-    # 10. .env in the working directory is loaded; already-exported variables win; quotes are stripped
+    # 10. the target changes while Jev is deciding -> the decision is stale, nothing is executed, the
+    #     run re-observes and finishes with the other button (one stale step, same number of actions)
+    spec = base_spec(url + "?stale_once=1")
+    jev = FakeJev(delay_ms=400)
+    out = os.path.join(tmp, "run-stale-once")
+    trace = run(spec, jev, out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    stale_steps = [s for s in trace["steps"] if s.get("stale")]
+    if trace["status"] != "passed" or trace["actions_executed"] != 4:
+        failures.append(f"stale_once: expected passed with 4 actions, got {trace['status']} with {trace['actions_executed']} ({trace.get('error')})")
+    if len(stale_steps) != 1 or "disabled" not in stale_steps[0]["stale"]:
+        failures.append(f"stale_once: expected exactly one stale step naming 'disabled', got {[s.get('stale') for s in trace['steps']]}")
+    if stale_steps and stale_steps[0]["executed"] != {"action": "WAIT", "ok": True, "error": None,
+                                                        "reason": f"page changed during the decision: {stale_steps[0]['stale']}"}:
+        failures.append(f"stale step not recorded as a WAIT with the reason: {stale_steps[0]['executed']}")
+    if stale_steps and any(a["step"] == stale_steps[0]["n"] for a in jev.seen_states[-1]["recent_actions"]):
+        failures.append("the stale step leaked into recent_actions")
+    clicked = [s for s in trace["steps"] if (s.get("executed") or {}).get("action") == "CLICK" and "Add to cart" in (s.get("target") or {}).get("label", "")]
+    if not clicked or clicked[-1]["target"]["element"] == stale_steps[0]["target"]["element"] if stale_steps else True:
+        failures.append("after the stale step the run did not pick the other Add-to-cart button")
+
+    # 11. the page never holds still -> max_stale consecutive stale decisions -> unstable_page, nothing executed
+    spec = base_spec(url + "?unstable=1")
+    out = os.path.join(tmp, "run-unstable")
+    trace = run(spec, FakeJev(delay_ms=300), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    if trace["status"] != "unstable_page" or trace["actions_executed"] != 0:
+        failures.append(f"unstable: expected unstable_page with no actions, got {trace['status']} with {trace['actions_executed']}")
+    if len(trace["steps"]) != spec["thresholds"]["max_stale"] or not all(s.get("stale") for s in trace["steps"]):
+        failures.append(f"unstable: expected {spec['thresholds']['max_stale']} stale steps, got {[s.get('stale') for s in trace['steps']]}")
+    if trace["steps"] and trace["steps"][-1]["executed"]["action"] != "STOP":
+        failures.append(f"unstable: terminal step should be a STOP: {trace['steps'][-1]['executed']}")
+
+    # 12. .env in the working directory is loaded; already-exported variables win; quotes are stripped
     env_dir = os.path.join(tmp, "dotenv")
     os.makedirs(env_dir)
     with open(os.path.join(env_dir, ".env"), "w", encoding="utf-8") as f:
