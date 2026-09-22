@@ -49,6 +49,9 @@ look at (step number, screenshot, the specific question).
    `NO-TARGET-ANSWER`, `INVALID-ANSWER` (a Jev answer failed validation; the reason is in `step.invalid_answer`),
    `RETRIED` (the request was re-sent once), `ERROR`.
 4. The step **after** the last sensible action: its checks and screenshot show what the app actually did.
+   With the default `screenshots: "key"` only the terminal and flagged steps have a picture; the step
+   before a divergence usually has none, but its element table and probabilities are in the trace
+   (`--step N`). Rerun with `--screenshots all` when a human needs to see that page.
 5. `--step N` for the divergence point: was the chosen element the right one? What else was offered?
 6. `final.png`.
 

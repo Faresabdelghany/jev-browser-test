@@ -116,8 +116,27 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
     lines.append("")
     lines.append("final checks: " + _fmt_checks(final.get("checks", {}), spec))
     if out_dir:
-        lines.append(f"trace: {os.path.join(out_dir, 'trace.json')}" + ("  screenshots: steps/NNN.png, steps/final.png" if any(s.get("screenshot") for s in trace.get("steps", [])) else ""))
+        lines.append(f"trace: {os.path.join(out_dir, 'trace.json')}" + _screenshot_hint(trace))
     return "\n".join(lines)
+
+
+def _screenshot_hint(trace: dict) -> str:
+    steps = trace.get("steps", [])
+    with_shot = [s["n"] for s in steps if s.get("screenshot")]
+    failed = [s["n"] for s in steps if s.get("screenshot_after_failure")]
+    final = (trace.get("final") or {}).get("screenshot")
+    if not with_shot and not final:
+        return ""
+    if steps and len(with_shot) == len(steps):
+        which = "every step"
+    else:
+        which = "steps " + ", ".join(str(n) for n in with_shot) if with_shot else "no step"
+    hint = f"  screenshots: {which}"
+    if failed:
+        hint += f"; after failed action: {', '.join(f'{n:03d}-failed.png' for n in failed)}"
+    if final:
+        hint += " + final.png"
+    return hint
 
 
 def dump_step(trace: dict, n: int) -> str:

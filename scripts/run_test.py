@@ -1,6 +1,6 @@
 """Run one Jev browser test from a spec and write a trace.
 
-    python scripts/run_test.py path/to/spec.json [--out runs/<id>] [--headed] [--no-screenshots] [--cdp-url URL]
+    python scripts/run_test.py path/to/spec.json [--out runs/<id>] [--headed] [--screenshots all|key|none] [--cdp-url URL]
 
 Exit codes: 0 = passed, 1 = did not pass (see trace status), 2 = spec / environment problem.
 
@@ -259,12 +259,20 @@ def wait_entry(n: int, operation: str, reason: str) -> dict:
     return {"step": n, "operation": operation, "reason": reason, "ok": True, "page_changed": None}
 
 
-def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: bool = False) -> dict:
-    """Execute the spec. `jev` is anything with .system_one(state, questions) and .usage_summary()."""
+SCREENSHOT_MODES = (True, False, "key")
+
+
+def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, headed: bool = False) -> dict:
+    """Execute the spec. `jev` is anything with .system_one(state, questions) and .usage_summary().
+
+    `screenshots`: True (every step), False (none, not even final.png) or "key" (terminal and flagged
+    steps only); None takes the spec's `observation.screenshots`.
+    """
     from playwright.sync_api import sync_playwright
 
-    if screenshots is None:
-        screenshots = spec["observation"]["screenshots"]
+    mode = spec["observation"]["screenshots"] if screenshots is None else screenshots
+    if not (mode is True or mode is False or mode == "key"):
+        raise ValueError(f"screenshots must be one of {SCREENSHOT_MODES}, got {mode!r}")
     os.makedirs(os.path.join(out_dir, "steps"), exist_ok=True)
     th = spec["thresholds"]
     budget = spec["budget"]
@@ -306,7 +314,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
             pending_change = None
 
     def shot(page, name: str) -> str | None:
-        if not screenshots:
+        if mode is False:
             return None
         rel = os.path.join("steps", name)
         try:
@@ -314,6 +322,30 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
             return rel
         except Exception:
             return None
+
+    def key_step(step: dict) -> bool:
+        """The steps worth a picture in "key" mode: something went wrong or the runner refused to act."""
+        return bool(step.get("never_violated") or step.get("low_confidence") or step.get("stale")
+                    or step.get("repeat_count", 0) >= 2)
+
+    def capture(page, step: dict, terminal: bool = False) -> None:
+        """Screenshot policy. Taken after Jev's answer and before execution, so the picture is the page
+        Jev decided on: every step with True, only terminal or flagged steps with "key", never with False."""
+        if step.get("screenshot") or mode is False:
+            return
+        if mode is True or terminal or key_step(step):
+            step["screenshot"] = shot(page, f"{step['n']:03d}.png")
+
+    def finish(page, step: dict, new_status: str, executed: dict) -> None:
+        """Every terminal site ends here: set the status, record what was (not) executed, take the terminal
+        screenshot according to the policy, append the step. The caller then breaks out of the loop."""
+        nonlocal status
+        status = new_status
+        step["executed"] = executed
+        capture(page, step, terminal=True)
+        trace["steps"].append(step)
+
+    STOP = {"action": "STOP", "ok": True, "error": None}
 
     def satisfied(checks: dict) -> bool:
         return bool(spec["done_when"]) and all(checks.get(c, 0.0) >= th["check_true"] for c in spec["done_when"])
@@ -367,7 +399,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
                     "url": obs["url"],
                     "title": obs["title"],
                     "signature": sig,
-                    "screenshot": shot(page, f"{n:03d}.png"),
+                    "screenshot": None,  # taken after Jev's answer, per the screenshot policy (capture)
                     "elements": obs["elements"],
                     "truncated_elements": obs["truncated"],
                     "visible_text": obs["visible_text"][:600],
@@ -396,9 +428,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
                         if op_problem:
                             note_invalid(step, f"operation after retry: {op_problem}")
                 except JevError as e:
-                    status, error = "error", str(e)
-                    step["error"] = error
-                    trace["steps"].append(step)
+                    error = step["error"] = str(e)
+                    finish(page, step, "error", dict(STOP))
                     break
                 checks = read_checks(answers, spec)
                 step["checks"] = checks
@@ -409,32 +440,25 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
                 if bad:
                     step["never_violated"] = bad
                     if spec["fail_fast"]:
-                        status = "never_violated"
-                        step["executed"] = {"action": "STOP", "ok": True, "error": None}
-                        trace["steps"].append(step)
+                        finish(page, step, "never_violated", dict(STOP))
                         break
 
                 if pending_done:
                     # Jev said DONE last step while done_when was unsatisfied; the page has now had a
                     # full settle (reloads, toasts, redirects). This observation is the verdict.
-                    status = "passed" if satisfied(checks) else "done_unverified"
-                    step["executed"] = {"action": "DONE", "ok": True, "error": None, "confirmed": True}
-                    trace["steps"].append(step)
+                    finish(page, step, "passed" if satisfied(checks) else "done_unverified",
+                           {"action": "DONE", "ok": True, "error": None, "confirmed": True})
                     break
 
                 if satisfied(checks) and spec["auto_done"]:
-                    status = "passed"
-                    step["executed"] = {"action": "AUTO_DONE", "ok": True, "error": None}
-                    trace["steps"].append(step)
+                    finish(page, step, "passed", {"action": "AUTO_DONE", "ok": True, "error": None})
                     if n == 1 and not spec["setup"]:
                         trace["passed_without_actions"] = True
                     break
 
                 if op is None:
-                    status, error = "error", f"invalid operation answer: {op_problem}"
-                    step["error"] = error
-                    step["executed"] = {"action": "STOP", "ok": True, "error": None}
-                    trace["steps"].append(step)
+                    error = step["error"] = f"invalid operation answer: {op_problem}"
+                    finish(page, step, "error", dict(STOP))
                     break
                 operation = op["choice"]
                 target = resolve_target(operation, answers, obs, meta)
@@ -468,12 +492,11 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
                 if low:
                     low_streak += 1
                     if low_streak >= th["max_low_confidence_steps"]:
-                        status = "low_confidence"
-                        step["executed"] = {"action": "STOP", "ok": True, "error": None}
-                        trace["steps"].append(step)
+                        finish(page, step, "low_confidence", dict(STOP))
                         break
                     step["executed"] = {"action": "WAIT", "ok": True, "error": None,
                                         "reason": f"low confidence; {operation} not executed"}
+                    capture(page, step)
                     record(wait_entry(n, "WAIT", "undecided between the offered options; nothing was executed"), step, sig)
                     t_b = time.perf_counter()
                     settle(page, spec)
@@ -499,12 +522,11 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
                         stale_streak += 1
                         step["stale"] = reason
                         if stale_streak >= th["max_stale"]:
-                            status = "unstable_page"
-                            step["executed"] = {"action": "STOP", "ok": True, "error": None}
-                            trace["steps"].append(step)
+                            finish(page, step, "unstable_page", dict(STOP))
                             break
                         step["executed"] = {"action": "WAIT", "ok": True, "error": None,
                                             "reason": f"page changed during the decision: {reason}"}
+                        capture(page, step)
                         t_b = time.perf_counter()
                         step["settle"] = settle(page, spec)
                         step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
@@ -514,19 +536,16 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
 
                 if operation == "DONE":
                     if satisfied(checks):
-                        status = "passed"
-                        step["executed"] = {"action": "DONE", "ok": True, "error": None}
-                        trace["steps"].append(step)
+                        finish(page, step, "passed", {"action": "DONE", "ok": True, "error": None})
                         break
                     if n >= budget["max_steps"]:
-                        status = "done_unverified"
-                        step["executed"] = {"action": "DONE", "ok": True, "error": None}
-                        trace["steps"].append(step)
+                        finish(page, step, "done_unverified", {"action": "DONE", "ok": True, "error": None})
                         break
                     # Confident DONE but the checks disagree: give the page one full settle and look
                     # again before calling it (a reload or redirect is often still in flight).
                     pending_done = True
                     step["executed"] = {"action": "WAIT", "ok": True, "error": None, "reason": "confirming DONE"}
+                    capture(page, step)
                     record(wait_entry(n, "DONE", "checking the result before finishing"), step, sig)
                     t_b = time.perf_counter()
                     page.wait_for_timeout(spec["browser"]["settle_ms"])
@@ -535,22 +554,21 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
                     trace["steps"].append(step)
                     continue
                 if operation == "BLOCKED":
-                    status = "blocked"
-                    step["executed"] = {"action": "BLOCKED", "ok": True, "error": None}
-                    trace["steps"].append(step)
+                    finish(page, step, "blocked", {"action": "BLOCKED", "ok": True, "error": None})
                     break
 
                 key = (sig, operation, target["choice"] if target and not target.get("missing") else None, value_key)
                 repeats[key] = repeats.get(key, 0) + 1
                 step["repeat_count"] = repeats[key]
                 if repeats[key] >= th["max_repeat"]:
-                    status = "stuck"
-                    step["executed"] = {"action": "STOP", "ok": True, "error": None}
-                    trace["steps"].append(step)
+                    finish(page, step, "stuck", dict(STOP))
                     break
 
+                capture(page, step)  # the page Jev decided on, before anything changes it
                 t_b = time.perf_counter()
                 executed = execute(page, spec, operation, target, value_key)
+                if not executed["ok"]:
+                    step["screenshot_after_failure"] = shot(page, f"{n:03d}-failed.png")
                 target_role = next((e["role"] for e in obs["elements"] if e["idx"] == (target or {}).get("element")), None)
                 step["settle"] = settle(page, spec, after=(operation, target_role))
                 step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
@@ -627,7 +645,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("spec")
     ap.add_argument("--out", help="output directory (default runs/<spec id>/<timestamp>)")
     ap.add_argument("--headed", action="store_true", help="show the browser window")
-    ap.add_argument("--no-screenshots", action="store_true")
+    ap.add_argument("--screenshots", choices=("all", "key", "none"),
+                    help="all = every step, key = terminal and flagged steps only (spec default), none = not even final.png")
+    ap.add_argument("--no-screenshots", action="store_true", help="alias for --screenshots none")
     ap.add_argument("--model", help="override TYPESAFE_MODEL (default jev-latest)")
     ap.add_argument("--cdp-url", help="attach to a running browser (overrides browser.cdp_url), e.g. http://127.0.0.1:9222")
     args = ap.parse_args(argv[1:])
@@ -655,8 +675,9 @@ def main(argv: list[str]) -> int:
         return 2
 
     out_dir = args.out or os.path.join("runs", spec["id"], datetime.now().strftime("%Y%m%d-%H%M%S"))
+    screenshots = {"all": True, "key": "key", "none": False, None: None}["none" if args.no_screenshots else args.screenshots]
     try:
-        trace = run(spec, jev, out_dir, screenshots=False if args.no_screenshots else None, headed=args.headed)
+        trace = run(spec, jev, out_dir, screenshots=screenshots, headed=args.headed)
     finally:
         close = getattr(jev, "close", None)  # the seam only requires system_one() and usage_summary()
         if close:

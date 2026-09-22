@@ -10,7 +10,8 @@ checks gets one settle-and-recheck before the verdict, and the answer validation
 answer that fails validation is re-asked once (the run goes on), twice ends the run as error.
 The freshness guard is exercised with a slow fake Jev: a target that changes during the decision
 makes the step stale (nothing executed, re-observe, the run still passes) and a page that never
-holds still ends as unstable_page. Also checks that a ./.env is loaded.
+holds still ends as unstable_page. The screenshot policy is checked in all three modes (every step,
+"key" = terminal and flagged steps only, none). Also checks that a ./.env is loaded.
 Run this after installing to confirm Playwright + Chromium work before spending TypeSafe credit.
 """
 from __future__ import annotations
@@ -470,8 +471,8 @@ def main() -> int:
         failures.append("secret not redacted in trace spec")
     if any("hunter2" in json.dumps(st) for st in jev.seen_states):
         failures.append("secret value leaked into Jev state")
-    if not os.path.exists(os.path.join(out, "steps", "001.png")):
-        failures.append("screenshot missing")
+    if not all(s.get("screenshot") == f"steps/{s['n']:03d}.png" and os.path.exists(os.path.join(out, s["screenshot"])) for s in trace["steps"]):
+        failures.append(f"screenshots=True should capture every step: {[s.get('screenshot') for s in trace['steps']]}")
     if not os.path.exists(os.path.join(out, "trace.json")):
         failures.append("trace.json missing")
     failures += state_shape_check(jev.seen_states[-1], trace)
@@ -479,16 +480,32 @@ def main() -> int:
     if not settles or not all(isinstance(s, dict) and s.get("ended") in ("quiet", "cap") and isinstance(s.get("ms"), int) for s in settles):
         failures.append(f"action steps do not carry a settle record: {settles}")
 
-    # 2. the app shows an error -> never_violated
+    # 1b. the same flow with the default policy ("key"): only the terminal step gets a picture, plus final.png
+    spec = base_spec(url)
+    out = os.path.join(tmp, "run-pass-key")
+    trace = run(spec, FakeJev(), out)  # screenshots=None -> the spec default, which is "key"
+    print(summarize(trace, out))
+    print()
+    shots = [s.get("screenshot") for s in trace["steps"]]
+    if trace["status"] != "passed" or shots[:-1] != [None] * (len(shots) - 1) or shots[-1] != f"steps/{len(shots):03d}.png":
+        failures.append(f"screenshots=key should capture only the terminal step of a clean run: {shots}")
+    if not os.path.exists(os.path.join(out, "steps", "final.png")) or trace["final"].get("screenshot") != "steps/final.png":
+        failures.append("final.png missing in key mode")
+    if f"screenshots: steps {len(shots)} + final.png" not in summarize(trace, out):
+        failures.append("summary does not say which steps have screenshots")
+
+    # 2. the app shows an error -> never_violated; in key mode the terminal step has a picture
     spec = base_spec(url + "?fail=1")
     out = os.path.join(tmp, "run-error")
-    trace = run(spec, FakeJev(), out, screenshots=False)
+    trace = run(spec, FakeJev(), out, screenshots="key")
     print(summarize(trace, out))
     print()
     if trace["status"] != "never_violated":
         failures.append(f"expected never_violated, got {trace['status']} ({trace.get('error')})")
+    if not trace["steps"][-1].get("screenshot") or any(s.get("screenshot") for s in trace["steps"][:-1]):
+        failures.append(f"key mode: only the never_violated step should have a screenshot: {[s.get('screenshot') for s in trace['steps']]}")
 
-    # 3. needed data missing -> blocked
+    # 3. needed data missing -> blocked; screenshots=False writes no picture at all
     spec = base_spec(url)
     spec["data"] = {}
     spec["secrets"] = []
@@ -498,11 +515,14 @@ def main() -> int:
     print()
     if trace["status"] != "blocked":
         failures.append(f"expected blocked, got {trace['status']} ({trace.get('error')})")
+    if any(s.get("screenshot") for s in trace["steps"]) or trace["final"].get("screenshot") or os.listdir(os.path.join(out, "steps")):
+        failures.append("screenshots=False still wrote pictures")
 
-    # 4. Jev unsure WHICH value to type -> nothing is typed, run ends low_confidence (was: typed anyway)
+    # 4. Jev unsure WHICH value to type -> nothing is typed, run ends low_confidence (was: typed anyway);
+    #    in key mode every low-confidence step has a picture
     spec = base_spec(url)
     out = os.path.join(tmp, "run-hedge-value")
-    trace = run(spec, FakeJev("hedge_value"), out, screenshots=False)
+    trace = run(spec, FakeJev("hedge_value"), out, screenshots="key")
     print(summarize(trace, out))
     print()
     ops = [s.get("executed", {}).get("action") for s in trace["steps"]]
@@ -510,6 +530,8 @@ def main() -> int:
         failures.append(f"expected low_confidence, got {trace['status']} ({trace.get('error')})")
     if "TYPE_TEXT" in ops or trace["actions_executed"] != 1:
         failures.append(f"a low-confidence value choice was executed: {ops}")
+    if not all(bool(s.get("screenshot")) == bool(s.get("low_confidence") or s is trace["steps"][-1]) for s in trace["steps"]):
+        failures.append(f"key mode: low-confidence steps should have screenshots and clean ones not: {[(s.get('low_confidence'), s.get('screenshot')) for s in trace['steps']]}")
 
     # 5. a low-confidence DONE is a WAIT, not a verdict -> the flow continues and passes
     spec = base_spec(url)
@@ -580,10 +602,12 @@ def main() -> int:
     spec = base_spec(url + "?stale_once=1")
     jev = FakeJev(delay_ms=400)
     out = os.path.join(tmp, "run-stale-once")
-    trace = run(spec, jev, out, screenshots=False)
+    trace = run(spec, jev, out, screenshots="key")
     print(summarize(trace, out))
     print()
     stale_steps = [s for s in trace["steps"] if s.get("stale")]
+    if stale_steps and not stale_steps[0].get("screenshot"):
+        failures.append("key mode: the stale step should have a screenshot")
     if trace["status"] != "passed" or trace["actions_executed"] != 4:
         failures.append(f"stale_once: expected passed with 4 actions, got {trace['status']} with {trace['actions_executed']} ({trace.get('error')})")
     if len(stale_steps) != 1 or "disabled" not in stale_steps[0]["stale"]:

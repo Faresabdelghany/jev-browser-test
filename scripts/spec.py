@@ -53,7 +53,8 @@ DEFAULTS = {
     },
     # 200 elements: the Choice cap is 255 and the table-row "stuck" seen in real runs was truncation at 60.
     # 4000 chars of viewport-first text: the toast the checks look for must not be crowded out by the header.
-    "observation": {"max_elements": 200, "max_text_chars": 4000, "screenshots": True},
+    # screenshots "key": only terminal and flagged steps (plus final.png); true = every step; false = none.
+    "observation": {"max_elements": 200, "max_text_chars": 4000, "screenshots": "key"},
 }
 
 
@@ -205,6 +206,9 @@ def validate(spec: dict) -> list[str]:
     mt = o.get("max_text_chars", 100)
     if not (isinstance(mt, int) and not isinstance(mt, bool) and mt >= 100):
         errors.append("'observation.max_text_chars' must be an integer >= 100")
+    ss = o.get("screenshots", "key")
+    if not (ss is True or ss is False or ss == "key"):
+        errors.append("'observation.screenshots' must be true, false or \"key\"")
     return errors
 
 

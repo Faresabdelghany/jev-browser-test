@@ -7,8 +7,12 @@ the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to re
 
 1. `python scripts/summarize_trace.py runs/<id>/<ts>/trace.json` — one line per step, flags on the right.
 2. For any flagged or suspicious step: `--step N` dumps it in full (probabilities, checks, the element table
-   Jev was offered) and `steps/NNN.png` shows what the page looked like *before* that decision.
-3. `steps/final.png` shows where the run ended.
+   Jev was offered) and `steps/NNN.png` shows the page Jev decided on (taken after its answer, before the
+   action). With the default `screenshots: "key"` only the terminal step and flagged steps (`never_violated`,
+   `low_confidence`, `stale`, `repeat_count ≥ 2`) have one; a failed action also leaves `NNN-failed.png`.
+   The step *before* a divergence usually has no picture: its element table and probabilities are still in
+   the trace, and `--screenshots all` restores a picture per step for a rerun.
+3. `steps/final.png` shows where the run ended (always written unless screenshots are off).
 4. Only open `trace.json` directly when you need something the above does not show.
 
 ## Terminal statuses
@@ -43,7 +47,7 @@ the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to re
   "steps": [
     {
       "n": 1, "url": "...", "title": "...", "signature": "7be5a4cf2445",
-      "screenshot": "steps/001.png",
+      "screenshot": "steps/001.png",       // null unless the policy captured this step; "screenshot_after_failure": "steps/001-failed.png" when the action failed
       "elements": [ { "idx": 3, "role": "button", "name": "Add to cart", "x": 116, "y": 151, "w": 79, "h": 21, ... } ],
       "truncated_elements": 0, "visible_text": "first 600 chars of the viewport-first text Jev saw...",
       "offered_operations": ["CLICK", "TYPE_TEXT", "WAIT", "DONE", "BLOCKED"],

@@ -558,6 +558,13 @@ class SpecValidationTests(unittest.TestCase):
         self.assertTrue(any("max_elements" in p for p in self.problems(observation={"max_elements": 251})))
         self.assertTrue(any("max_text_chars" in p for p in self.problems(observation={"max_text_chars": 50})))
 
+    def test_screenshots_modes(self) -> None:
+        self.assertEqual(DEFAULTS["observation"]["screenshots"], "key")
+        for ok in (True, False, "key"):
+            self.assertEqual(self.problems(observation={"screenshots": ok}), [])
+        for bad in ("all", "none", 1, 0, None):
+            self.assertTrue(any("screenshots" in p for p in self.problems(observation={"screenshots": bad})), bad)
+
     def test_cdp_url(self) -> None:
         self.assertIsNone(DEFAULTS["browser"]["cdp_url"])
         self.assertEqual(self.problems(browser={"cdp_url": "http://127.0.0.1:9222"}), [])
