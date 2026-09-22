@@ -654,6 +654,44 @@ class FingerprintCompareTests(unittest.TestCase):
         self.assertTrue(any("max_repeat" in p for p in validate(_merge(SPEC, {"thresholds": {"max_repeat": "3"}}))))
 
 
+class MaskSecretsTests(unittest.TestCase):
+    def test_masks_every_observed_channel_and_truncated_prefixes(self) -> None:
+        from observe import MASK, mask_secrets
+        long_secret = "L" * 45 + "tail"  # longer than the observer's 40-char value cut
+        obs = {
+            "url": "http://x/", "title": "Hello hunter2-not-real",
+            "elements": [
+                {"idx": 0, "role": "textbox", "name": "API token", "value": "hunter2-not-real"},
+                {"idx": 1, "role": "textbox", "name": "hunter2-not-real", "text": "prefix hunter2-not-real suffix"},
+                {"idx": 2, "role": "checkbox", "name": "", "context": "row with hunter2-not-real inside"},
+                {"idx": 3, "role": "textbox", "name": "Long", "value": long_secret[:40]},
+                {"idx": 4, "role": "select", "name": "S", "options": [{"i": 0, "text": long_secret[:50]}]},
+                {"idx": 5, "role": "button", "name": "Save", "value": None},
+            ],
+            "visible_text": "Token: hunter2-not-real and " + long_secret,
+            "fingerprint": {"nodes": {"0": [True, True, "hunter2-not-real", None, False, "abcd"]}},
+        }
+        out = mask_secrets(obs, ["hunter2-not-real", long_secret, ""])
+        self.assertIs(out, obs)
+        dumped = json.dumps({k: v for k, v in out.items() if k != "fingerprint"})
+        self.assertNotIn("hunter2", dumped)
+        self.assertNotIn("LLLLLLLLLL", dumped)
+        self.assertEqual(out["elements"][0]["value"], MASK)
+        self.assertEqual(out["elements"][1]["text"], f"prefix {MASK} suffix")
+        self.assertEqual(out["elements"][2]["context"], f"row with {MASK} inside")
+        self.assertEqual(out["elements"][3]["value"], MASK)
+        self.assertEqual(out["elements"][4]["options"][0]["text"], MASK)
+        self.assertEqual(out["visible_text"], f"Token: {MASK} and {MASK}")
+        self.assertEqual(out["elements"][5]["value"], None)
+        self.assertEqual(out["fingerprint"]["nodes"]["0"][2], "hunter2-not-real")  # compared in Python only
+
+    def test_no_secrets_is_a_no_op(self) -> None:
+        from observe import mask_secrets
+        obs = {"elements": [{"idx": 0, "role": "textbox", "name": "n", "value": "v"}], "visible_text": "t", "title": "T"}
+        self.assertEqual(mask_secrets(dict(obs), []), obs)
+        self.assertEqual(mask_secrets(dict(obs), [""]), obs)
+
+
 class RulesTests(unittest.TestCase):
     def test_rules_off_by_default_plain_wording(self) -> None:
         from policy import QUESTIONS

@@ -21,7 +21,7 @@ import time
 from datetime import datetime, timezone
 
 from jev_client import JevClient, JevError
-from observe import GUARD_SKIPPED, TARGET_OPERATIONS, compare_fingerprint, fingerprint, observe, signature
+from observe import GUARD_SKIPPED, TARGET_OPERATIONS, compare_fingerprint, fingerprint, mask_secrets, observe, signature
 from policy import build_questions, build_state, read_checks, read_choice, resolve_target, validate_choice
 from spec import load_dotenv, load_spec, validate
 from summarize_trace import summarize
@@ -369,6 +369,12 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         timing[name] = int((time.perf_counter() - since) * 1000)
         return time.perf_counter()
 
+    secret_values = [spec["data"][k] for k in spec["secrets"] if spec["data"].get(k)]
+
+    def look() -> dict:
+        """Observe the page with every secret value masked in what Jev and the trace will see."""
+        return mask_secrets(observe(page, obs_cfg["max_elements"], obs_cfg["max_text_chars"]), secret_values)
+
     with sync_playwright() as p:
         t_lap = time.perf_counter()
         cdp_url = spec["browser"]["cdp_url"]
@@ -426,7 +432,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                 if time.perf_counter() - t_start > budget["max_seconds"]:
                     status = "budget_exhausted"
                     break
-                obs = observe(page, obs_cfg["max_elements"], obs_cfg["max_text_chars"])
+                obs = look()
                 sig = signature(obs)
                 note_page_change(sig)  # did the previous action change what Jev sees?
                 step: dict = {
@@ -621,7 +627,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
 
             if status == "budget_exhausted":
                 # One last look: did the final action happen to reach the goal?
-                obs = observe(page, obs_cfg["max_elements"], obs_cfg["max_text_chars"])
+                obs = look()
                 note_page_change(signature(obs))
                 questions, _ = build_questions(spec, obs, last_operation)
                 only_checks = {k: v for k, v in questions.items() if k in spec["checks"]}

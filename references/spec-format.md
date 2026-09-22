@@ -29,7 +29,7 @@ it without opening a browser. Unknown fields are ignored; every optional field h
 | `goal` | string | required | What a tester would be told to do. One flow, plain language, names the visible outcome |
 | `notes` | string | `""` | Hints Jev sees every step ("dismiss the cookie banner first", "the product grid loads lazily") |
 | `data` | object | `{}` | Every string Jev may type, by name. Jev picks the name, never writes text. Values support `${ENV_VAR}` |
-| `secrets` | list | `[]` | Names in `data` whose values must never appear in the trace or in the state sent to Jev |
+| `secrets` | list | `[]` | Names in `data` whose values must never appear in the trace or in the state sent to Jev. Shown as `<secret>` in `available_data_values`, and masked again in every observation (a secret typed into a plain text field or a contenteditable reads back as `<secret>`, not as the value) |
 | `setup` | list | `[]` | Deterministic Playwright steps run **before** Jev takes over (see below) |
 | `checks` | object | `{}` | `name -> statement` evaluated as a Noul (0–1) against the page at every step |
 | `done_when` | list | required | Check names that must all be ≥ `thresholds.check_true` for a pass |

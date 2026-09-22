@@ -346,6 +346,21 @@ def observer_check(url: str) -> list[str]:
             failures.append("visible_text should hold a closed details' summary but not its hidden content")
         if obs["fingerprint"]["text_head"] != obs["visible_text"][:500]:
             failures.append("the fingerprint's text head is not the first 500 chars of visible_text")
+
+        # A secret typed into a plain text field and into a contenteditable comes back as their value; the
+        # runner masks it before anything sees the observation (the fingerprint keeps the real value).
+        from observe import mask_secrets
+        pg.fill("#u", "hunter2-not-real")
+        pg.fill('[aria-label="Editor"]', "note hunter2-not-real end")
+        masked = mask_secrets(observe(pg), ["hunter2-not-real"])
+        shown = json.dumps({k: v for k, v in masked.items() if k != "fingerprint"})
+        if "hunter2" in shown:
+            failures.append("a typed secret leaked through the observation")
+        by_name = {e["name"]: e for e in masked["elements"]}
+        if by_name.get("Username", {}).get("value") != "<secret>" or by_name.get("Editor", {}).get("value") != "note <secret> end":
+            failures.append(f"typed secrets should show as <secret>: {by_name.get('Username', {}).get('value')!r} {by_name.get('Editor', {}).get('value')!r}")
+        if "hunter2-not-real" not in json.dumps(masked["fingerprint"]):
+            failures.append("the fingerprint should keep the real value (it is only compared, never sent)")
         b.close()
     print(f"observer check: {len(obs['elements'])} elements, checkboxes={len(boxes)}, states={states}, change_events={changes}")
     print()

@@ -290,6 +290,47 @@ def observe(page, max_elements: int = 200, max_text_chars: int = 4000) -> dict:
     return obs
 
 
+MASK = "<secret>"
+OBSERVED_CUTS = (40, 70, 80)  # the observer cuts value / context / name+text at these lengths
+
+
+def mask_secrets(obs: dict, values: list[str]) -> dict:
+    """Replace every secret value (and its observer-truncated prefixes) in what Jev and the trace get to see.
+
+    The observer reads fields back after they were typed into, so a secret typed into anything but a
+    password field returns as an element's `value` (and, for a contenteditable, its text), from where it
+    would reach the state, the target criteria, the trace and `recent_actions`. Masking here, in Python and
+    right after the observation, closes every one of those channels at once. `fingerprint` is left alone: it
+    is compared in Python only and never sent or written. Empty values are ignored."""
+    needles: list[str] = []
+    for v in values:
+        if not v:
+            continue
+        needles.append(v)
+        needles.extend(v[:cut] for cut in OBSERVED_CUTS if len(v) > cut)
+    if not needles:
+        return obs
+    needles.sort(key=len, reverse=True)  # longest first, so a prefix never pre-empts the full value
+
+    def scrub(s):
+        if not isinstance(s, str) or not s:
+            return s
+        for n in needles:
+            if n in s:
+                s = s.replace(n, MASK)
+        return s
+
+    for e in obs.get("elements") or []:
+        for key in ("name", "text", "value", "context"):
+            if e.get(key):
+                e[key] = scrub(e[key])
+        for o in e.get("options") or []:
+            o["text"] = scrub(o.get("text"))
+    obs["visible_text"] = scrub(obs.get("visible_text") or "")
+    obs["title"] = scrub(obs.get("title") or "")
+    return obs
+
+
 def fingerprint(page) -> dict:
     """The current identity/meaning fingerprint of the tagged nodes (same functions as observe())."""
     return page.evaluate(FINGERPRINT_JS)
