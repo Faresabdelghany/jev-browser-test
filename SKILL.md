@@ -18,8 +18,8 @@ Claude is the brain, Jev is the hands, Playwright is the body.
 - **Playwright** turns the live page into a numbered element table and executes the chosen action.
 
 Only the outcomes come back to you: `passed`, `blocked`, a `never` check firing, low confidence, a stuck
-loop, or a budget running out. The runner is deterministic given Jev's answers, which is what makes the
-trace usable as evidence.
+loop, a page that would not hold still (`unstable_page`), or a budget running out. The runner is
+deterministic given Jev's answers, which is what makes the trace usable as evidence.
 
 The loop this skill exists for: **ticket or flow → Claude writes the spec → Jev runs it → Claude judges →
 if BUG, Claude fixes the code → the same spec re-runs green → PR.** Steps 1–4 below get you to the
@@ -88,10 +88,14 @@ python scripts/summarize_trace.py runs/<id>/<ts>/trace.json           # one line
 python scripts/summarize_trace.py runs/<id>/<ts>/trace.json --step 7  # full detail for one step
 ```
 
-Then look at the screenshots for the step where the run diverged and at `steps/final.png` (use your
-image viewing; the PNGs are what the page looked like before each decision). `references/trace-format.md`
-explains every field and status. The single most important reading rule: the checks recorded in step *n*
-describe the page **before** action *n*; action *n*'s effect shows in step *n+1*.
+Then look at the pictures. With the default `screenshots: "key"` the terminal step and every flagged step
+(`never_violated`, `low_confidence`, `stale`, `repeat_count ≥ 2`) have a `steps/NNN.png` of the page Jev
+decided on (taken after its answer, before the action), a failed action leaves `NNN-failed.png`, and
+`steps/final.png` shows where the run ended. The step *before* a divergence usually has no picture: its
+element table and probabilities are in `--step N`, and `--screenshots all` gives every step a picture on a
+rerun. `references/trace-format.md` explains every field and status. The single most important reading
+rule: the checks recorded in step *n* describe the page **before** action *n*; action *n*'s effect shows in
+step *n+1*.
 
 ### 4. Judge and report
 
@@ -169,16 +173,19 @@ is the fastest way to manufacture flakiness. Store `runs/` outside version contr
 | `stuck` on the same button | Look at the screenshot: dead control (bug) or a modal Jev cannot see past (add a note or setup step) |
 | `stuck` with confidence ≈ `min_confidence` and flat target probabilities | Jev is saying "the thing I need is not in the table". Check the element table for that step: if the control is missing, it is a non-semantic clickable the observer skipped (the `cursor: pointer` pass catches most; a `div` with no cursor hint needs a `setup` click or an ARIA role in the app). Verdict TEST_ISSUE, not BUG — but note the missing role for accessibility |
 | `stuck` clicking a table row *confidently* | The row was the best thing on offer: the real control (a selection checkbox, an inline action) is missing from the table. Hidden-input checkboxes are now observed with their row text; if a control is still absent, script that one step in `setup`. Canvas content (maps) is never observable |
+| `unstable_page` | The page never held still: every decision went stale before it could be executed (`step.stale` says what moved each time). Environment, not a bug: raise `browser.quiet_ms` / `settle_ms`, or add a `setup` `wait_for` for the thing that keeps changing |
 | Setup is most of the wall-clock | Replace `wait {ms}` with `wait_for {selector}` / `wait_for {url}` |
 | Choice rejected as too large | Lower `observation.max_elements` |
-| Page needs an existing login session | Save a Playwright `storage_state` once and point `browser.storage_state` at it |
+| Page needs an existing login session | Save a Playwright `storage_state` once and point `browser.storage_state` at it. For SSO or hardware-token logins, run inside a browser you are already logged into: start Chrome with `--remote-debugging-port=9222` and pass `--cdp-url http://127.0.0.1:9222` (or set `browser.cdp_url`); `storage_state` is ignored when attached. Recipe in `references/spec-format.md`, "Attach to a running browser" |
 | Elements inside iframes are missing | Main frame only for now; see `references/runner-design.md` to extend |
 
 ## Files
 
 - `scripts/run_test.py` — the loop; `scripts/spec.py` — validation; `scripts/summarize_trace.py` — reading
-  runs; `scripts/selftest.py` — offline check; `scripts/observe.py`, `scripts/policy.py`,
-  `scripts/jev_client.py` — the pieces (see `references/runner-design.md` before modifying them).
+  runs; `scripts/selftest.py` — offline check; `scripts/unit_tests.py` — unit tests for the pure parts;
+  `scripts/bench.py` — repeat a spec N times and report medians; `scripts/observe.py`, `scripts/policy.py`,
+  `scripts/rules.py`, `scripts/jev_client.py` — the pieces (see `references/runner-design.md` before
+  modifying them).
 - `references/spec-format.md`, `references/trace-format.md`, `references/verdict-rubric.md`,
   `references/runner-design.md`.
 - `assets/spec.example.json` — a realistic spec with login in `setup` and a Jev-driven goal.

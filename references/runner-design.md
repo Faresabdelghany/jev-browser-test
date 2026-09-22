@@ -36,12 +36,15 @@ secrets out of any model that does not need them, and turns a missing value into
 | File | Role |
 |---|---|
 | `scripts/spec.py` | Defaults, `${ENV}` substitution, validation. CLI validates a spec |
-| `scripts/observe.py` | The injected JS that builds the element table; `render_table`, `signature` |
+| `scripts/observe.py` | The injected JS that builds the element table and the freshness fingerprint: `observe`, `fingerprint`, `compare_fingerprint`, `mask_secrets`, `signature` (and `element_label` for trace labels) |
 | `scripts/policy.py` | State + question construction, strict answer validation, target resolution |
+| `scripts/rules.py` | The optional standing rules (`"rules": true`) and the measurement that made them opt-in |
 | `scripts/jev_client.py` | Stdlib HTTP client for `POST /v1/systemone`: one persistent connection per run (reconnects and retries once if the socket was dropped; Jev calls are read-only), 429/5xx backoff, usage counters; honours `https_proxy` / `no_proxy` like urllib |
 | `scripts/run_test.py` | The loop, setup steps, action execution, stop conditions, trace writing |
 | `scripts/summarize_trace.py` | Summary table and `--step N` dump |
-| `scripts/selftest.py` | Offline end-to-end test with a local page and a rule-based fake Jev |
+| `scripts/bench.py` | Runs a spec N times as subprocesses and reports medians; every number in the docs comes from its `--json` output |
+| `scripts/selftest.py` | Offline end-to-end test with local pages and a rule-based fake Jev |
+| `scripts/unit_tests.py` | Stdlib `unittest` for the pure parts: client, validation, criteria, fingerprint compare, masking, bench |
 
 `run_test.run(spec, jev, out_dir)` accepts any object with `system_one(state, questions)` and
 `usage_summary()`, which is how the self-test swaps Jev for a fake. Keep that seam when refactoring.
@@ -153,11 +156,13 @@ from jev-ultrafast for a loop with prepared values (TYPE_TEXT means picking one 
 a missing value means BLOCKED, never an unrelated value), and the untrusted-page-text guard is in both
 `NEXT_ACTION` and `CHECK`.
 
-**They are off by default because the measurement said so.** On the demo login page every wording tried
-(full, light, without the BLOCKED sentences, only the two guard sentences) lowered the `operation` decision's
-confidence and made the bad-password spec hesitate between TYPE_TEXT and BLOCKED, because the page's own
-text hints at the right password; the CHECK rule pulled a borderline check under its threshold. Without
-rules the same runs pass at higher confidence. The per-variant numbers are in
+**They are off by default because the measurement said so.** On the demo login page three of the four
+wordings tried (full, light, only the two guard sentences) lowered the `operation` decision's median
+confidence from 0.95 to 0.50–0.57; the fourth (without the BLOCKED sentences) kept 0.97 on `smoke-login` but
+took two extra no-op steps and broke the bad-password spec (`low_confidence` 2/3, `budget_exhausted` 1/3).
+In every variant the bad-password spec hesitated between TYPE_TEXT and BLOCKED, because the page's own
+text hints at the right password, and the CHECK rule pulled a borderline check under its threshold. Without
+rules the same runs pass at 0.94–0.99. The per-variant numbers are in
 `docs/superpowers/measurements/2026-09-22-track1-ab-*.json`. Turn them on per spec when an app shows the
 failure modes they address (repeated no-op actions, page text steering Jev) and measure with `bench.py`.
 

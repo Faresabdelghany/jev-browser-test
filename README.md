@@ -62,7 +62,7 @@ A spec is a goal in plain language plus checks that are statements about what is
 ```
 
 Exit code 0 = passed, 1 = failed (`never_violated`, `stuck`, `blocked`, `low_confidence`,
-`done_unverified`, `budget_exhausted`), 2 = spec/environment problem. `SKILL.md` tells Claude how to
+`done_unverified`, `budget_exhausted`, `unstable_page`, `error`), 2 = spec/environment problem. `SKILL.md` tells Claude how to
 write specs and how to turn a trace into a verdict (PASS / BUG / TEST_ISSUE / FLAKY / NEEDS_HUMAN);
 `references/` has the spec format, trace format, rubric and runner design.
 
@@ -87,8 +87,11 @@ Five repeats before and after the jev-ultrafast-style loop work, `scripts/bench.
 | decision confidence | 0.94 | 0.95 |
 | input tokens per run | 3.9k | 5.1k |
 
-Of the remaining 5.2 s about 2.0 s is the initial page load of the remote site and 0.15 s the browser
-launch (`trace.timing`). One connection per run instead of one per request is where the Jev time went;
+The two per-step rows are medians pooled over every step of the five runs (`jev_warm_ms_all_steps` and
+`browser_per_action_ms_all_steps` in the JSON; the first request of a run, which pays for the TCP + TLS
+handshake, is reported separately as `jev_first_ms`, 832 → 766 ms). Of the remaining 5.2 s about 2.0 s is
+the initial page load of the remote site and 0.15 s the browser launch (`trace.timing`, medians
+`navigation_ms` 1,979 and `launch_ms` 152). One connection per run instead of one per request is where the Jev time went;
 observing as soon as the DOM is quiet instead of a fixed pause is where the browser time went. The
 structured state costs about a third more input tokens. Things that were tried and measured worse are in
 `docs/superpowers/measurements/` too (the standing rules text, see `references/runner-design.md`).
@@ -98,14 +101,18 @@ structured state costs about a third more input tokens. Things that were tried a
 ```
 SKILL.md                    instructions Claude Code loads
 scripts/run_test.py         the loop
-scripts/observe.py          page → numbered element table (semantic, label-proxy and cursor:pointer passes)
-scripts/policy.py           state + questions for Jev, answer parsing
-scripts/jev_client.py       stdlib HTTP client for POST /v1/systemone
+scripts/observe.py          page → numbered element table + freshness fingerprint (semantic, label-proxy and cursor:pointer passes)
+scripts/policy.py           state + questions for Jev, answer validation and parsing
+scripts/rules.py            optional standing rules attached to every question ("rules": true)
+scripts/jev_client.py       stdlib HTTP client for POST /v1/systemone, one connection per run
 scripts/spec.py             defaults, ${ENV} substitution, validation
 scripts/summarize_trace.py  one line per step, --step N for a full dump
-scripts/selftest.py         offline: fake Jev, local pages, 8 scenarios
+scripts/bench.py            run a spec N times; medians of wall, Jev, browser, tokens, confidence
+scripts/selftest.py         offline: fake Jev, local pages, one case per terminal status and guard
+scripts/unit_tests.py       stdlib unittest for the pure parts (client, validation, criteria, bench)
 references/                 spec-format, trace-format, verdict-rubric, runner-design
 specs/                      example specs
+docs/superpowers/           design spec, plans, and the measurement files every number above comes from
 ```
 
 Related: [browser-use/jev-ultrafast](https://github.com/browser-use/jev-ultrafast) uses the same

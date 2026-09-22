@@ -32,9 +32,11 @@ app's exact words rather than lowering the threshold).
 Up to two spec revisions are reasonable inside one task; if it still fails, report it as NEEDS_HUMAN with
 what was tried.
 
-**FLAKY / ENVIRONMENT** — `status == error`, timeouts, `executed.ok == false` on network-heavy steps, or a
-result that differs across reruns. Rerun once (twice for a suspected flake). Report as flaky only after a
-rerun disagrees with the first result, and include both traces. Never diagnose flakiness from a single run.
+**FLAKY / ENVIRONMENT** — `status == error`, `unstable_page` (the page kept changing while Jev decided, so
+nothing was executed; each step's `stale` names what moved), timeouts, `executed.ok == false` on
+network-heavy steps, or a result that differs across reruns. Rerun once (twice for a suspected flake).
+Report as flaky only after a rerun disagrees with the first result, and include both traces. Never
+diagnose flakiness from a single run.
 
 **NEEDS_HUMAN** — the evidence is genuinely ambiguous: confidence is low and both a bug and a test issue
 are plausible; the failure depends on domain knowledge the spec did not capture; the flow involves money,
@@ -46,6 +48,7 @@ look at (step number, screenshot, the specific question).
 1. Summary line: status, actions, duration, `passed_without_actions` warning.
 2. Step table: read the operations as a story. Does the sequence make sense for the goal?
 3. Flags column: `LOW-CONF`, `ACTION-FAILED`, `FORCED-CLICK`, `DISPATCHED-CLICK`, `REPEAT×n`, `NEVER:*`,
+   `STALE` (the page changed while Jev decided; nothing was executed, the loop observed again),
    `NO-TARGET-ANSWER`, `INVALID-ANSWER` (a Jev answer failed validation; the reason is in `step.invalid_answer`),
    `RETRIED` (the request was re-sent once), `ERROR`.
 4. The step **after** the last sensible action: its checks and screenshot show what the app actually did.

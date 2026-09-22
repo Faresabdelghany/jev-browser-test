@@ -79,8 +79,8 @@ Notes that matter when judging:
 - `checks` in step *n* describe the page **before** step *n*'s action. The effect of action *n* shows up in
   step *n+1*'s checks (or in `final.checks`).
 - `executed.action` is `AUTO_DONE`, `DONE`, `BLOCKED` or `STOP` on the terminal step; `STOP` means the runner
-  stopped for its own reason (`never_violated`, `stuck`, `low_confidence`) and `operation.choice` is what Jev
-  *would* have done next.
+  stopped for its own reason (`never_violated`, `stuck`, `low_confidence`, `unstable_page`, `error`) and
+  `operation.choice` is what Jev *would* have done next.
 - `decision_confidence` is the weakest of the operation, target and (for TYPE_TEXT) `type_value` confidences.
   When it is below `min_confidence`, `low_confidence` is true and **nothing was executed**: `executed` is
   `{ "action": "WAIT", "reason": "low confidence; <op> not executed" }`, the runner waits `settle_ms` and
