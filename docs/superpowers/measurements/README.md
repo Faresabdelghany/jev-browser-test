@@ -415,3 +415,36 @@ outcome, evidence line and sighting step the same in every run of every bench.
   spec author's remedy; not changed here.
 - The F5 commit landed with a unit test and one selftest scenario still written for the old default;
   `e44e359` fixed both (the pipeline that ran the suites had masked their exit codes; the handoff says so).
+
+## The examples suite after block F (2026-09-22): the ten specs at `188e50e`
+
+The same `run_suite.py specs/examples/*.json --repeat 3 --workers 2` from a `git archive 188e50e` export with
+`GIT_COMMIT` set (`188e50e` is a docs commit; the runner is `e44e359`, blocks G and F complete), against the run
+at `b3996fa` above. Files: `2026-09-22-examples-suite-after-levers.json` / `.md`. 97.4 s wall-clock (was
+96.9), 203 Jev requests and 499,916 input tokens in all (were 205 and 552,765: -10%), no environment failure.
+
+| spec | verdict, `b3996fa` → `188e50e` | requests | input tokens per run (medians) | wall (median) | evidence line at `188e50e` |
+|---|---|---|---|---|---|
+| `shop-checkout` | pass → **pass** | 11 → 11 | 28,911 → 26,523 (-8%) | 7,572 → 7,522 ms | "Checkout: Complete!" 3/3 |
+| `shop-add-second-item` | pass → **pass** | 5 → 5 | 13,143 → 12,193 (-7%) | 4,609 → 4,678 ms | "Sauce Labs Bike Light" 3/3 |
+| `shop-checkout-problem-account` | bug → **bug** | 9 → 9 | 24,641 → 22,740 (-8%) | 6,355 → 6,209 ms | "Error: Last Name is required" 3/3 |
+| `shop-checkout-error-account` | undetermined (suggested bug 3) → **undetermined (suggested bug 3)** | 9 → 10 | 26,151 → 25,660 (-2%) | 6,520 → 6,742 ms | none 3/3 |
+| `wiki-search` | pass → **pass** | 5 → 5 | 47,872 → 43,990 (-8%) | 5,614 → 5,715 ms | "Playwright (software)" 3/3 |
+| `todo-add-filter` | pass → **pass** | 9 → 9 | 19,349 → 17,469 (-10%) | 5,925 → 5,838 ms | "1 item left" 3/3 |
+| `load-wait` | pass → **pass** | 10 → 8 | 12,901 → 8,059 (-38%) | 12,709 → 12,443 ms | "Hello World!" 3/3 |
+| `notify-random` | flaky (action_unsuccessful 2, action_successful 1) → **flaky (action_unsuccessful 2, action_successful 1)** | 3 → 3 | 3,205 → 2,692 (-16%) | 4,619 → 4,492 ms | "Action unsuccesful, please try again" 2/3; "Action successful" 1/3 |
+| `modal-close` | pass → **pass** | 5 → 5 | 5,523 → 4,572 (-17%) | 5,950 → 5,805 ms | "If closed, it will not appear on subsequent page loads." 3/3 |
+| `menu-random` | bug → **flaky (all_entries 1, entry_missing 2)** | 2 → 2 | 2,117 → 1,893 (-11%) | 3,801 → 3,741 ms | none 3/3 |
+
+- **Eight specs read exactly as before**; the two random pages both read `flaky` now: `notify-random` again
+  (bug 2, pass 1) and `menu-random` (bug 2, pass 1) whose dropped entry showed on one of three loads this time
+  where the first run had none: the page's randomness, and the second page on which the computed verdict has
+  been seen live.
+- **Every spec spends fewer tokens** than at `b3996fa`, from −2% on the random-menu page to −38% on the loader
+  (10 → 8 requests, F4). The blocked shop account costs **one request more** (9 → 10): F1's follow-up on the
+  terminal step, which returns the same `blocked_reason` and the same suggested bug 3/3.
+- **Evidence lines**: the loader statement now gets "Hello World!" 3/3 (0/3 before; F3, see block F); every
+  other pick is as before, including the two-sentence todo statement's "1 item left" 3/3 and none for the two
+  absence statements.
+- **Time**: the suite's wall is the same within a second; with two workers its per-spec medians are noisier than
+  the bench's, so the loader's +1.0 s (F4) is read from the bench, not from here.
