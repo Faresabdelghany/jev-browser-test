@@ -23,8 +23,21 @@
     "server_error_visible": "An error page, stack trace, 'something went wrong' or 500 message is visible",
     "still_on_login":       "The page is a login form asking for email and password"
   },
-  "done_when": ["order_in_list"],
-  "never": ["server_error_visible", "still_on_login"],
+  "outcomes": {
+    "order_created":    { "when": "The orders list shows an order for Acme Ltd with 2 x Widget 12-pack, and a success notification confirms it was saved",
+                          "verdict": "pass", "requires": ["order_in_list"] },
+    "validation_error": { "when": "The order form shows a red validation message and the order was not saved",
+                          "verdict": "bug", "note": "every field was filled with a valid value from data" },
+    "server_error":     { "when": "An error page, stack trace, 'something went wrong' or 500 message is visible",
+                          "verdict": "bug" },
+    "still_on_login":   { "when": "The page is a login form asking for email and password",
+                          "verdict": "test_issue", "note": "the setup login did not stick: check TEST_USER_EMAIL / TEST_USER_PASSWORD" }
+  },
+  "assert": [
+    { "url_matches": "**/app/orders*" },
+    { "text_contains": "Acme Ltd" },
+    { "element_absent": { "role": "alert" } }
+  ],
   "budget": { "max_steps": 30, "max_seconds": 300 },
   "thresholds": { "check_true": 0.8, "never_true": 0.85, "min_confidence": 0.5 },
   "browser": { "headless": true, "viewport": [1366, 850], "settle_ms": 800 },

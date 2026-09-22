@@ -1,10 +1,61 @@
-# Trace format
+# Trace and result format
 
-Every run writes `trace.json` (plus `steps/NNN.png` screenshots) into its output directory. The trace is
-the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to read it.
+Every run writes `result.json`, `trace.json` and `steps/NNN.png` screenshots into its output directory.
+`result.json` is the *verdict*: exactly one of the spec's declared outcomes (or `undetermined`) with its
+evidence, the file Claude reads first. The trace is the *evidence* behind it; the summary
+(`scripts/summarize_trace.py`) is the fast way to read it.
+
+## result.json
+
+```jsonc
+{
+  "spec_id": "smoke-login-badpw",
+  "outcome": "bad_credentials", "verdict": "pass",              // one of the spec's outcomes, or "undetermined" with verdict null
+  "note": "the wrong password is deliberate: ...",             // the outcome's note, copied for Claude
+  "probability": 0.91, "confidence": 0.88,                      // the outcome Choice at the step it was seen (null for a checks-only outcome's confidence)
+  "seen_at_step": 5, "first_seen_at_step": 4, "confirmed": true, // first_seen: the sighting; seen_at: the confirming step for a pass (the same step for other verdicts)
+  "path_confidence": 0.89,                                      // the weakest executed decision on the way: report the least certain judgment
+  "reason": null,                                               // for undetermined: see below
+  "evidence": { "line": "Your password is invalid!",            // the page line Jev selected in the adjudication request (verbatim), or null
+                "present": 0.94,                                // the adjudication's Noul over the outcome statement
+                "screenshot": "steps/005.png",                  // the sighting step's picture (forced for non-pass outcomes), else final.png
+                "checks": { "logged_in": 0.03, "login_error": 0.81 } },   // the checks at the sighting step
+  "assertions": [ { "url_matches": "**/login", "ok": true, "actual": "https://.../login" } ],   // every assertion with what was found
+  "outcomes_seen_earlier": [],                                  // non-terminal sightings (fail_fast: false)
+  "story": [ "1 TYPE_TEXT [0] textbox \"Username\" <- username", "2 TYPE_TEXT [1] textbox \"Password\" <- password", "3 CLICK [2] button \"Login\"" ],
+  "status": "passed", "duration_ms": 6200,
+  "usage": { "jev_requests": 6, "input_tokens": 9774, "output_tokens": 1741, "model": "jev-1.13.0", "reconnects": 0 },
+  "trace": "runs/smoke-login-badpw/20260922-101500/trace.json"
+}
+```
+
+`outcome: "undetermined"` means no declared outcome was seen: the loop ended `stuck | blocked |
+low_confidence | done_unverified | budget_exhausted | unstable_page | error`, or a pass outcome was seen but
+an assertion failed (`assert_failed`). Then `reason` is `{ "status", "blocked_reason", "stuck_reason",
+"suggested_verdict" }` plus `failed_assertions` (with `actual` values) and `outcome_seen` for
+`assert_failed`, and `error` for `error`. `blocked_reason` is Jev's answer on the terminal step to "what most
+prevents progress" (`nothing | missing_data_value | control_not_on_page | site_refused_or_error |
+human_step_required | wrong_page | other`); `stuck_reason` is asked only after an action with
+`page_changed: false` (`control_had_no_effect | overlay_or_modal | still_loading |
+needs_scroll_or_other_control | other`). The suggestion comes from a fixed table, the typed reason winning
+over the status when both have a row:
+
+| reason or status | suggested verdict |
+|---|---|
+| `missing_data_value`, `wrong_page`, `low_confidence`, `budget_exhausted` | TEST_ISSUE |
+| `control_not_on_page`, `control_had_no_effect`, `overlay_or_modal`, `site_refused_or_error` | BUG |
+| `human_step_required` | NEEDS_HUMAN |
+| `still_loading`, `unstable_page`, `error` | FLAKY |
+| `done_unverified`, `assert_failed`, `other`, `nothing`, `needs_scroll_or_other_control` | none: Claude judges from the trace |
+
+Exit codes: 0 ⇔ verdict `pass` (status `passed`); 1 for every other outcome and for `undetermined`; 2 for a
+spec or environment problem (no result is written).
 
 ## Reading order
 
+0. `python scripts/summarize_trace.py runs/<id>/<ts>/trace.json --result` — the result above. For a declared
+   outcome the verdict is pre-declared; look at `evidence.line`, the screenshot and `path_confidence` to
+   sanity-check it. For `undetermined`, start from `reason.suggested_verdict` and read on.
 1. `python scripts/summarize_trace.py runs/<id>/<ts>/trace.json` — one line per step, flags on the right.
 2. For any flagged or suspicious step: `--step N` dumps it in full (probabilities, checks, the element table
    Jev was offered) and `steps/NNN.png` shows the page Jev decided on (taken after its answer, before the
@@ -19,10 +70,12 @@ the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to re
 
 | `status` | Meaning | Typical verdict |
 |---|---|---|
-| `passed` | All `done_when` checks ≥ threshold, no `never` fired | PASS (sanity-check the screenshots once) |
-| `done_unverified` | Jev said DONE confidently; the runner settled, re-observed, and `done_when` is still not satisfied | Either the check wording is off (test issue) or the app did not do what it claims (bug). Look at `final.png`. Timing is already ruled out by the recheck |
-| `blocked` | Jev chose BLOCKED | Usually a test issue: missing `data` value, missing precondition, wrong start page. Sometimes a real bug: the needed control is not rendered |
-| `never_violated` | A `never` check crossed its threshold | Often a product bug. Confirm the error is real in the screenshot, and that the preceding action was reasonable |
+| `passed` | An outcome with verdict `pass` was seen, survived the settle-and-recheck, and every assertion held | PASS (sanity-check `evidence.line` and `final.png` once) |
+| `outcome` | A declared outcome with another verdict was seen; `result.outcome` names it, `result.verdict` is its pre-declared verdict | That verdict. The outcome name is always in the result, so a mislabelled verdict is visible and is a one-line spec fix |
+| `assert_failed` | A pass outcome was confirmed but an assertion did not hold on the final page (`result.reason.failed_assertions` has the actual values) | Claude judges: the app is wrong (BUG) or the assertion is (TEST_ISSUE). Never loosen an assertion to get green without saying so |
+| `done_unverified` | Jev said DONE confidently; the runner settled, re-observed, and no pass outcome is visible | Either the outcome wording is off (test issue) or the app did not do what it claims (bug). Look at `final.png`. Timing is already ruled out by the recheck |
+| `blocked` | Jev chose BLOCKED (`result.reason.blocked_reason` says why) | Usually a test issue: missing `data` value, missing precondition, wrong start page. Sometimes a real bug: the needed control is not rendered |
+| `never_violated` | (Runs before the results contract only.) A `never` check crossed its threshold; today this ends as `outcome` with `never_<check>` | Often a product bug. Confirm the error is real in the screenshot, and that the preceding action was reasonable |
 | `stuck` | Same action on an unchanged page `max_repeat` times | The action had no effect: dead button (bug), or Jev is confused by the page (test issue: add a note or a `setup` step) |
 | `low_confidence` | `max_low_confidence_steps` consecutive uncertain decisions, none of them executed | Jev could not choose between the offered options: look at `decision_confidence` and the probabilities in `--step N`. A split over `type_value` means the `data` key names do not match the field labels (rename them); a split over targets means the goal/notes do not say which of several similar controls to use |
 | `budget_exhausted` | Ran out of steps or seconds | Wandering (test issue, tighten the goal) or a very long flow (raise the budget) |
@@ -37,6 +90,8 @@ the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to re
 {
   "spec_id": "search-add-to-cart",
   "status": "passed", "status_meaning": "...", "pass": true, "error": null,
+  "outcome": "item_added", "verdict": "pass",  // as in result.json; "result" holds the whole result.json, "outcomes" the effective outcomes (declared + synthesized)
+  "adjudication": { "outcome": "item_added", "statement": "...", "line": "Cart: 1 items", "line_id": "3", "present": 0.95, "confidence": 0.9, "latency_ms": 290 },
   "started_at": "...", "ended_at": "...", "duration_ms": 6210,
   "actions_executed": 4,                 // steps that changed the browser (not DONE/STOP, not runner-inserted WAITs)
   "timing": { "launch_ms": 150, "navigation_ms": 2000, "setup_ms": 0, "steps_ms": 2500, "final_ms": 30 },  // where the wall-clock went
@@ -59,6 +114,13 @@ the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to re
                   "confidence": 0.88, "top_probabilities": { "3": 0.86, "4": 0.11 } },
       "type_value": { "choice": "search_query", "confidence": 0.95, "top_probabilities": {...} },   // TYPE_TEXT only
       "checks": { "cart_has_item": 0.02, "error_visible": 0.01 },   // evaluated on the page BEFORE the action
+      "outcome": { "choice": "none_yet", "confidence": 0.9, "probabilities": { "item_added": 0.03, "app_error": 0.02, "none_yet": 0.95 } },  // the outcome Choice (only when an outcome has a `when`)
+      "blocked_reason": { "choice": "nothing", "confidence": 0.9, "top_probabilities": {...} },   // asked every step, consumed for undetermined
+      "stuck_reason": { "choice": "control_had_no_effect", ... },    // only after an action with page_changed: false
+      "outcome_seen": "app_error",                                   // a non-pass outcome was seen here (terminal with fail_fast)
+      "pending_outcome": "item_added",                               // a pass was seen here; executed is a WAIT "confirming outcome ..." and the next step decides
+      "outcome_unconfirmed": "item_added",                           // the recheck did not see it again: a transient sighting, the run went on
+      "assertions": [ ... ],                                         // on the confirming step: the assert block's results
       "low_confidence": false, "decision_confidence": 0.94, "repeat_count": 1,
       "page_changed": true,                                          // set once the next observation exists: did this step's action change the page signature?
       "never_violated": ["error_visible"],                           // only when a never check fired
@@ -85,9 +147,14 @@ Notes that matter when judging:
   When it is below `min_confidence`, `low_confidence` is true and **nothing was executed**: `executed` is
   `{ "action": "WAIT", "reason": "low confidence; <op> not executed" }`, the runner waits `settle_ms` and
   settles like the WAIT operation (`settle` records how that ended), then observes again. It never acts on a guess.
-- `executed.action == "WAIT"` with `reason == "confirming DONE"` means Jev chose DONE while `done_when` was
-  unsatisfied; the next step's checks are the verdict and carry `executed.confirmed == true`. This absorbs
-  reloads and redirects still in flight when Jev declared victory.
+- `executed.action == "WAIT"` with `reason == "confirming outcome <name>"` (or `"confirming DONE"` when Jev
+  chose DONE) means a pass outcome was in sight; the runner waited `settle_ms`, settled and observed again,
+  and the next step is the verdict: a pass seen again is confirmed (`executed.confirmed == true`, then the
+  assertions run), a DONE without a pass ends `done_unverified`, an auto sighting that vanished is recorded
+  as `outcome_unconfirmed` and the run goes on. This absorbs reloads and redirects still in flight when Jev
+  declared victory, and costs one extra request per pass.
+- A non-pass outcome is terminal at its first sighting (`outcome_seen`, status `outcome`), with the picture
+  forced; the outcome Choice's full distribution is on the step, so a near miss is visible too.
 - Every Choice answer is validated before it is used: the choice must be one of the keys the question
   offered, every probability key must be offered, values finite in [0, 1] and summing to 1 (± 0.02),
   `confidence` in [0, 1], and the choice must carry the top probability. `invalid_answer` names the

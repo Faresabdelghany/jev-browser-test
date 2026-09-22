@@ -5,14 +5,15 @@ Claude writes the test spec and judges the result, [TypeSafe's Jev](https://docs
 picks every click/type/scroll from a numbered element table, and Playwright executes.
 
 ```
-Claude (slow brain)  →  spec.json  →  runner loop  →  trace.json + screenshots  →  Claude (verdict)
+Claude (slow brain)  →  spec.json  →  runner loop  →  result.json (+ trace, screenshots)  →  Claude (acts on it)
                                           ↕
                             Jev: one typed decision per step
                             Playwright: observe + act
 ```
 
-The loop: **ticket or flow → Claude writes the spec → Jev runs it → Claude judges → if BUG, Claude fixes
-the code → the same spec re-runs green → PR.** The spec that found a bug stays as its regression test.
+The loop: **ticket or flow → Claude writes the spec, including the outcomes it will accept back → Jev
+runs it → the runner returns exactly one of those outcomes with its evidence → if BUG, Claude fixes the
+code → the same spec re-runs green → PR.** The spec that found a bug stays as its regression test.
 
 Jev never generates text. Each step the runner sends it the page state and a fixed set of typed
 questions — which operation, which element, which prepared value, and every check in the spec as a
@@ -44,7 +45,8 @@ never reaches Jev at all.
 .venv/bin/python scripts/summarize_trace.py runs/smoke-login/*/trace.json
 ```
 
-A spec is a goal in plain language plus checks that are statements about what is visible:
+A spec is a goal in plain language, the endings the run may return (each a statement about the visible
+page with a pre-declared verdict), and exact expectations checked in code at the end:
 
 ```json
 {
@@ -52,32 +54,37 @@ A spec is a goal in plain language plus checks that are statements about what is
   "start_url": "https://the-internet.herokuapp.com/login",
   "goal": "Log in with the provided username and password, so that the Secure Area page is shown.",
   "data": { "username": "tomsmith", "password": "SuperSecretPassword!" },
-  "checks": {
-    "logged_in": "A green flash message says 'You logged into a secure area!'",
-    "login_error": "A red flash message says the username or password is invalid"
+  "outcomes": {
+    "logged_in":       { "when": "The page heading says 'Secure Area' and a green flash message says 'You logged into a secure area!'", "verdict": "pass" },
+    "bad_credentials": { "when": "A red flash message says the username or password is invalid", "verdict": "bug" }
   },
-  "done_when": ["logged_in"],
-  "never": ["login_error"]
+  "assert": [ { "url_matches": "**/secure" }, { "text_contains": "You logged into a secure area!" } ]
 }
 ```
 
-Exit code 0 = passed, 1 = failed (`never_violated`, `stuck`, `blocked`, `low_confidence`,
-`done_unverified`, `budget_exhausted`, `unstable_page`, `error`), 2 = spec/environment problem. `SKILL.md` tells Claude how to
-write specs and how to turn a trace into a verdict (PASS / BUG / TEST_ISSUE / FLAKY / NEEDS_HUMAN);
-`references/` has the spec format, trace format, rubric and runner design.
+The run writes `result.json`: `outcome` (one of the declared names, or `undetermined` with a typed reason
+and a suggested verdict), `verdict`, the page line that states it (selected by Jev, copied verbatim), the
+assertions, and the story of the actions. Exit code 0 = an outcome with verdict `pass`, 1 = anything
+else, 2 = spec/environment problem. `SKILL.md` tells Claude how to write specs and how to act on a result
+(PASS / BUG / TEST_ISSUE / FLAKY / NEEDS_HUMAN); `references/` has the spec format, trace and result
+format, rubric and runner design.
 
 ## What it does with Jev's confidence
 
 The runner never acts on a guess. A decision below `thresholds.min_confidence` on the operation, the
 target or which value to type is not executed: the step becomes a wait, Jev is asked again, and three
-undecided answers on an unchanged page end the run as `low_confidence`. A confident DONE with unsatisfied
-checks gets one settle-and-recheck before the verdict. Both rules came from real runs: Jev split 0.68/0.32
-over which value to type into a password field, and once declared DONE at 0.36 mid-reload.
+undecided answers on an unchanged page end the run as `low_confidence`. A pass outcome (or a confident
+DONE) gets one settle-and-recheck and then the `assert` block before it counts; any other declared outcome
+is terminal at first sighting. Both gates came from real runs: Jev split 0.68/0.32 over which value to
+type into a password field, and once declared DONE at 0.36 mid-reload. The outcomes are asked as one
+Choice, not as independent true/false checks, because a Choice compares the endings: the bad-password
+message that read 0.73–0.84 as a lone check (and ended runs `low_confidence` after three hesitant steps) is
+chosen as `bad_credentials` the first step it is on screen.
 
 ## Measured (the-internet.herokuapp.com login, Chromium, `jev-1.13.0`, Sept 2026)
 
-Five repeats before and after the jev-ultrafast-style loop work, `scripts/bench.py`, medians
-(`docs/superpowers/measurements/2026-09-21-track1-{baseline,after}.json`):
+Two rounds, each five repeats before and after with `scripts/bench.py`, medians. First the
+jev-ultrafast-style loop work (`docs/superpowers/measurements/2026-09-21-track1-{baseline,after}.json`):
 
 | `smoke-login` (3 actions, passed 5/5 both times) | before | after |
 |---|---:|---:|
@@ -95,6 +102,18 @@ the initial page load of the remote site and 0.15 s the browser launch (`trace.t
 observing as soon as the DOM is quiet instead of a fixed pause is where the browser time went. The
 structured state costs about a third more input tokens. Things that were tried and measured worse are in
 `docs/superpowers/measurements/` too (the standing rules text, see `references/runner-design.md`).
+
+Then the results contract (`2026-09-22-track2-{before,after}.json`), which is what the runner does today:
+
+| | before | after |
+|---|---:|---:|
+| `smoke-login` | passed 5/5, 4.8 s, 4 requests, 5.1k tokens | `logged_in` (pass) 5/5 confirmed with 3/3 assertions, 6.0 s, 6 requests, 8.9k tokens |
+| `smoke-login-badpw` (wrong password on purpose) | `never_violated` 2/5, `low_confidence` 3/5, 6.4 s, confidence 0.41 | `bad_credentials` (pass) 5/5, seen the first step the message is on screen, 6.1 s, confidence 0.93 |
+
+The contract costs one confirmation step and one adjudication request per run, and the two extra Choices
+per step are where the extra tokens go; what it buys is a run that comes back as one declared outcome
+with the page's own line as evidence, and a negative test that is decided the moment its message appears
+instead of hovering under a threshold.
 
 ## Layout
 

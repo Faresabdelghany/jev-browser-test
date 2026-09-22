@@ -17,9 +17,11 @@ Claude is the brain, Jev is the hands, Playwright is the body.
   action that is not on the page because it only ever chooses from options the runner offers.
 - **Playwright** turns the live page into a numbered element table and executes the chosen action.
 
-Only the outcomes come back to you: `passed`, `blocked`, a `never` check firing, low confidence, a stuck
-loop, a page that would not hold still (`unstable_page`), or a budget running out. The runner is
-deterministic given Jev's answers, which is what makes the trace usable as evidence.
+Only a result comes back to you: `result.json` names exactly **one of the outcomes your spec declared**
+(with the verdict you attached to it when you wrote the spec, and the line of the page that proves it) or
+`undetermined` with a typed reason (`blocked`, `stuck`, low confidence, a page that would not hold still, a
+budget running out) and a suggested verdict. The runner is deterministic given Jev's answers, which is what
+makes the trace behind the result usable as evidence.
 
 The loop this skill exists for: **ticket or flow → Claude writes the spec → Jev runs it → Claude judges →
 if BUG, Claude fixes the code → the same spec re-runs green → PR.** Steps 1–4 below get you to the
@@ -60,10 +62,19 @@ Read `references/spec-format.md` the first time, then write `specs/<id>.json`. W
 - **data** — every string the flow might need to type. Jev chooses *which* value to type; it never writes
   text. A value that is missing surfaces as `BLOCKED` and comes back to you. Credentials go through
   `${ENV_VAR}` and `secrets`, and preferably through `setup` so they never reach Jev at all.
-- **checks** — atomic statements about what is *visible* ("The cart shows 1 item"), one fact each.
-  These are the assertions; Jev returns a probability for each on every step.
-- **done_when / never** — which checks define success, which ones mean "stop, something is wrong".
-  Always include an error-visible style check in `never`.
+- **outcomes** — the endings you will accept back, each a statement about the visible page and the
+  verdict you give if it is seen: the acceptance criteria as the `pass` outcome, the wrong behaviour you
+  are testing for (or the ticket reports) as `bug`, a CAPTCHA or approval step as `needs_human`. Every
+  step Jev picks one of them (or `none_yet`); a pass is re-checked after a settle, any other verdict ends
+  the run at first sighting. A negative test declares the rejection as its `pass` and the success as the
+  `bug`, with a `note` saying so. This is the whole point: the run comes back as *one of your outcomes*.
+- **assert** — exact expectations checked in code on the final page before a pass counts: the URL glob,
+  a text the page must contain, a field's value, an element that must (not) be there. Free and non-model.
+- **checks** — atomic statements about what is *visible* ("The cart shows 1 item"), one fact each; Jev
+  returns a probability for each on every step. They are the progress signals that show *where* a run
+  diverged, and an outcome's `requires` can lean on them.
+- **done_when / never** — shorthand for a `pass` outcome (`goal_reached`) and `bug` outcomes
+  (`never_<check>`) when you do not spell out `outcomes`. Older specs keep working unchanged.
 - **setup** — deterministic Playwright steps for preconditions.
 
 Validate: `python scripts/spec.py specs/<id>.json`. Ask the user only for what you cannot infer from the
@@ -77,18 +88,25 @@ python scripts/run_test.py specs/<id>.json                 # -> runs/<id>/<times
 python scripts/run_test.py specs/<id>.json --headed        # watch it, when debugging locally
 ```
 
-Exit 0 = passed, 1 = did not pass, 2 = spec or environment problem (fix that first; it is never a bug).
-Runs are cheap: a 20-step flow is roughly 20 Jev calls at a fraction of a cent, so rerun freely, but
-read the trace before rerunning, or you throw away the evidence of why it failed.
+Exit 0 = the run ended in an outcome with verdict `pass`, 1 = any other outcome or `undetermined`, 2 = spec
+or environment problem (fix that first; it is never a bug). Launch it and do nothing until it returns: the
+runner confirms a pass, stops at the first sighting of anything else, and writes the verdict for you.
+Runs are cheap: a 20-step flow is roughly 20 Jev calls at a fraction of a cent, so rerun freely, but read
+the result before rerunning, or you throw away the evidence of why it failed.
 
-### 3. Read the trace
+### 3. Read the result, then the trace
 
 ```bash
+python scripts/summarize_trace.py runs/<id>/<ts>/trace.json --result  # result.json: outcome, verdict, evidence
 python scripts/summarize_trace.py runs/<id>/<ts>/trace.json           # one line per step + flags
 python scripts/summarize_trace.py runs/<id>/<ts>/trace.json --step 7  # full detail for one step
 ```
 
-Then look at the pictures. With the default `screenshots: "key"` the terminal step and every flagged step
+`result.json` is the file to read first: `outcome` (one of your names, or `undetermined`), `verdict`,
+`evidence.line` (the page's own words, selected by Jev and copied verbatim), `path_confidence` (the
+weakest decision on the way), `assertions`, `story`, and for `undetermined` the `reason` with a typed cause
+and a `suggested_verdict`. Open the step table only for `undetermined` or to sanity-check a surprising
+outcome. Then look at the pictures. With the default `screenshots: "key"` the terminal step and every flagged step
 (`never_violated`, `low_confidence`, `stale`, `repeat_count ≥ 2`) have a `steps/NNN.png` of the page Jev
 decided on (taken after its answer, before the action), a failed action leaves `NNN-failed.png`, and
 `steps/final.png` shows where the run ended. The step *before* a divergence usually has no picture: its
@@ -100,11 +118,14 @@ step *n+1*.
 ### 4. Judge and report
 
 Follow `references/verdict-rubric.md`. Exactly one verdict per run: **PASS**, **BUG**, **TEST_ISSUE**,
-**FLAKY**, or **NEEDS_HUMAN**. A red run is a bug only when the action was reasonable (confidence above
-`min_confidence`, a sensible element on a sensible page) and the *next* page shows the app misbehaving.
-A red run is a test issue when the spec caused it: missing data value, unreachable check, banner that
-belonged in `setup`, ambiguous goal. Fix the spec and rerun (at most twice) before reporting a test issue.
-Never call a single run flaky; rerun and compare.
+**FLAKY**, or **NEEDS_HUMAN**. When the result names one of your outcomes, the verdict is the one you
+declared: sanity-check it against `evidence.line` and the screenshot, and if the label does not fit what
+you see, the spec mislabelled it (fix the `when` or the `verdict`, rerun, say so). When the result is
+`undetermined`, start from `reason.suggested_verdict` and apply the rubric: a red run is a bug only when the
+action was reasonable (`path_confidence` above `min_confidence`, a sensible element on a sensible page) and
+the next page shows the app misbehaving; it is a test issue when the spec caused it: missing data value,
+unreachable outcome, banner that belonged in `setup`, ambiguous goal. Fix the spec and rerun (at most twice)
+before reporting a test issue. Never call a single run flaky; rerun and compare.
 
 Report with the template in the rubric: verdict, one-line flow, result numbers, the story in 2–4 sentences,
 the evidence (step number, action, confidence, check value, screenshot path), what was expected, and the next
@@ -141,13 +162,15 @@ When it is **NEEDS_HUMAN**, stop and ask the specific question the rubric tells 
 If the user hands you a Linear/Jira issue or a bug report instead of a flow, write the spec from it:
 
 - **goal** = the user story or the reproduction steps, in one breath, ending at the visible outcome.
-- one **check** per acceptance criterion, worded with the app's own text;
-- the reported wrong behaviour as a **`never`** check (for a bug ticket) so the run fails for the right reason.
+- the acceptance criteria as the **`pass` outcome** (its `when` in the app's own words) with the exact
+  expectations in **`assert`**; one **check** per criterion when there are several, and `requires` them;
+- the reported wrong behaviour as a **`bug` outcome** (for a bug ticket) so the run fails for the right
+  reason and comes back with the error text as its evidence line.
 
 A bug ticket's spec should come back **BUG before the fix and PASS after** — that is the definition of
 done for the fix, and the spec stays in `specs/` as the regression test for that ticket. For a feature
-ticket, the spec is the acceptance test: write it from the criteria before the code exists, expect
-`blocked`/`never_violated` until the feature lands, and PASS when it does.
+ticket, the spec is the acceptance test: write it from the criteria before the code exists, expect the
+`bug` outcome or `undetermined` (`blocked`) until the feature lands, and PASS when it does.
 
 ## Triage-only mode
 
@@ -167,7 +190,10 @@ is the fastest way to manufacture flakiness. Store `runs/` outside version contr
 | `TYPESAFE_API_KEY is not set` | Export the key or put it in `.env` in the directory you run from; the installed TypeSafe plugin does not provide one |
 | exit 2 with "Spec problems" | Read the list; usually a `done_when` naming an unknown check, a check written as a question, or a missing `${ENV}` |
 | `error` with `setup[i] failed` | The selector in a setup step did not match; fix it or move that step into the goal |
-| `blocked` right after a text field appears | Add the needed value to `data` |
+| `blocked` right after a text field appears | Add the needed value to `data` (`reason.blocked_reason` says `missing_data_value`) |
+| `assert_failed` | A pass outcome was confirmed but an assertion did not hold: `reason.failed_assertions` has the actual values. Decide whether the assertion or the app is wrong; never loosen it silently |
+| The outcome that came back does not match what the screenshot shows | The spec mislabelled it: fix that outcome's `when` or `verdict` (one line), rerun, and say so in the report |
+| Two outcomes hover at 0.4–0.5 while the page clearly shows one of them | Their `when` statements are both true of that page; reword them so they are distinguishable on sight (name a string unique to each) |
 | `low_confidence` with `type_value` split between two keys | Rename `data` keys to the field labels the app shows; Jev refused to guess which value went where (nothing was typed) |
 | A `never` check sits at 0.7–0.8 for several steps | The statement half-matches the page; reuse the app's exact wording instead of lowering `never_true` |
 | `stuck` on the same button | Look at the screenshot: dead control (bug) or a modal Jev cannot see past (add a note or setup step) |

@@ -1,14 +1,37 @@
 # Verdict rubric
 
-Jev only reports probabilities; deciding what they *mean* is Claude's job. Every run ends in exactly one
-verdict. The point of the rubric is to stop two failure modes: calling every red run a bug (the developer
-stops trusting the reports) and calling every red run flaky (real bugs get buried).
+Every run ends in exactly one verdict. The point of the rubric is to stop two failure modes: calling every
+red run a bug (the developer stops trusting the reports) and calling every red run flaky (real bugs get
+buried).
+
+## Read result.json first
+
+`python scripts/summarize_trace.py runs/<id>/<ts>/trace.json --result`. Three cases:
+
+- **A declared outcome** (`outcome` is one of the spec's names): the verdict was decided when the spec was
+  written; `verdict` is it (`pass` → PASS, `bug` → BUG, `test_issue` → TEST_ISSUE, `needs_human` →
+  NEEDS_HUMAN). Sanity-check it in one glance: `evidence.line` should be the app's own words for that
+  ending, `evidence.screenshot` should show it, `path_confidence` should be above `min_confidence` (the
+  weakest decision on the way; a low value means the path there was shaky even if the ending is clear). If
+  the outcome name does not match what you see, the spec mislabelled it: fix the `when` or the `verdict`
+  (a one-line change) and rerun, and say so in the report.
+- **`undetermined` with a suggestion** (`reason.suggested_verdict` set): start from the suggestion and
+  confirm it with the rubric below; the typed reason (`reason.blocked_reason`, `reason.stuck_reason`) and
+  `reason.status` tell you where to look in the trace.
+- **`undetermined` without a suggestion** (`done_unverified`, `assert_failed`, an `other` reason): the
+  judgment below applies in full. For `assert_failed`, `reason.failed_assertions` carries the actual values:
+  decide whether the assertion or the app is wrong, and never loosen an assertion to get green without
+  saying so.
+
+Jev only reports probabilities; deciding what they *mean* is Claude's job, and the outcome names keep that
+job honest: a wrong verdict is visible as a wrong label, not hidden in a threshold.
 
 ## The five verdicts
 
-**PASS** — `status == passed`, and a glance at `final.png` agrees with the checks. If
-`passed_without_actions` is set, do not report a pass yet: the start page already satisfied `done_when`,
-so the checks are too weak to prove the flow works. Tighten them and rerun.
+**PASS** — `status == passed`: a pass outcome was seen, confirmed after the recheck, every assertion held,
+and a glance at `evidence.line` and `final.png` agrees. If `passed_without_actions` is set, do not report a
+pass yet: the start page already showed the pass outcome, so the outcome or checks are too weak to prove
+the flow works. Tighten them and rerun.
 
 **BUG** (product defect) — the app did not behave as a user would expect, and the test's actions were
 reasonable. Evidence needed before saying "bug":
@@ -16,9 +39,10 @@ reasonable. Evidence needed before saying "bug":
 - What was expected vs. what the next step's page showed (checks, screenshot).
 - The action would make sense to a human on that page (look at the offered element table: was there a
   better element Jev ignored? If so this is a test issue, see below).
-Typical signatures: `never_violated` with a real error on screen; `stuck` on a button that visibly does
-nothing; `done_unverified` where the success page is missing content it should have; `blocked` because
-a control the flow requires is not rendered at all.
+Typical signatures: an outcome declared `bug` with the error in `evidence.line`; `stuck` with
+`stuck_reason: control_had_no_effect` on a button that visibly does nothing; `done_unverified` where the
+success page is missing content it should have; `blocked` with `blocked_reason: control_not_on_page`
+because a control the flow requires is not rendered at all.
 
 **TEST_ISSUE** — the spec, not the app, is at fault. Fix the spec and rerun before reporting anything.
 Signatures: `blocked` right after a text field appears with no matching `data` value; checks phrased
@@ -45,6 +69,7 @@ look at (step number, screenshot, the specific question).
 
 ## How to look at a run (in this order)
 
+0. `result.json` (see above): outcome, verdict or suggestion, evidence line, assertions.
 1. Summary line: status, actions, duration, `passed_without_actions` warning.
 2. Step table: read the operations as a story. Does the sequence make sense for the goal?
 3. Flags column: `LOW-CONF`, `ACTION-FAILED`, `FORCED-CLICK`, `DISPATCHED-CLICK`, `REPEAT×n`, `NEVER:*`,
@@ -79,10 +104,10 @@ Keep it short; the trace is the appendix. Use this shape (plain prose is fine fo
 ```
 **Verdict:** BUG | PASS | TEST_ISSUE | FLAKY | NEEDS_HUMAN
 **Flow:** <spec id> — <goal in one line>
-**Result:** <status>, <n> actions, <duration>s, <jev requests> Jev calls
+**Result:** outcome <name> (<verdict> | undetermined, <reason.status>), <n> actions, <duration>s, <jev requests> Jev calls
 
-**What happened:** <2–4 sentences: the story of the run, ending with where it diverged>
-**Evidence:** step <n> <action> (conf <x>) → step <n+1>: <check>=<p>, screenshot steps/<nnn>.png
+**What happened:** <2–4 sentences: the story of the run (result.story), ending with where it diverged>
+**Evidence:** "<evidence.line>" at step <n> (probability <p>, path confidence <c>), screenshot steps/<nnn>.png
 **Expected:** <what a user should have seen>
 
 **Next step:** <fix in the app | spec change made and rerun result | what a human should check>
@@ -92,8 +117,9 @@ Trace: runs/<id>/<ts>/trace.json (failing), runs/<id>/<ts2>/trace.json (after fi
 
 A BUG report without a fix attempt is incomplete when the repository is available: the spec is a
 reproduction, so use it. The one hard rule: the fix must make the *app* behave as a user expects, never
-make the *spec* easier to satisfy. If you find yourself loosening a check to get green, stop — that is a
-TEST_ISSUE wearing a BUG's clothes, or a real bug you have not understood yet.
+make the *spec* easier to satisfy. If you find yourself loosening a check, an outcome statement or an
+assertion to get green, stop — that is a TEST_ISSUE wearing a BUG's clothes, or a real bug you have not
+understood yet.
 
 If the user has an issue tracker connected (Linear, Jira, GitHub) and the verdict is BUG, offer to file it
 with the evidence block and attach `final.png` and the divergence screenshot. Do not file without asking.

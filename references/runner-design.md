@@ -40,7 +40,7 @@ secrets out of any model that does not need them, and turns a missing value into
 | `scripts/policy.py` | State + question construction, strict answer validation, target resolution |
 | `scripts/rules.py` | The optional standing rules (`"rules": true`) and the measurement that made them opt-in |
 | `scripts/jev_client.py` | Stdlib HTTP client for `POST /v1/systemone`: one persistent connection per run (reconnects and retries once if the socket was dropped; Jev calls are read-only), 429/5xx backoff, usage counters; honours `https_proxy` / `no_proxy` like urllib |
-| `scripts/run_test.py` | The loop, setup steps, action execution, stop conditions, trace writing |
+| `scripts/run_test.py` | The loop, setup steps, action execution, stop conditions, the results contract (outcome sightings, confirmation, assertions, adjudication), trace and result writing |
 | `scripts/summarize_trace.py` | Summary table and `--step N` dump |
 | `scripts/bench.py` | Runs a spec N times as subprocesses and reports medians; every number in the docs comes from its `--json` output |
 | `scripts/selftest.py` | Offline end-to-end test with local pages and a rule-based fake Jev |
@@ -51,10 +51,44 @@ secrets out of any model that does not need them, and turns a missing value into
 
 ## Stop conditions (in the order they are evaluated each step)
 
-time budget → observe → ask Jev (re-ask once if the `operation` answer fails validation) → `never`
-violated (fail_fast) → `done_when` satisfied (`auto_done`) → invalid `operation` after the retry (`error`) →
-low-confidence streak → freshness guard (stale → WAIT and re-observe; `max_stale` in a row →
-`unstable_page`) → DONE / BLOCKED chosen → repeat detection (`stuck`) → execute → settle → next step.
+time budget → observe → ask Jev (re-ask once if the `operation` answer fails validation) → a non-pass
+outcome seen (fail_fast → `outcome`) → a pending pass confirmed (`passed` / `assert_failed`) or not
+(`done_unverified` after Jev's DONE; carry on after an auto sighting) → a pass outcome seen (`auto_done` →
+WAIT, recheck next step) → invalid `operation` after the retry (`error`) → low-confidence streak →
+freshness guard (stale → WAIT and re-observe; `max_stale` in a row → `unstable_page`) → DONE (→ WAIT,
+recheck next step) / BLOCKED chosen → repeat detection (`stuck`) → execute → settle → next step.
+
+## The results contract
+
+`spec.effective_outcomes()` gives the runner the outcomes it works with: the declared ones plus
+`goal_reached` (requires `done_when`, verdict pass) and `never_<check>` (verdict bug, at `never_true`)
+synthesized when the spec does not declare those names. Every step `policy.build_questions` adds one
+`outcome` Choice over the outcomes that have a `when` plus `none_yet` (asked only when at least one has a
+`when`; a Choice *compares* mutually exclusive endings, where independent Nouls can all read 0.85 at once
+or one can sit at 0.78 for steps), a `blocked_reason` Choice (always, phrased without a conditional), and a
+`stuck_reason` Choice after an action with `page_changed: false`. `policy.seen_outcomes` decides what the
+page shows: probability ≥ `outcome_true` (for a `when`) and every `requires` check ≥ its threshold.
+
+A pass sighting (or Jev's DONE) is a `pending` confirmation: the step is a WAIT (`settle_ms`, then settle),
+the next observation decides. Confirmed → `run_test.check_assertions` evaluates the `assert` block in code
+on that observation (`url_matches` glob, `text_contains` on `body.innerText`, `field_value` by label,
+`element_present` / `element_absent` by role and name substring) → `passed`, or `assert_failed` with the
+actual values. Not confirmed → `done_unverified` after DONE, `outcome_unconfirmed` and carry on after an
+auto sighting. A non-pass outcome ends the run at first sighting with its picture forced (today's
+`fail_fast` asymmetry: a vanishing error toast is still an error). Preference when several are seen on
+one page: non-pass over pass, declared over synthesized, declaration order.
+
+After a seen outcome one adjudication request (`policy.build_adjudication`) sends the terminal page's
+`innerText` as up to 200 numbered lines with the outcome's statement; `evidence_line` selects the line that
+states it (or `none`) and `evidence_present` re-judges the statement. Code copies the selected line
+verbatim into `result.evidence.line`: Jev cannot quote text, so selection is how a quote is produced. A
+failed adjudication is recorded, never fatal.
+
+`run_test.build_result` writes `result.json` (references/trace-format.md): outcome, verdict, note,
+probability, confidence, seen_at_step, confirmed, `path_confidence` (the weakest executed decision),
+evidence, assertions, story, and for `undetermined` a `reason` with the typed answers of the terminal step
+and `policy.suggested_verdict`'s table lookup (typed reason first, then status). `trace.outcome` /
+`trace.verdict` repeat the headline and `trace.result` the whole file, so a trace alone is enough.
 
 **Freshness guard.** Jev decides on an observation, but the page may move on while it decides. Before
 executing, `observe.fingerprint()` re-reads what the observation recorded, without re-tagging: url, title,
