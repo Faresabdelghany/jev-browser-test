@@ -66,6 +66,12 @@ PAGE = """<!doctype html><html><head><title>Mini Shop</title>
    const f = document.getElementById('filler');
    f.textContent = 'Lorem ipsum filler sentence number ' + Array.from({length: 600}, (_, i) => i).join(' lorem ') + '.';
    f.hidden = false;
+   // ... and 600+ chars of whitespace-padded in-view text nodes (pretty-printed HTML), so the 500-char
+   // text head is cut inside the in-view part: it must still be a prefix of the 4,000-char text.
+   const ul = document.createElement('ul');
+   ul.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;list-style:none;padding:0;margin:4px 0';  // wraps: stays in view
+   for (let i = 0; i < 80; i++) { const li = document.createElement('li'); li.textContent = '\\n   item ' + i + '  \\n'; ul.appendChild(li); }
+   document.getElementById('results').before(ul);
  }
  if (location.search.includes('unstable=1')) {
    // The cookie banner's text changes every 70 ms, so the Accept button's surroundings never hold still.
@@ -114,6 +120,16 @@ CONTROLS_PAGE = """<!doctype html><html><head><title>Controls</title><style>
 <div><span class="mui-box"><svg viewBox="0 0 20 20"><rect x="2" y="2" width="16" height="16" fill="none" stroke="#666"/></svg><input type="checkbox" aria-label="Notify me"></span></div>
 <input type="checkbox" class="sr-only" aria-label="genuinely hidden, should NOT appear">
 <button>Continue</button>
+<form id="fields" style="margin-top:12px">
+  <label for="u" style="cursor:pointer">Username</label> <input id="u" type="text">
+  <input type="search" placeholder="Find">
+  <input list="dl" placeholder="Pick"><datalist id="dl"><option value="A"></option></datalist>
+  <input type="submit" value="Send">
+  <textarea aria-label="Notes">hello there</textarea>
+  <div contenteditable="true" aria-label="Editor" style="border:1px solid #ccc;display:inline-block;min-width:80px">draft</div>
+  <select aria-label="Grouped"><option>open-1</option><optgroup label="Closed" disabled><option>closed-1</option></optgroup></select>
+</form>
+<details><summary>Show error</summary>Payment failed: card declined</details>
 </body></html>
 """
 
@@ -308,6 +324,28 @@ def observer_check(url: str) -> list[str]:
         changes = pg.evaluate("() => window.changes")
         if states != "01110" or changes != 3:
             failures.append(f"checkbox clicks did not toggle the right inputs: states={states} change_events={changes}")
+
+        # Fields and their descriptions: a label whose control is in the table is not a clickable; implicit
+        # roles for search / datalist inputs; a submit's caption is its name, not a value; a textarea and a
+        # contenteditable carry their content as value and no `text`; a disabled optgroup disables its options.
+        by_name = {e["name"]: e for e in obs["elements"]}
+        if any(e["name"] == "Username" and e["via"] == "cursor" for e in obs["elements"]) or by_name.get("Username", {}).get("role") != "textbox":
+            failures.append(f"the label of an offered text field must not be a clickable: {[(e['role'], e['via']) for e in obs['elements'] if e['name'] == 'Username']}")
+        if by_name.get("Find", {}).get("role") != "searchbox" or by_name.get("Pick", {}).get("role") != "combobox":
+            failures.append(f"implicit roles: search={by_name.get('Find', {}).get('role')} list={by_name.get('Pick', {}).get('role')}")
+        if by_name.get("Send", {}).get("role") != "submit" or by_name.get("Send", {}).get("value") is not None:
+            failures.append(f"a submit input should be named by its caption and carry no value: {by_name.get('Send')}")
+        if by_name.get("Notes", {}).get("value") != "hello there" or by_name.get("Notes", {}).get("text") is not None:
+            failures.append(f"a textarea should carry its content as value only: {by_name.get('Notes')}")
+        if by_name.get("Editor", {}).get("value") != "draft" or by_name.get("Editor", {}).get("text") is not None or by_name.get("Editor", {}).get("role") != "textbox":
+            failures.append(f"a contenteditable should be a textbox with its content as value: {by_name.get('Editor')}")
+        grouped = by_name.get("Grouped", {}).get("options") or []
+        if [o["disabled"] for o in grouped] != [False, True]:
+            failures.append(f"options inside a disabled optgroup should be disabled: {grouped}")
+        if "Show error" not in obs["visible_text"] or "Payment failed" in obs["visible_text"]:
+            failures.append("visible_text should hold a closed details' summary but not its hidden content")
+        if obs["fingerprint"]["text_head"] != obs["visible_text"][:500]:
+            failures.append("the fingerprint's text head is not the first 500 chars of visible_text")
         b.close()
     print(f"observer check: {len(obs['elements'])} elements, checkboxes={len(boxes)}, states={states}, change_events={changes}")
     print()
@@ -718,6 +756,19 @@ def main() -> int:
         failures.append(f"visible_text lost the below-the-fold text or ignored max_text_chars: len={len(text)}")
     if trace["steps"][0]["visible_text"] != text[:600]:
         failures.append("the step's visible_text excerpt is not the first 600 chars of what Jev saw")
+    if "item 79" not in text or text.find("item 79") > text.find("Lorem ipsum"):
+        failures.append(f"in-view list items should all precede the below-the-fold filler: item 79 at {text.find('item 79')}, filler at {text.find('Lorem ipsum')}")
+    from observe import fingerprint as _fp, observe as _observe
+    from playwright.sync_api import sync_playwright as _sp
+    with _sp() as p:
+        b = p.chromium.launch()
+        pg = b.new_page(viewport={"width": 1280, "height": 800})
+        pg.goto(url + "?longtext=1")
+        o = _observe(pg, 200, 4000)
+        head_again = _fp(pg)["text_head"]
+        b.close()
+    if not (len(o["fingerprint"]["text_head"]) == 500 and o["fingerprint"]["text_head"] == o["visible_text"][:500] == head_again):
+        failures.append("with the head cut inside the in-view text, visibleText(500) must be the prefix of visibleText(4000) and equal at fingerprint time")
 
     # 13. browser.cdp_url: attach to a browser we did not launch, leave its tabs alone
     failures += cdp_check(url, tmp)

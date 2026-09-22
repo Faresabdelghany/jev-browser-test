@@ -24,14 +24,20 @@ JS_HELPERS = r"""
     return (h >>> 0).toString(16).padStart(8, '0');
   };
   const scopeOf = el => el.closest('form, dialog, [role="dialog"], tr, [role="row"], li, label') || el.parentElement || el;
+  const BUTTON_INPUTS = ['submit', 'button', 'reset', 'image'];  // their .value is a caption, not content
+  // The current content of a field, for the table and the fingerprint alike: text-like inputs (password
+  // shown as "(filled)"), textareas, the selected option of a select, the text of a contenteditable.
+  // Buttons, checkboxes, radios and file inputs have no content.
   const valueOf = el => {
     const tag = (el.tagName || '').toLowerCase();
     const type = (el.getAttribute('type') || '').toLowerCase();
-    if (tag === 'input' && type !== 'checkbox' && type !== 'radio') {
+    if (tag === 'input') {
+      if (type === 'checkbox' || type === 'radio' || type === 'file' || BUTTON_INPUTS.includes(type)) return '';
       return type === 'password' ? (el.value ? '(filled)' : '') : String(el.value || '').slice(0, 40);
     }
     if (tag === 'textarea') return String(el.value || '').slice(0, 40);
     if (tag === 'select') { const o = el.options[el.selectedIndex]; return o ? clean(o.text).slice(0, 40) : ''; }
+    if (el.isContentEditable) return clean(el.innerText || '').slice(0, 40);
     return '';
   };
   const checkedOf = el => {
@@ -41,19 +47,27 @@ JS_HELPERS = r"""
     return null;
   };
   const disabledOf = el => !!(el.disabled || el.getAttribute('aria-disabled') === 'true');
+  // Visible in the sense of "still the thing Jev saw": rendered, with a box, and able to take a pointer
+  // (pointer-events: none is how apps park a control while busy; the observer never offers such a node).
   const visibleOf = el => {
     if (!el.isConnected) return false;
     const r = el.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return false;
     const cs = getComputedStyle(el);
-    return cs.display !== 'none' && cs.visibility !== 'hidden';
+    return cs.display !== 'none' && cs.visibility !== 'hidden' && cs.pointerEvents !== 'none';
   };
-  // [connected, visible, value, checked, disabled, hash of the surrounding form/dialog/row/item text]
-  const nodeTuple = el => [el.isConnected, visibleOf(el), valueOf(el), checkedOf(el), disabledOf(el),
-                           strHash(clean(scopeOf(el).innerText || '').slice(0, 2000))];
+  // [connected, visible, value, checked, disabled, hash of the surrounding form/dialog/row/item text].
+  // A <label> offered for its offscreen checkbox stands for the control: value/checked/disabled are read
+  // from the control, so the box being checked or disabled during the decision makes the label stale.
+  const nodeTuple = el => {
+    const c = (el.tagName === 'LABEL' && el.control) ? el.control : el;
+    return [el.isConnected, visibleOf(el), valueOf(c), checkedOf(c), disabledOf(c),
+            strHash(clean(scopeOf(el).innerText || '').slice(0, 2000))];
+  };
   // Viewport-first visible text: text nodes that intersect the viewport in document order, then the rest,
   // cut to maxChars. body.innerText from the top let 2,000 chars of header and navigation crowd out the
-  // toast the checks were looking for. visibleText(500) is always a prefix of visibleText(4000).
+  // toast the checks were looking for. visibleText(n) is a prefix of visibleText(m) for n <= m: inLen is
+  // the exact length of the joined in-view text, so the walk stops only once the head alone fills the cut.
   const visibleText = maxChars => {
     if (!document.body) return '';
     const inView = [], rest = [];
@@ -61,22 +75,27 @@ JS_HELPERS = r"""
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     const range = document.createRange();
     let node;
-    while ((node = walker.nextNode()) && inLen < maxChars) {
+    while (inLen < maxChars && (node = walker.nextNode())) {
       const raw = node.textContent;
       if (!raw || !raw.trim()) continue;
       const parent = node.parentElement;
       if (!parent || parent.closest('script, style, noscript, template')) continue;
       if (parent.checkVisibility && !parent.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
+      // Text directly inside a closed <details> (outside its <summary>) is not shown, although its parent is.
+      const details = parent.closest('details');
+      if (details && !details.open) { const s = parent.closest('summary'); if (!s || s.parentElement !== details) continue; }
       range.selectNodeContents(node);
       const r = range.getBoundingClientRect();
       if (r.width <= 0 && r.height <= 0) continue;
-      const value = raw.replace(/\s+/g, ' ');
-      if (r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) { inView.push(value); inLen += value.length; }
-      else rest.push(value);
+      const value = clean(raw);
+      if (r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) {
+        inLen += value.length + (inView.length ? 1 : 0);
+        inView.push(value);
+      } else rest.push(value);
     }
-    const head = clean(inView.join(' '));
+    const head = inView.join(' ');
     if (head.length >= maxChars) return head.slice(0, maxChars);
-    return clean(head + ' ' + rest.join(' ')).slice(0, maxChars);
+    return (head + ' ' + rest.join(' ')).trim().slice(0, maxChars);
   };
 """
 
@@ -126,16 +145,25 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
       else if (tag === 'select') role = 'select';
       else if (tag === 'textarea') role = 'textbox';
       else if (tag === 'summary') role = 'button';
-      else if (tag === 'input') role = ['checkbox','radio','submit','button','file','range','reset','image'].includes(type) ? type : 'textbox';
+      else if (tag === 'input') {
+        if (['checkbox','radio','submit','button','file','range','reset','image'].includes(type)) role = type;
+        else if (type === 'search') role = 'searchbox';        // the implicit ARIA role of <input type=search>
+        else if (el.hasAttribute('list')) role = 'combobox';    // <input list=...>: datalist suggestions
+        else role = 'textbox';
+      }
       else if (el.isContentEditable) role = 'textbox';
       else role = 'clickable';
     }
-    const text = clean(el.innerText || el.textContent).slice(0, 80);
+    // A field's content is its value, never its caption: text is read only from non-editable elements, so a
+    // typed value cannot become a field's label, and a textarea's initial markup is not a second value.
+    const editable = formControl || el.isContentEditable;
+    const text = editable ? '' : clean(el.innerText || el.textContent).slice(0, 80);
     let labelText = '';
     if (el.labels && el.labels.length) labelText = clean(el.labels[0].innerText);
+    const caption = tag === 'input' && BUTTON_INPUTS.includes(type) ? el.value : '';
     const name = clean(
       el.getAttribute('aria-label') || labelText || el.getAttribute('placeholder') ||
-      el.getAttribute('title') || el.getAttribute('alt') || (tag === 'input' && type === 'submit' ? el.value : '') ||
+      el.getAttribute('title') || el.getAttribute('alt') || caption ||
       text || el.getAttribute('name') || el.id || ''
     ).slice(0, 80);
     let context;
@@ -149,16 +177,12 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
         h = h.parentElement;
       }
     }
-    let value;
-    if ((tag === 'input' && type !== 'checkbox' && type !== 'radio') || tag === 'textarea') {
-      value = type === 'password' ? (el.value ? '(filled)' : '') : String(el.value || '').slice(0, 40);
-    } else if (tag === 'select') {
-      const o = el.options[el.selectedIndex];
-      value = o ? clean(o.text).slice(0, 40) : '';
-    }
+    const value = valueOf(el) || undefined;  // the same function the fingerprint uses
     let options;
     if (tag === 'select') {
-      options = Array.from(el.options).slice(0, 40).map((o, i) => ({ i, text: clean(o.text).slice(0, 50), disabled: !!o.disabled }));
+      // an option inside a disabled <optgroup> is not selectable although its own .disabled is false
+      options = Array.from(el.options).slice(0, 40).map((o, i) => ({
+        i, text: clean(o.text).slice(0, 50), disabled: !!(o.disabled || o.closest('optgroup[disabled]')) }));
     }
     let checked;
     if (type === 'checkbox' || type === 'radio') checked = !!el.checked;
@@ -167,7 +191,7 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     seen.add(el);
     candidates.push({
       el, role, tag, type: type || undefined, name, text: text && text !== name ? text : undefined,
-      value: value || undefined, options, checked, via, context,
+      value, options, checked, via, context,
       href: tag === 'a' ? (el.getAttribute('href') || '').slice(0, 80) : undefined,
       disabled, x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)
     });
@@ -316,7 +340,10 @@ def compare_fingerprint(before: dict, after: dict, operation: str, target_idx=No
 
 
 def element_label(e: dict) -> str:
-    """One-line description of an element, used both in the state table and as a Choice option."""
+    """One-line description of an element: the `label` a chosen target gets in the trace and in Jev's
+    `recent_actions`, and the row format `render_table` hashes into the page signature. (The state sends
+    elements as records and the target questions offer objects; see policy.describe_element and
+    policy.target_criterion.)"""
     parts = [e["role"], f'"{e["name"]}"' if e.get("name") else '""']
     if e.get("text"):
         parts.append(f'text="{e["text"]}"')

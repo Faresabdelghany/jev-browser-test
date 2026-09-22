@@ -77,10 +77,15 @@ def element_operations(spec: dict, e: dict) -> list[str]:
     return ops
 
 
+def is_field(e: dict) -> bool:
+    """A control with content of its own (text field, select): its `value` is the field's current content."""
+    return e["role"] in TYPE_ROLES or e["role"] == "select"
+
+
 def describe_element(spec: dict, e: dict) -> dict:
     """One element as Jev sees it in `state.elements`: named fields, not a rendered line."""
     d = {"index": e["idx"], "role": e["role"], "label": e.get("name") or ""}
-    if e.get("text"):
+    if e.get("text") and not is_field(e):
         d["text"] = e["text"]
     d["value"] = e.get("value") or ""
     d["checked"] = e.get("checked") if e.get("checked") is not None else None
@@ -96,14 +101,15 @@ def describe_element(spec: dict, e: dict) -> dict:
 def target_criterion(e: dict) -> dict:
     """A click_target / type_target option as an object (TypeSafe criteria may be objects).
 
-    `element` and `role` always; `current_value` always for text fields and selects (an empty string
-    tells Jev the field is empty, which the rule about not re-filling a field needs) and otherwise only
-    when non-empty; `checked` as "true"/"false" for checkable roles; `text` and `context` when present.
+    `element` and `role` always; `current_value` for text fields and selects only (an empty string tells
+    Jev the field is empty, which the rule about not re-filling a field needs; a button's caption is not a
+    value); `checked` as "true"/"false" for checkable roles; `text` for non-field elements and `context`
+    when present.
     """
     c = {"element": f'[{e["idx"]}] {e["role"]} "{e.get("name") or ""}"', "role": e["role"]}
-    if e.get("text"):
+    if e.get("text") and not is_field(e):
         c["text"] = e["text"]
-    if e["role"] in TYPE_ROLES or e["role"] == "select" or e.get("value"):
+    if is_field(e):
         c["current_value"] = e.get("value") or ""
     if e["role"] in CHECKABLE_ROLES and e.get("checked") is not None:
         c["checked"] = "true" if e["checked"] else "false"

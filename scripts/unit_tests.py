@@ -534,6 +534,25 @@ class CriteriaTests(unittest.TestCase):
                                       "context": "1000-05 Residual Nile"})
         self.assertNotIn("5", click)  # a select is a SELECT target, not a click target
 
+    def test_fields_carry_current_value_only_and_buttons_no_value(self) -> None:
+        # A textarea's observed `text` is its initial markup, a contenteditable's is its content: for fields
+        # only `current_value` is offered. A submit input's `value` is its caption, never a current_value.
+        elements = [
+            {"idx": 0, "role": "textbox", "name": "Notes", "text": "hello there", "value": "completely new"},
+            {"idx": 1, "role": "submit", "name": "Sign in", "value": "Sign in"},
+            {"idx": 2, "role": "select", "name": "Size", "text": "S M", "value": "S", "options": [{"i": 0, "text": "S"}]},
+            {"idx": 3, "role": "searchbox", "name": "Find"},
+        ]
+        questions, _ = build_questions(SPEC, observation(elements), None)
+        self.assertEqual(questions["type_target"]["criteria"]["0"], {"element": '[0] textbox "Notes"', "role": "textbox", "current_value": "completely new"})
+        self.assertEqual(questions["type_target"]["criteria"]["3"], {"element": '[3] searchbox "Find"', "role": "searchbox", "current_value": ""})
+        self.assertEqual(questions["click_target"]["criteria"]["1"], {"element": '[1] submit "Sign in"', "role": "submit"})
+        self.assertEqual(questions["select_target"]["criteria"]["2:0"], {"element": '[2] select "Size"', "option": "S", "current_value": "S"})
+        state = build_state(SPEC, observation(elements), 1, [])
+        self.assertNotIn("text", state["elements"][0])
+        self.assertNotIn("text", state["elements"][2])
+        self.assertEqual(state["elements"][1]["value"], "Sign in")  # the record keeps what was observed
+
     def test_select_and_value_criteria(self) -> None:
         sel = self.questions["select_target"]["criteria"]
         self.assertEqual(list(sel), ["5:0", "5:1"])  # the disabled option is not offered
