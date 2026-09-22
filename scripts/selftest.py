@@ -193,7 +193,11 @@ def cdp_check(url: str, tmp: str) -> list[str]:
 
     proc = subprocess.Popen(
         [chromium, "--headless=new", f"--remote-debugging-port={port}", f"--user-data-dir={os.path.join(tmp, 'cdp-profile')}",
-         "--no-first-run", "--no-default-browser-check", "about:blank"],
+         "--no-first-run", "--no-default-browser-check",
+         # Playwright passes these when it launches Chromium itself; without them a fresh profile asks
+         # macOS for the keychain ("Chromium Safe Storage") to encrypt cookies, a password prompt per run.
+         "--use-mock-keychain", "--password-store=basic",
+         "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     try:
