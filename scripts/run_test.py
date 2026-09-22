@@ -37,7 +37,7 @@ from policy import (
     ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, build_adjudication, build_questions, build_state, is_field, read_checks,
     read_choice, read_outcome, resolve_target, seen_outcomes, suggested_verdict, validate_choice,
 )
-from spec import UNDETERMINED, effective_outcomes, load_dotenv, load_spec, validate
+from spec import UNDETERMINED, effective_outcomes, load_dotenv, load_spec, spec_warnings, validate
 from summarize_trace import is_action_step, summarize
 
 
@@ -1053,6 +1053,8 @@ def main(argv: list[str]) -> int:
     except (ValueError, json.JSONDecodeError, OSError) as e:
         print(str(e), file=sys.stderr)
         return 2
+    for note in spec_warnings(spec):  # advisory (a secret too short to mask safely); never changes the exit code
+        print(f"warning: {note}", file=sys.stderr)
     try:
         jev = JevClient(model=args.model)
     except JevError as e:

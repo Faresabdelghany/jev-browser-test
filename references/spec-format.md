@@ -87,7 +87,7 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `goal` | string | required | What a tester would be told to do. One flow, plain language, names the visible outcome |
 | `notes` | string | `""` | Hints Jev sees every step ("dismiss the cookie banner first", "the product grid loads lazily") |
 | `data` | object | `{}` | Every string Jev may type, by name. Jev picks the name, never writes text. Values support `${ENV_VAR}` |
-| `secrets` | list | `[]` | Names in `data` whose values must never appear in the trace or in the state sent to Jev. Shown as `<secret>` in `available_data_values`, and masked again in every observation (a secret typed into a plain text field or a contenteditable reads back as `<secret>`, not as the value) |
+| `secrets` | list | `[]` | Names in `data` whose values must never appear in the trace or in the state sent to Jev. Shown as `<secret>` in `available_data_values`, and masked again in every observation (a secret typed into a plain text field or a contenteditable reads back as `<secret>`, not as the value). Masking replaces **every occurrence**, so a value shorter than 6 characters after `${ENV}` substitution (`1`, `2024`, `admin`) also rewrites unrelated page text Jev decides on; `spec.py` and the runner print a warning on stderr for it (exit code unchanged): use a longer test credential, or leave a non-confidential value out of `secrets` |
 | `setup` | list | `[]` | Deterministic Playwright steps run **before** Jev takes over (see below) |
 | `checks` | object | `{}` | `name -> statement` evaluated as a Noul (0–1) against the page at every step |
 | `done_when` | list | `[]` | Check names that must all be ≥ `thresholds.check_true` for the synthesized `goal_reached` pass outcome. Required when no `outcomes` are declared; ignored when they are |
@@ -200,3 +200,5 @@ Checks are Noul questions: Jev returns the probability that the statement is tru
   which comes back to Claude to fix the spec — that is a test issue, not a product bug.
 - Test credentials go in `data` via `${ENV_VAR}` and are listed in `secrets`. Never paste real
   passwords into a spec file. Prefer `setup` for the login itself so the credential never reaches Jev at all.
+  Keep a secret at least 6 characters long: every occurrence of it is masked, so a PIN like `1234` or a
+  year also blanks unrelated page text (the validator warns; the run still goes ahead).

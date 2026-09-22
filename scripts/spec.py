@@ -34,6 +34,7 @@ ASSERTIONS = {
     "element_absent": dict,   # the same shape, must not be there
 }
 SETUP_ACTIONS = {"goto", "click", "fill", "press", "wait", "wait_for", "select"}
+SECRET_MIN_LEN = 6  # a shorter secret is masked wherever it occurs and rewrites unrelated page text: a warning, not a problem
 ENV_RE = re.compile(r"\$\{([A-Z0-9_]+)\}")
 DOTENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -302,6 +303,28 @@ def validate(spec: dict) -> list[str]:
     return errors
 
 
+def spec_warnings(spec: dict) -> list[str]:
+    """Advisory notes about a spec that validates. The CLIs print them to stderr; they are never a problem and
+    never change an exit code. Today: a `secrets` entry whose value (after `${ENV}` substitution) is shorter
+    than SECRET_MIN_LEN characters. `observe.mask_secrets` replaces every occurrence of a secret in what Jev
+    sees and in the trace, so a value like `1`, `2024` or `admin` also rewrites unrelated page text (a year in
+    a footer, a menu entry) as `<secret>` and can change what Jev decides on. An empty value masks nothing."""
+    notes: list[str] = []
+    data = spec.get("data") or {}
+    for key in spec.get("secrets") or []:
+        value = data.get(key)
+        if not isinstance(value, str):
+            continue  # validate() reports it
+        if value == "":
+            notes.append(f"secret '{key}' is empty: nothing is masked (is its environment variable set to a value?)")
+        elif len(value) < SECRET_MIN_LEN:
+            notes.append(f"secret '{key}' resolves to a {len(value)}-character value: every occurrence of a secret is masked in "
+                         f"the state Jev sees and in the trace, so a value this short also rewrites unrelated page text "
+                         f"(a year, a menu entry) as <secret> and can change what Jev decides on; use a longer test "
+                         f"credential, or drop '{key}' from 'secrets' if it is not confidential")
+    return notes
+
+
 def effective_outcomes(spec: dict) -> dict:
     """The outcomes the runner works with: the declared ones, or those synthesized from done_when / never.
 
@@ -352,6 +375,8 @@ def main(argv: list[str]) -> int:
     except (ValueError, json.JSONDecodeError, OSError) as e:
         print(str(e))
         return 1
+    for note in spec_warnings(spec):
+        print(f"warning: {note}", file=sys.stderr)
     print(f"OK: spec '{spec['id']}' is valid")
     print(f"  goal: {spec['goal']}")
     print(f"  checks: {', '.join(spec['checks'])}")

@@ -612,6 +612,45 @@ class SpecValidationTests(unittest.TestCase):
         self.assertTrue(any("quiet_ms" in p for p in self.problems(browser={"quiet_ms": -1})))
 
 
+class SecretWarningTests(unittest.TestCase):
+    """spec.spec_warnings: a secret too short to mask safely is a stderr warning, never a problem."""
+
+    def test_short_secret_warns_and_is_not_a_problem(self) -> None:
+        from spec import SECRET_MIN_LEN, spec_warnings, validate
+        self.assertEqual(SECRET_MIN_LEN, 6)
+        spec = _merge(SPEC, {"data": {"pin": "2024", "one": "1", "fine": "abcdef", "blank": "", "user": "tom"},
+                             "secrets": ["pin", "one", "fine", "blank"]})
+        self.assertEqual(validate(spec), [])                           # valid: the warning changes nothing about validity
+        notes = spec_warnings(spec)
+        self.assertEqual(len(notes), 3)
+        self.assertIn("secret 'pin' resolves to a 4-character value", notes[0])
+        self.assertIn("drop 'pin' from 'secrets'", notes[0])
+        self.assertIn("secret 'one' resolves to a 1-character value", notes[1])
+        self.assertIn("secret 'blank' is empty", notes[2])
+        self.assertFalse(any("fine" in n or "user" in n for n in notes))  # 6 characters is enough; a non-secret is never mentioned
+        self.assertEqual(spec_warnings(_merge(SPEC, {"data": {"pw": "longenough"}, "secrets": ["pw"]})), [])
+        self.assertEqual(spec_warnings(_merge(SPEC, {"secrets": ["missing"]})), [])   # validate() reports the unknown key
+
+    def test_cli_prints_the_warning_on_stderr_and_exits_0(self) -> None:
+        import tempfile
+        from spec import main as spec_main
+        tmp = tempfile.mkdtemp(prefix="jev-spec-")
+        path = os.path.join(tmp, "short.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"id": "short", "start_url": "http://x/", "goal": "Log in and see the dashboard",
+                       "checks": {"ok": "The dashboard heading is visible"}, "done_when": ["ok"],
+                       "data": {"username": "tom", "password": "${JEV_UNIT_SHORT_SECRET}"}, "secrets": ["password"]}, f)
+        with mock.patch.dict(os.environ, {"JEV_UNIT_SHORT_SECRET": "1234"}), mock.patch("sys.stdout") as out, mock.patch("sys.stderr") as err:
+            self.assertEqual(spec_main(["spec.py", path]), 0)
+        written = lambda m: "".join(str(c.args[0]) for c in m.write.call_args_list if c.args)  # noqa: E731
+        self.assertIn("warning: secret 'password' resolves to a 4-character value", written(err))
+        self.assertIn("OK: spec 'short' is valid", written(out))
+        self.assertNotIn("1234", written(out) + written(err))         # the value itself is never echoed
+        with mock.patch.dict(os.environ, {"JEV_UNIT_SHORT_SECRET": "long-enough-secret"}), mock.patch("sys.stdout"), mock.patch("sys.stderr") as err:
+            self.assertEqual(spec_main(["spec.py", path]), 0)
+        self.assertEqual(written(err), "")
+
+
 class FingerprintCompareTests(unittest.TestCase):
     def fp(self, **changes) -> dict:
         base = {"url": "http://x/a", "title": "A", "text_head": "hello",
