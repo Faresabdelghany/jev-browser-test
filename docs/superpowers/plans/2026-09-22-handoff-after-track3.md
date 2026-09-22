@@ -2,12 +2,15 @@
 
 All three tracks of `docs/superpowers/specs/2026-09-21-ultrafast-loop-and-results-contract-design.md` are
 implemented, measured and pushed to `main`. The brief (`2026-09-21-implementation-brief.md`) stays the
-rulebook for commands, non-negotiables and the push recipe. Start with `git pull`.
+rulebook for commands, non-negotiables and the push recipe. Start with `git pull`. After Track 3 a
+max-effort code review of `1c79f1b..25df84d` found fifteen defects; `9c20838` fixes them and the commit
+after it re-measures both smoke specs and the suite at `9c20838` (deviations 8 and 9 below).
 
 ## State of the repo
 
-Selftest (`.venv/bin/python scripts/selftest.py`, 20 numbered checks, ~25 s) and unit tests
-(`.venv/bin/python scripts/unit_tests.py`, 70 tests) are green at HEAD. `.env` and `.venv` are local and
+Selftest (`.venv/bin/python scripts/selftest.py`, 22 run scenarios plus the observer, settle, CDP-attach
+and dotenv checks, ~37 s) and unit tests (`.venv/bin/python scripts/unit_tests.py`, 74 tests) are green at
+HEAD. `.env` and `.venv` are local and
 git-ignored. Every number in README / SKILL.md / references comes from a file under
 `docs/superpowers/measurements/` (see its README for how each row is derived).
 
@@ -25,7 +28,14 @@ Commits of this session, in order (`1c79f1b..67cb084`):
 - Track 2: `1ee2ed8` the results contract (spec, policy, runner, summarizer, selftest, unit tests) ·
   `1aec493` smoke specs rewritten with outcomes + assert · `6d1d5cc` `first_seen_at_step` · `1327df4`
   docs · `185a10f` measurement.
-- Track 3: `8780958` `run_suite.py` + `report.py` · `ef0c9e9` docs · `67cb084` acceptance record.
+- Track 3: `8780958` `run_suite.py` + `report.py` · `ef0c9e9` docs · `67cb084` acceptance record ·
+  `25df84d` this handoff.
+- Review round 2: `9c20838` the fifteen fixes of the max-effort review (the budget's final look as a
+  terminal step, declared outcomes as the whole contract, masking in adjudication / assertions / url,
+  whole-document assertions, viewport-first adjudication lines, Playwright's glob dialect, `adjudicate()`
+  never fatal, `suggested_verdict` gated, suite robustness, `summarize_trace --result` fallback, bench
+  headline fields and `GIT_COMMIT` for exports; its commit message has the list) · the commit after it:
+  measurement at `9c20838`.
 
 ## Numbers (medians of 5 live runs each; files in `docs/superpowers/measurements/`)
 
@@ -36,6 +46,13 @@ Commits of this session, in order (`1c79f1b..67cb084`):
 
 Track 3 acceptance (`2026-09-22-track3-suite.json`): 2 specs × 5 repeats, 4 workers, **18.6 s**, all pass,
 agreement 100% (acceptance < 60 s ✓).
+
+At `9c20838` (review fixes; `2026-09-22-review-fixes-bench.json` / `-suite.json`, from a `git archive`
+export with `GIT_COMMIT` set, so the files record the commit): `smoke-login` `logged_in` 5/5 confirmed,
+3/3 assertions, 6,372 ms, 6 requests, 8,932 tokens, conf 0.94; `smoke-login-badpw` `bad_credentials` 5/5,
+first seen at step 4 in 5/5, 6,282 ms, 6 requests, 9,774 tokens, conf 0.92; suite **20.8 s**, all pass,
+agreement 100%. Requests and tokens are unchanged because the fixes changed the runner's outcome table and
+its oracles, not what Jev is sent; the measurements README has the row-by-row comparison.
 
 Acceptance per the spec: §5.8 all four items ✓ (badpw at first sighting; smoke-login confirmed with all
 assertions; old-style specs unchanged in status via synthesized outcomes, covered by the selftest;
@@ -71,7 +88,19 @@ the suite ✗ (see deviations).
    to the working tree could not leak into the subprocess runs (which is why those two files record
    `git_commit: null`: pass `GIT_COMMIT=<sha>` when benching from an export). The Track 3 acceptance suite ran
    from the checkout with `run_suite.py` still uncommitted (`185a10f` has no `run_suite.py`). Do the export for
-   any number that cites a commit.
+   any number that cites a commit; the review-fixes files were taken that way (`git_commit: 9c20838` in all
+   three).
+8. **Two behaviour changes from the review fixes**: with a declared `outcomes` block, `done_when` / `never`
+   are inert (design §5.1; validation requires a pass outcome among the declared ones, and
+   `specs/smoke-login.json` dropped both keys), and a pass first seen on the budget's final look ends
+   `budget_exhausted` with `reason.pending_outcome` instead of an unconfirmed `passed`.
+9. **Review findings confirmed but left as reported**: an intermittent runner exit 2 (environment) still
+   counts in the suite's outcome distribution, so one launch failure among passes reads `flaky`; a short
+   secret (`1`, `2024`, `admin`) still over-masks unrelated UI text (a minimum-length warning in
+   `spec.validate` would close it); and the reuse cleanups (`run_suite` vs `bench` launchers and
+   aggregators, `report` vs `summarize_trace` labels, `read_outcome` vs `read_choice`, the adjudication
+   payload carrying each line twice, `blocked_reason` asked every step as the spec prescribes) were not
+   applied.
 
 ## Suggested next steps (none required by the spec)
 
@@ -83,7 +112,7 @@ the suite ✗ (see deviations).
 ## Reminders
 
 - The skill's copy in **Claude Desktop is behind the repo** (it was behind after Track 1 already; three
-  more tracks of changes since). Exporting from Desktop over this folder would revert everything above;
+  more tracks of changes and the review fixes since). Exporting from Desktop over this folder would revert everything above;
   re-import from the repo (or stop exporting) before the next round.
 - Push recipe: `gh auth switch --user Faresabdelghany; git push origin main; gh auth switch`.
 - Live runs cost credit (~6 requests each now); the offline selftest and unit tests cover everything else.

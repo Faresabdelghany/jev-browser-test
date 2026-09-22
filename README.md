@@ -117,6 +117,12 @@ per step are where the extra tokens go; what it buys is a run that comes back as
 with the page's own line as evidence, and a negative test that is decided the moment its message appears
 instead of hovering under a threshold.
 
+Re-measured after the review fixes (`9c20838`, `2026-09-22-review-fixes-bench.json`, from a clean export of
+that commit): the same results in 5/5 runs of both specs, 6.4 s and 6.3 s, the same 6 requests and the same
+token counts, confidence 0.94 and 0.92; the suite of both specs × 5 repeats on 4 workers took 20.8 s, all
+pass (`2026-09-22-review-fixes-suite.json`). `docs/superpowers/measurements/README.md` has the row-by-row
+comparison.
+
 ## Layout
 
 ```

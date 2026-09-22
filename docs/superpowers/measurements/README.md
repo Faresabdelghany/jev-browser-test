@@ -167,3 +167,68 @@ wordings (`light`, `minimal`, `noblocked`, `no-check-rule`) were never committed
 already-offered controls are not clickables), not by the env. What is reproducible from a commit is the
 adopted shape: `c3382c2` is what `2026-09-21-track1-after.json` measures. The rows above are kept as the
 record of why the decisions were taken, not as re-runnable experiments.
+
+## Review fixes (2026-09-22): the runner at `9c20838`
+
+Both smoke specs, 5 repeats, medians, then the suite, all from a `git archive 9c20838` export in the
+scratchpad with `GIT_COMMIT=9c20838` set: the three files record the commit, and every bench run record
+carries the headline fields (`first_seen_at_step`, `seen_at_step`, `confirmed`, `assertions_ok` /
+`assertions_total`, `evidence_line`, `adjudication_ms`), so nothing in this section comes from a trace
+outside the file. `9c20838` applies the fifteen findings of the max-effort review of `1c79f1b..25df84d`
+(its commit message lists them). The ones a live run exercises: the `assert` block is evaluated on a
+whole-document observation taken after the confirming step (one more observation per passing run), the
+adjudication offers visibility-filtered, viewport-first lines, adjudication lines and assertion actuals are
+masked, and `smoke-login.json` dropped its `done_when` / `never` because declared outcomes are now the whole
+contract. Files: `2026-09-22-review-fixes-bench.json`, `2026-09-22-review-fixes-suite.json` / `.md`.
+
+| spec | measure | Track 2 after (`1aec493`) | review fixes (`9c20838`) |
+|---|---|---:|---:|
+| `smoke-login` | result | `logged_in` (pass) 5/5, confirmed, 3/3 assertions | `logged_in` (pass) 5/5, confirmed, 3/3 assertions |
+| | first sighting → confirming step | 4 → 5 (from the traces) | 4 → 5 in 5/5 (in the file) |
+| | evidence line | "You logged into a secure area!" | the same, 5/5 |
+| | wall-clock | 6,030 ms | 6,372 ms (+6%) |
+| | Jev ms per run / requests | 2,049 / 6 | 2,016 / 6 |
+| | adjudication request | not in the file | 319 ms |
+| | Jev request, warm | 307 ms | 307 ms |
+| | browser per action | 146 ms | 152 ms |
+| | input tokens per run | 8,932 | 8,932 |
+| | decision confidence (median) | 0.96 | 0.94 |
+| `smoke-login-badpw` | result | `bad_credentials` (pass) 5/5, confirmed, 3/3 assertions | the same |
+| | first sighting → confirming step | 4 → 5 (from the traces) | 4 → 5 in 5/5 (in the file) |
+| | evidence line | "Your password is invalid!" | the same, 5/5 |
+| | wall-clock | 6,062 ms | 6,282 ms (+4%) |
+| | Jev ms per run / requests | 2,019 / 6 | 1,966 / 6 |
+| | adjudication request | not in the file | 291 ms |
+| | Jev request, warm | 315.5 ms | 296.5 ms |
+| | browser per action | 147 ms | 144 ms |
+| | input tokens per run | 9,774 | 9,774 |
+| | decision confidence (median) | 0.93 | 0.92 |
+
+**The token counts are identical because the requests are identical.** Jev reports `input_tokens` per
+request, and every run of a spec has read the same figure since `1aec493`. The `checks` block is still
+asked every step and the outcome Choice already offered only the declared outcomes (`logged_in`,
+`bad_credentials`, `server_error`, `none_yet`) at `1aec493`; the synthesized `goal_reached` /
+`never_login_error` that `9c20838` removed lived in the runner's outcome table, where the lone `login_error`
+Noul raced the Choice at `never_true`, not in the request. Dropping `done_when` / `never` from the spec
+therefore changed what can end the run, not what Jev is sent.
+
+**Wall-clock and confidence.** Jev ms and browser ms per run are unchanged; the medians moved by +342 ms
+and +220 ms while the runs spread 6,299–7,024 ms against 5,996–6,370 ms before, so the difference is
+inside the run-to-run spread plus the one whole-document observation per passing run, and is reported as
+measured rather than attributed. The confidence medians (0.94 vs 0.96, 0.92 vs 0.93) are Jev's variance on
+identical requests: per run 0.93–0.96 against 0.95–0.96 for `smoke-login`, 0.88–0.92 against 0.88–0.94 for
+`smoke-login-badpw`, same model `jev-1.13.0`.
+
+The suite, `run_suite.py specs/smoke-login.json specs/smoke-login-badpw.json --repeat 5 --workers 4`, from
+the same export:
+
+| | Track 3 (`185a10f`, from the checkout) | review fixes (`9c20838`, from the export) |
+|---|---|---|
+| wall-clock, 2 specs × 5 repeats, 4 workers | 18.6 s | 20.8 s (acceptance < 60 s ✓) |
+| `smoke-login` | pass 5/5, agreement 100%, first sighting at step 4 in 5/5, median 6,432 ms | pass 5/5, agreement 100%, step 4 in 5/5, median 7,461 ms |
+| `smoke-login-badpw` | pass 5/5, agreement 100%, first sighting at step 4 in 5/5, median 6,192 ms | pass 5/5, agreement 100%, step 4 in 5/5, median 6,736 ms |
+| suite verdict | ALL PASS | ALL PASS (`all_pass: true`, exit 0) |
+
+Per-run wall under four concurrent browsers is higher than in the bench, as before. The `results.md` cells
+now hold the evidence line and a link to each `result.json`; the runner exits 2 for a spec problem or an
+unreachable browser and the suite exits 2 when no run produced a result, which no run here did.
