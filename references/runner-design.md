@@ -62,9 +62,9 @@ recheck next step) / BLOCKED chosen → repeat detection (`stuck`) → execute �
 
 ## The results contract
 
-`spec.effective_outcomes()` gives the runner the outcomes it works with: the declared ones plus
-`goal_reached` (requires `done_when`, verdict pass) and `never_<check>` (verdict bug, at `never_true`)
-synthesized when the spec does not declare those names. Every step `policy.build_questions` adds one
+`spec.effective_outcomes()` gives the runner the outcomes it works with: the declared ones, or, when none
+are declared, `goal_reached` (requires `done_when`, verdict pass) and `never_<check>` (verdict bug, at
+`never_true`) synthesized from the old-style fields (design §5.1). Every step `policy.build_questions` adds one
 `outcome` Choice over the outcomes that have a `when` plus `none_yet` (asked only when at least one has a
 `when`; a Choice *compares* mutually exclusive endings, where independent Nouls can all read 0.85 at once
 or one can sit at 0.78 for steps), a `blocked_reason` Choice (always, phrased without a conditional), and a
@@ -73,23 +73,33 @@ page shows: probability ≥ `outcome_true` (for a `when`) and every `requires` c
 
 A pass sighting (or Jev's DONE) is a `pending` confirmation: the step is a WAIT (`settle_ms`, then settle),
 the next observation decides. Confirmed → `run_test.check_assertions` evaluates the `assert` block in code
-on that observation (`url_matches` glob, `text_contains` on `body.innerText`, `field_value` by label,
-`element_present` / `element_absent` by role and name substring) → `passed`, or `assert_failed` with the
-actual values. Not confirmed → `done_unverified` after DONE, `outcome_unconfirmed` and carry on after an
-auto sighting. A non-pass outcome ends the run at first sighting with its picture forced (today's
-`fail_fast` asymmetry: a vanishing error toast is still an error). Preference when several are seen on
-one page: non-pass over pass, declared over synthesized, declaration order.
+on the final page (`url_matches` glob, `text_contains` on `body.innerText`, `field_value` by label,
+`element_present` / `element_absent` by role and name substring over a whole-document observation, not the
+viewport table) → `passed`, or `assert_failed` with the actual values (masked). Not confirmed →
+`done_unverified` after DONE, `outcome_unconfirmed` and carry on after an auto sighting. A non-pass outcome
+ends the run at first sighting with its picture forced (today's `fail_fast` asymmetry: a vanishing error
+toast is still an error). Preference when several are seen on one page: non-pass over pass, declaration
+order. When the budget ends, the final look is one more terminal step (`final_look: true`, asked only the
+check and outcome questions): it confirms a sighting or a DONE made on the last step, ends a non-pass
+outcome under the same `fail_fast` rule, and records a pass first seen there as `pending_outcome` under
+`budget_exhausted` (no recheck happened, so it is not a pass; the next run gets one more step). Every
+runner-inserted WAIT (pending confirmation, low confidence, stale decision) goes through one `park()`
+helper; only the stale one skips the `settle_ms` pause, because the page is already moving and the
+event-based settle is what waits for it to stop.
 
-After a seen outcome one adjudication request (`policy.build_adjudication`) sends the terminal page's
-`innerText` as up to 200 numbered lines with the outcome's statement; `evidence_line` selects the line that
-states it (or `none`) and `evidence_present` re-judges the statement. Code copies the selected line
-verbatim into `result.evidence.line`: Jev cannot quote text, so selection is how a quote is produced. A
-failed adjudication is recorded, never fatal.
+After a seen outcome one adjudication request (`policy.build_adjudication`) sends the terminal page's visible
+text as up to 200 numbered lines with the outcome's statement (`observe.LINES_JS`: one line per block, the
+lines in the viewport first, the same visibility rules as the observation, masked like it); `evidence_line`
+selects the line that states it (or `none`) and `evidence_present` re-judges the statement. Code copies the
+selected line verbatim into `result.evidence.line`: Jev cannot quote text, so selection is how a quote is
+produced. A failed adjudication (transport, a non-JSON body, a malformed answer) is recorded, never fatal.
 
 `run_test.build_result` writes `result.json` (references/trace-format.md): outcome, verdict, note,
 probability, confidence, seen_at_step, confirmed, `path_confidence` (the weakest executed decision),
 evidence, assertions, story, and for `undetermined` a `reason` with the typed answers of the terminal step
-and `policy.suggested_verdict`'s table lookup (typed reason first, then status). `trace.outcome` /
+and `policy.suggested_verdict`'s table lookup (`stuck_reason` for `stuck`, `blocked_reason` for `blocked` /
+`stuck` / `low_confidence` / `budget_exhausted`, else the status row: for `done_unverified`, `assert_failed`,
+`unstable_page` and `error` the step's `blocked_reason` is about progress, not the verdict). `trace.outcome` /
 `trace.verdict` repeat the headline and `trace.result` the whole file, so a trace alone is enough.
 
 **Freshness guard.** Jev decides on an observation, but the page may move on while it decides. Before

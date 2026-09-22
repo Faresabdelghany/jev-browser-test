@@ -1,8 +1,16 @@
 # Measurements
 
 Every performance number in the README, SKILL.md and `references/` comes from `scripts/bench.py` output
-committed here. Files are named `<date>-<track>-<what>.json`; each holds the per-run records and the
-medians for one or more specs, plus the git commit the runs were made at.
+committed here (Track 3's from `scripts/run_suite.py`'s `results.json`, which reuses bench's per-run measures
+but keeps a shorter median list). Files are named `<date>-<track>-<what>.json`; each holds the per-run
+records and the medians for one or more specs, plus the git commit the runs were made at when the bench could
+read it: `2026-09-22-track2-before.json` / `-after.json` record `git_commit: null` because they were run from
+a `git archive` export (no `.git`; `bench._git_commit()` now falls back to a `GIT_COMMIT` environment
+variable, so set it when benching from an export). Since 2026-09-22 each run record also carries the
+result headline the tables quote (`first_seen_at_step`, `confirmed`, `assertions_ok` / `assertions_total`,
+`evidence_line`) and `adjudication_ms`, the one request `requests` counts that the per-step `jev_ms` sum does
+not; the Track 2 files predate those fields, so their "first seen" and "confirmed, 3/3 assertions" rows come
+from the run traces on disk, not from the committed file.
 
 How to read a file: `specs.<id>.medians` holds the per-run medians of every `RUN_FIELDS` entry (wall,
 duration, Jev ms, browser ms, requests, tokens, decision confidence, stale steps, the first request's
@@ -69,7 +77,8 @@ instead of thresholding one Noul).
 
 Both smoke specs, 5 repeats, medians. Before = commit `5954577` (Track 1 plus the review fixes; the specs
 still written with `done_when` / `never`), after = commit `1aec493` (outcomes + assert in the runner and
-in both specs). Files: `2026-09-22-track2-before.json`, `2026-09-22-track2-after.json`.
+in both specs); both attributions are from the session notes, the files themselves carry `git_commit: null`
+(see the top of this page). Files: `2026-09-22-track2-before.json`, `2026-09-22-track2-after.json`.
 
 | spec | measure | before | after |
 |---|---|---:|---:|
@@ -103,9 +112,10 @@ confidence, three refused WAITs) are gone.
 
 ## Track 3 (2026-09-22): hands-off suite
 
-`scripts/run_suite.py specs/smoke-login.json specs/smoke-login-badpw.json --repeat 5 --workers 4` at commit
-`185a10f` (the runner of Track 2): `2026-09-22-track3-suite.json` / `.md` are the `results.json` /
-`results.md` it wrote.
+`scripts/run_suite.py specs/smoke-login.json specs/smoke-login-badpw.json --repeat 5 --workers 4` with the
+runner at commit `185a10f` (the runner of Track 2) and `run_suite.py` itself still uncommitted in the working
+tree (it landed in `8780958`; the suite ran from the checkout, not from an export, which is how the file got
+its commit): `2026-09-22-track3-suite.json` / `.md` are the `results.json` / `results.md` it wrote.
 
 | | |
 |---|---|

@@ -130,6 +130,11 @@ CONTROLS_PAGE = """<!doctype html><html><head><title>Controls</title><style>
   <select aria-label="Grouped"><option>open-1</option><optgroup label="Closed" disabled><option>closed-1</option></optgroup></select>
 </form>
 <details><summary>Show error</summary>Payment failed: card declined</details>
+<div style="height:2200px"></div>
+<!-- below the fold: the assertion oracle must see these, the table Jev chooses from must not -->
+<a href="#logout">Logout</a>
+<div role="alert">Session expired</div>
+<label>Coupon <input id="coupon" value="SAVE10"></label>
 </body></html>
 """
 
@@ -140,6 +145,8 @@ SETTLE_PAGE = """<!doctype html><html><head><title>Settle</title></head><body>
 <input id="cb" role="combobox" aria-label="Product" oninput="suggest()">
 <ul id="list" role="listbox"></ul>
 <input id="sb" role="searchbox" aria-label="Find">
+<input id="sync" role="combobox" aria-label="Colour" oninput="filterSync()">
+<ul id="synclist" role="listbox"></ul>
 <ul role="listbox" id="sidebar"><li role="option">Always shown</li></ul>
 <div id="counter">0</div>
 <script>
@@ -150,6 +157,10 @@ SETTLE_PAGE = """<!doctype html><html><head><title>Settle</title></head><body>
  function suggest(){ setTimeout(() => {
    const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = 'Blue Hoodie';
    document.getElementById('list').appendChild(li); }, 120); }
+ function filterSync(){  // client-side filtering: the suggestions are on screen before the input handler returns
+   const ul = document.getElementById('synclist'); ul.innerHTML = '';
+   for (const c of ['blue', 'black', 'red']) if (c.startsWith(document.getElementById('sync').value)) {
+     const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = c; ul.appendChild(li); } }
 </script></body></html>"""
 
 
@@ -164,10 +175,13 @@ def settle_check(url: str) -> list[str]:
     def sp(cap: int, quiet: int) -> dict:
         return _merge(DEFAULTS, {"id": "settle", "start_url": url, "goal": "x", "browser": {"settle_ms": cap, "quiet_ms": quiet}})
 
+    from observe import observe
+
     with sync_playwright() as p:
         b = p.chromium.launch()
         pg = b.new_page(viewport={"width": 800, "height": 600})
         pg.goto(url)
+        observe(pg)  # as in the loop: the options wait counts an option as new when Jev did not see it (no data-jev-idx)
         pg.click("#burst")  # mutates every 20 ms for 150 ms, then stops
         r1 = settle(pg, sp(1000, 50))
         if r1["ended"] != "quiet" or not (150 <= r1["ms"] < 800):
@@ -177,6 +191,7 @@ def settle_check(url: str) -> list[str]:
         if r2["ended"] != "cap" or not (280 <= r2["ms"] <= 700):
             failures.append(f"settle on a never-quiet page should end at the cap (300 ms): {r2}")
         pg.goto(url)  # a fresh document: no interval running
+        observe(pg)
         pg.fill("#cb", "blu")  # the option appears 120 ms later; the sidebar's permanent option must not count
         r3 = settle(pg, sp(1000, 50), after=("TYPE_TEXT", "combobox"))
         visible = pg.locator('#list [role="option"]').count()
@@ -185,12 +200,17 @@ def settle_check(url: str) -> list[str]:
         r4 = settle(pg, sp(1000, 50))  # a plain settle right after: nothing changes, quiet within ~quiet_ms
         if r4["ended"] != "quiet" or r4["ms"] >= 400:
             failures.append(f"a quiet page should settle in about quiet_ms: {r4}")
+        observe(pg)  # the option from the previous typing is now one Jev saw
         pg.fill("#sb", "xyz")  # a searchbox that never produces suggestions: give up after 200 ms
         r5 = settle(pg, sp(1000, 50), after=("TYPE_TEXT", "searchbox"))
         if r5["ended"] != "options_timeout" or not (200 <= r5["ms"] < 500):
             failures.append(f"typing into a searchbox with no suggestions should end options_timeout at ~200 ms: {r5}")
+        pg.fill("#sync", "bl")  # suggestions rendered synchronously by the typing: on screen before the settle begins
+        r6 = settle(pg, sp(1000, 50), after=("TYPE_TEXT", "combobox"))
+        if r6["ended"] != "options" or r6["ms"] >= 200:
+            failures.append(f"suggestions already on screen when the settle starts must count as arrived, not time out: {r6}")
         b.close()
-    print(f"settle check: burst={r1} forever={r2} combobox={r3} quiet={r4} no-suggestions={r5}")
+    print(f"settle check: burst={r1} forever={r2} combobox={r3} quiet={r4} no-suggestions={r5} sync={r6}")
     print()
     return failures
 
@@ -367,6 +387,53 @@ def observer_check(url: str) -> list[str]:
             failures.append(f"typed secrets should show as <secret>: {by_name.get('Username', {}).get('value')!r} {by_name.get('Editor', {}).get('value')!r}")
         if "hunter2-not-real" not in json.dumps(masked["fingerprint"]):
             failures.append("the fingerprint should keep the real value (it is only compared, never sent)")
+        if by_name.get("Pick", {}).get("datalist") is not True or by_name.get("Find", {}).get("datalist") is not None:
+            failures.append(f"a datalist input should be flagged (the settle must not wait for DOM options): {by_name.get('Pick')}")
+
+        # The assertion oracle is the whole document: the Logout link, the alert and the Coupon field sit 2,200 px
+        # below the fold, so they are absent from the table Jev chooses from (a 1280x800 viewport) and present to
+        # check_assertions; comparisons use the real values and `actual` is masked.
+        from run_test import adjudicate, check_assertions
+        names = {e["name"] for e in masked["elements"]}
+        if "Logout" in names or "Coupon" in names:
+            failures.append("below-the-fold controls should not be in the table Jev chooses from")
+        got = check_assertions({"assert": [
+            {"element_present": {"role": "link", "name": "Logout"}}, {"element_absent": {"role": "alert"}},
+            {"field_value": {"label": "Coupon", "equals": "SAVE10"}}, {"field_value": {"label": "Username", "equals": "hunter2-not-real"}},
+            {"text_contains": "Session expired"}, {"url_matches": "file://**/controls.html"},
+        ]}, pg, masked, ["hunter2-not-real"])
+        if [a["ok"] for a in got] != [True, False, True, True, True, True]:
+            failures.append(f"assertions should judge the whole document: {[(next(k for k in a if k not in ('ok', 'actual')), a['ok']) for a in got]}")
+        if "hunter2" in json.dumps(got) or got[3]["field_value"]["equals"] != "<secret>":
+            failures.append(f"assertion records should be masked: {got[3]}")
+        if pg.evaluate("() => document.querySelectorAll('[data-jev-idx]').length") != len(masked["elements"]):
+            failures.append("the whole-document observation must not re-number the nodes Jev saw")
+
+        # The adjudication lines: viewport-first, masked, and never fatal on a bad answer
+        class PickEditor:
+            def system_one(self, state, questions):
+                self.state = state
+                crit = questions["evidence_line"]["criteria"]
+                pick = next((k for k, v in crit.items() if "note" in v), "none")
+                return {"answers": {"evidence_line": {"type": "choice", "choice": pick, "confidence": 0.9,
+                                                      "probabilities": {k: (1.0 if k == pick else 0.0) for k in crit}},
+                                    "evidence_present": {"type": "noul", "noul": 0.9}}, "usage": {}, "latency_ms": 1}
+        picker = PickEditor()
+        rec = adjudicate(pg, picker, "edited", "The editor holds a note", ["hunter2-not-real"])
+        lines = [ln["text"] for ln in picker.state["lines"]]
+        if "note <secret> end" not in (rec.get("line") or "") or "hunter2" in json.dumps(picker.state):
+            failures.append(f"the adjudication should quote the masked line and send masked lines: {rec.get('line')!r}")
+        if not (lines.index("Continue") < lines.index("Logout") and lines.index("Show error") < lines.index("Session expired")):
+            failures.append(f"adjudication lines should come viewport-first: {lines[:6]} ... {lines[-4:]}")
+        if "Payment failed: card declined" in lines:
+            failures.append("a closed details' content is not a quotable line")
+
+        class Broken:
+            def system_one(self, state, questions):
+                raise ValueError("not JSON")
+        rec = adjudicate(pg, Broken(), "edited", "The editor holds a note", [])
+        if rec.get("line") is not None or "ValueError" not in (rec.get("error") or ""):
+            failures.append(f"a failing adjudication is recorded, never raised: {rec}")
         b.close()
     print(f"observer check: {len(obs['elements'])} elements, checkboxes={len(boxes)}, states={states}, change_events={changes}")
     print()
@@ -674,18 +741,20 @@ def main() -> int:
     if set(timing) != {"launch_ms", "navigation_ms", "setup_ms", "steps_ms", "final_ms"} or not all(isinstance(v, int) and v >= 0 for v in timing.values()):
         failures.append(f"trace.timing should hold the five non-negative laps: {timing}")
 
-    # 1b. the same flow with the default policy ("key"): only the terminal step gets a picture, plus final.png
+    # 1b. the same flow with the default policy ("key"): the pass sighting (the page where the outcome was first
+    #     seen) and the terminal step get a picture, the ordinary steps do not, plus final.png
     spec = base_spec(url)
     out = os.path.join(tmp, "run-pass-key")
     trace = run(spec, FakeJev(), out)  # screenshots=None -> the spec default, which is "key"
     print(summarize(trace, out))
     print()
     shots = [s.get("screenshot") for s in trace["steps"]]
-    if trace["status"] != "passed" or shots[:-1] != [None] * (len(shots) - 1) or shots[-1] != f"steps/{len(shots):03d}.png":
-        failures.append(f"screenshots=key should capture only the terminal step of a clean run: {shots}")
+    n = len(shots)
+    if trace["status"] != "passed" or shots != [None] * (n - 2) + [f"steps/{n - 1:03d}.png", f"steps/{n:03d}.png"]:
+        failures.append(f"screenshots=key should capture the sighting and the terminal step of a clean run: {shots}")
     if not os.path.exists(os.path.join(out, "steps", "final.png")) or trace["final"].get("screenshot") != "steps/final.png":
         failures.append("final.png missing in key mode")
-    if f"screenshots: steps {len(shots)} + final.png" not in summarize(trace, out):
+    if f"screenshots: steps {n - 1}, {n} + final.png" not in summarize(trace, out):
         failures.append("summary does not say which steps have screenshots")
 
     # 2. the app shows an error -> the synthesized never_<check> outcome (verdict bug) ends the run with status
@@ -901,6 +970,57 @@ def main() -> int:
     # 13. browser.cdp_url: attach to a browser we did not launch, leave its tabs alone
     failures += cdp_check(url, tmp)
 
+    # 13b. the budget's final look. Four actions reach the cart (cookies, type, enter, add), so with max_steps 4 the
+    #      pass is first visible on the final look: undetermined, budget_exhausted, `pending_outcome` names it (no
+    #      settle-and-recheck happened, so it is not a pass); with max_steps 5 the sighting at step 5 is rechecked by
+    #      the final look and confirmed like any other pass (seen_at_step 6, first_seen 5); with auto_done false and
+    #      Jev's DONE on the last step the final look confirms too.
+    spec = outcome_spec(url)
+    spec["budget"]["max_steps"] = 4
+    out = os.path.join(tmp, "run-budget-first-seen")
+    trace = run(spec, FakeJev(), out, screenshots="key")
+    print(summarize(trace, out))
+    print()
+    res, last = trace["result"], trace["steps"][-1]
+    if trace["status"] != "budget_exhausted" or res["outcome"] != "undetermined" or (res["reason"] or {}).get("pending_outcome") != "item_added":
+        failures.append(f"budget: a pass first seen on the final look must stay undetermined and be named: {trace['status']} {res['outcome']} {res.get('reason')}")
+    if not last.get("final_look") or last["n"] != 5 or last.get("pending_outcome") != "item_added" or not last.get("screenshot"):
+        failures.append(f"budget: the final look should be step 5 with pending_outcome and a picture: {last.get('n')} {last.get('pending_outcome')} {last.get('screenshot')}")
+    if res["confirmed"] or res["seen_at_step"] is not None or trace["final"].get("checks", {}).get("cart_has_item") != 1.0:
+        failures.append(f"budget: nothing is confirmed, final.checks holds the last look: {res['confirmed']} {res['seen_at_step']} {trace['final']}")
+    spec = outcome_spec(url)
+    spec["budget"]["max_steps"] = 5
+    out = os.path.join(tmp, "run-budget-confirmed")
+    trace = run(spec, FakeJev(), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    res = trace["result"]
+    if trace["status"] != "passed" or (res["outcome"], res["confirmed"], res["first_seen_at_step"], res["seen_at_step"]) != ("item_added", True, 5, 6):
+        failures.append(f"budget: a sighting on the last step is confirmed by the final look: {trace['status']} {res['outcome']} {res['confirmed']} {res['first_seen_at_step']} {res['seen_at_step']}")
+    if not trace["steps"][-1].get("final_look") or trace["steps"][-1]["executed"] != {"action": "AUTO_DONE", "ok": True, "error": None, "confirmed": True}:
+        failures.append(f"budget: the confirming final look should be the terminal step: {trace['steps'][-1].get('executed')}")
+    if len(res["assertions"]) != 5 or not all(a["ok"] for a in res["assertions"]) or "Cart: 1 items" not in (res["evidence"]["line"] or ""):
+        failures.append(f"budget: the confirmed pass runs the assertions and the adjudication: {res['assertions']} {res['evidence']}")
+    spec = outcome_spec(url + "?fail=1")
+    spec["budget"]["max_steps"] = 4
+    out = os.path.join(tmp, "run-budget-bug")
+    trace = run(spec, FakeJev(), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    res = trace["result"]
+    if trace["status"] != "outcome" or (res["outcome"], res["verdict"], res["seen_at_step"]) != ("app_error", "bug", 5):
+        failures.append(f"budget: a bug outcome on the final look is terminal like in the loop: {trace['status']} {res['outcome']} {res['seen_at_step']}")
+    spec = base_spec(url)
+    spec["auto_done"] = False
+    spec["budget"]["max_steps"] = 5
+    out = os.path.join(tmp, "run-budget-done")
+    trace = run(spec, FakeJev("done_after_add"), out, screenshots=False)  # DONE right after the add: step 5, the last one
+    print(summarize(trace, out))
+    print()
+    res = trace["result"]
+    if trace["status"] != "passed" or (res["outcome"], res["confirmed"], res["seen_at_step"]) != ("goal_reached", True, 6):
+        failures.append(f"budget: DONE on the last step with the pass in sight is confirmed by the final look (auto_done false): {trace['status']} {res['outcome']} {res['confirmed']} {res['seen_at_step']}")
+
     # 15. the results contract, happy path: the declared pass outcome is seen, confirmed after a
     #     settle-and-recheck, every assertion holds, the adjudication quotes the evidence line
     spec = outcome_spec(url)
@@ -943,7 +1063,7 @@ def main() -> int:
     last = trace["steps"][-1]
     if trace["status"] != "outcome" or (res["outcome"], res["verdict"], res["confirmed"]) != ("app_error", "bug", False):
         failures.append(f"outcome bug: expected outcome/app_error/bug, got {trace['status']} {res['outcome']} {res['verdict']}")
-    if res["seen_at_step"] != res["first_seen_at_step"] != len(trace["steps"]):
+    if res["seen_at_step"] != len(trace["steps"]) or res["first_seen_at_step"] != len(trace["steps"]):
         failures.append(f"outcome bug: a first-sighting outcome is seen and terminal on the same step: {res['seen_at_step']} {res['first_seen_at_step']}")
     if last.get("outcome_seen") != "app_error" or not last.get("screenshot") or last["executed"]["action"] != "STOP":
         failures.append(f"outcome bug: the sighting step should be terminal with a picture: {last.get('outcome_seen')} {last.get('screenshot')} {last.get('executed')}")

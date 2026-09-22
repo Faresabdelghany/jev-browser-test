@@ -67,8 +67,11 @@ the suite ✗ (see deviations).
    over the target *during* the decision is caught by Playwright's actionability wait, then force-clicked
    and recorded `forced: true` (the design delegates hit-testing to Playwright; `pointer-events: none` and
    opacity-0 now do make the tuple stale); the settle's navigation-retry path has no fixture test.
-7. Live runs were measured from a clean `git archive HEAD` export in the scratchpad so that edits to the
-   working tree could not leak into the subprocess runs; do the same for any number that cites a commit.
+7. The Track 2 live runs were measured from a clean `git archive HEAD` export in the scratchpad so that edits
+   to the working tree could not leak into the subprocess runs (which is why those two files record
+   `git_commit: null`: pass `GIT_COMMIT=<sha>` when benching from an export). The Track 3 acceptance suite ran
+   from the checkout with `run_suite.py` still uncommitted (`185a10f` has no `run_suite.py`). Do the export for
+   any number that cites a commit.
 
 ## Suggested next steps (none required by the spec)
 

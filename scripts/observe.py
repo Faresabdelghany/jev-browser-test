@@ -100,8 +100,11 @@ JS_HELPERS = r"""
 """
 
 OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
-  const { maxElements, maxTextChars } = args;
-  document.querySelectorAll('[data-jev-idx]').forEach(e => e.removeAttribute('data-jev-idx'));
+  // wholeDocument: the assertion oracle (run_test.check_assertions). Every rendered control on the page,
+  // wherever it sits, with no viewport or hit-test gates and no cursor:pointer scan, and without touching
+  // the numbering Jev saw. The default is the table Jev chooses from: viewport, hit-tested, cursor scan.
+  const { maxElements, maxTextChars, wholeDocument } = args;
+  if (!wholeDocument) document.querySelectorAll('[data-jev-idx]').forEach(e => e.removeAttribute('data-jev-idx'));
   const SEL = [
     'a[href]', 'button', 'input', 'select', 'textarea', 'summary',
     '[role="button"]', '[role="link"]', '[role="tab"]', '[role="menuitem"]', '[role="menuitemcheckbox"]',
@@ -121,22 +124,24 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     if (tag === 'input' && type === 'hidden') return false;
     const r = el.getBoundingClientRect();
     if (r.width < 2 || r.height < 2) return false;
-    if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) return false;
+    if (!wholeDocument && (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw)) return false;
     const cs = getComputedStyle(el);
     const formControl = tag === 'input' || tag === 'select' || tag === 'textarea';
     if (cs.visibility === 'hidden' || cs.display === 'none' || cs.pointerEvents === 'none') return false;
     // opacity:0 on a form control with a real box is the "hidden input behind a styled box" pattern
     // (antd/MUI/Bootstrap checkboxes, file inputs under an Upload button) -> still the thing to click.
     if (cs.opacity === '0' && !formControl) return false;
-    const cx = Math.min(vw - 1, Math.max(0, r.left + r.width / 2));
-    const cy = Math.min(vh - 1, Math.max(0, r.top + r.height / 2));
-    const top = document.elementFromPoint(cx, cy);
-    if (top && top !== el && !el.contains(top) && !top.contains(el)) {
-      // covered by something else (modal, banner, overlay) -> a human could not click it either,
-      // unless what is on top is the control's own styled box: its label, or a sibling in the same wrapper.
-      const lbl = top.closest('label');
-      const sibling = el.parentElement && (top.parentElement === el.parentElement || el.parentElement.contains(top));
-      if (!((lbl && lbl.control === el) || (formControl && sibling))) return false;
+    if (!wholeDocument) {
+      const cx = Math.min(vw - 1, Math.max(0, r.left + r.width / 2));
+      const cy = Math.min(vh - 1, Math.max(0, r.top + r.height / 2));
+      const top = document.elementFromPoint(cx, cy);
+      if (top && top !== el && !el.contains(top) && !top.contains(el)) {
+        // covered by something else (modal, banner, overlay) -> a human could not click it either,
+        // unless what is on top is the control's own styled box: its label, or a sibling in the same wrapper.
+        const lbl = top.closest('label');
+        const sibling = el.parentElement && (top.parentElement === el.parentElement || el.parentElement.contains(top));
+        if (!((lbl && lbl.control === el) || (formControl && sibling))) return false;
+      }
     }
     let role = el.getAttribute('role');
     if (!role) {
@@ -193,13 +198,17 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
       el, role, tag, type: type || undefined, name, text: text && text !== name ? text : undefined,
       value, options, checked, via, context,
       href: tag === 'a' ? (el.getAttribute('href') || '').slice(0, 80) : undefined,
+      // a native <datalist> shows its suggestions in browser UI, never as [role=option] nodes, so the
+      // settle must not wait for one (run_test.settle)
+      datalist: tag === 'input' && el.hasAttribute('list') ? true : undefined,
       disabled, x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)
     });
     return true;
   };
 
-  // Pass 1: semantic controls (tags, ARIA roles, explicit handlers).
-  for (const el of document.querySelectorAll(SEL)) describe(el, 'semantic');
+  // Pass 1: semantic controls (tags, ARIA roles, explicit handlers). The assertion oracle also takes every
+  // element with an explicit role (alert, status, dialog, heading, ...): not actionable, but assertable.
+  for (const el of document.querySelectorAll(wholeDocument ? SEL + ',[role]' : SEL)) describe(el, 'semantic');
 
   // Pass 2: a <label> whose checkbox/radio is parked offscreen (clip/left:-9999px) is the only thing
   // a human can click for it. Offer the label, described as the control.
@@ -218,7 +227,7 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
   // clickable <div> (an avatar menu, a card, a table row) has no role, no tabindex and no onclick
   // attribute -- the only visible hint is `cursor: pointer`. Because `cursor` is inherited, keep the
   // OUTERMOST element of each pointer chain, and skip anything nested inside a pass-1 control.
-  if (document.body) {
+  if (document.body && !wholeDocument) {
     let scanned = 0;
     for (const el of document.body.querySelectorAll('*')) {
       if (++scanned > 8000) break;
@@ -242,9 +251,8 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
   const kept = candidates.slice(0, maxElements);
   const nodes = {};
   kept.forEach((c, i) => {
-    c.el.setAttribute('data-jev-idx', String(i));
+    if (!wholeDocument) { c.el.setAttribute('data-jev-idx', String(i)); nodes[String(i)] = nodeTuple(c.el); }
     c.idx = i;
-    nodes[String(i)] = nodeTuple(c.el);
     delete c.el;
   });
   return {
@@ -263,6 +271,48 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
 }
 """
 
+# The terminal page as the lines a human would quote from, for the adjudication request (spec §5.4): the
+# visible text, grouped by block (a paragraph, a cell, a list item, a toast), with the lines that intersect the
+# viewport FIRST, then the rest, the same visibility rules as visibleText, cut to maxLines. body.innerText from
+# the top would let 200 lines of navigation and table rows crowd out the flash message at the bottom.
+LINES_JS = "(maxLines) => {\n" + JS_HELPERS + r"""
+  if (!document.body) return [];
+  const INLINE = new Set(['inline', 'inline-block', 'inline-flex', 'inline-grid', 'contents', 'ruby']);
+  const blockOf = el => {
+    let e = el;
+    while (e && e !== document.body) { if (!INLINE.has(getComputedStyle(e).display)) return e; e = e.parentElement; }
+    return document.body;
+  };
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const range = document.createRange();
+  const inView = [], rest = [];
+  let node, cur = null, parts = [], seenInView = false;
+  const flush = () => {
+    const t = parts.join(' ').trim();
+    if (t) (seenInView ? inView : rest).push(t);
+    parts = []; seenInView = false;
+  };
+  while ((node = walker.nextNode())) {
+    const raw = node.textContent;
+    if (!raw || !raw.trim()) continue;
+    const parent = node.parentElement;
+    if (!parent || parent.closest('script, style, noscript, template')) continue;
+    if (parent.checkVisibility && !parent.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
+    const details = parent.closest('details');
+    if (details && !details.open) { const s = parent.closest('summary'); if (!s || s.parentElement !== details) continue; }
+    range.selectNodeContents(node);
+    const r = range.getBoundingClientRect();
+    if (r.width <= 0 && r.height <= 0) continue;
+    const b = blockOf(parent);
+    if (b !== cur) { flush(); cur = b; }
+    parts.push(clean(raw));
+    if (r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) seenInView = true;
+  }
+  flush();
+  return inView.concat(rest).slice(0, maxLines);
+}
+"""
+
 # Cheap re-read of what the observation recorded, without re-tagging: the nodes still carry data-jev-idx.
 FINGERPRINT_JS = "() => {\n" + JS_HELPERS + r"""
   const nodes = {};
@@ -276,14 +326,17 @@ GUARD_SKIPPED = {"SCROLL_DOWN", "SCROLL_UP", "WAIT"}
 TARGET_OPERATIONS = {"CLICK", "TYPE_TEXT", "SELECT"}
 
 
-def observe(page, max_elements: int = 200, max_text_chars: int = 4000) -> dict:
+def observe(page, max_elements: int = 200, max_text_chars: int = 4000, whole_document: bool = False) -> dict:
     """Run the observation script on the current page and return the observation dict.
 
     Besides the element table it carries `fingerprint`: url, title, the first 500 chars of visible text and
     one identity/meaning tuple per tagged node, which `fingerprint()` + `compare_fingerprint()` check again
-    right before acting.
+    right before acting. `whole_document=True` is the assertion oracle (run_test.check_assertions): every
+    rendered control on the page, not only what is in the viewport and under the pointer, and the nodes
+    Jev saw keep their numbering.
     """
-    obs = page.evaluate(OBSERVE_JS, {"maxElements": max_elements, "maxTextChars": max_text_chars})
+    obs = page.evaluate(OBSERVE_JS, {"maxElements": max_elements, "maxTextChars": max_text_chars,
+                                     "wholeDocument": whole_document})
     s = obs["scroll"]
     obs["can_scroll_down"] = s["y"] + s["viewport"] < s["height"] - 8
     obs["can_scroll_up"] = s["y"] > 8
@@ -291,7 +344,47 @@ def observe(page, max_elements: int = 200, max_text_chars: int = 4000) -> dict:
 
 
 MASK = "<secret>"
-OBSERVED_CUTS = (40, 70, 80)  # the observer cuts value / context / name+text at these lengths
+OBSERVED_CUTS = (40, 50, 70, 80)  # the observer cuts value / option text / context / name+text at these lengths
+MASK_TAIL_MIN = 8  # a string ending in at least this many leading chars of a secret was cut mid-secret
+
+
+def make_scrubber(values: list[str]):
+    """The masking function for one run, or None when there is nothing to mask.
+
+    `scrub(s)` replaces every secret in `values`, and every observer-truncated prefix of it, with MASK. A
+    string that ENDS in at least MASK_TAIL_MIN leading chars of a secret was cut mid-secret by some other
+    truncation (visible_text at max_text_chars, a context or option cut at an offset); that tail is masked
+    too. Empty values are ignored."""
+    secrets = [v for v in values if v]
+    if not secrets:
+        return None
+    needles: list[str] = []
+    for v in secrets:
+        needles.append(v)
+        needles.extend(v[:cut] for cut in OBSERVED_CUTS if len(v) > cut)
+    needles.sort(key=len, reverse=True)  # longest first, so a prefix never pre-empts the full value
+
+    def scrub(s):
+        if not isinstance(s, str) or not s:
+            return s
+        for v in secrets:  # a cut tail first: once a prefix needle has eaten its head, the rest is unrecognisable
+            for k in range(min(len(s), len(v) - 1), MASK_TAIL_MIN - 1, -1):
+                if s.endswith(v[:k]):
+                    s = s[:-k] + MASK
+                    break
+        for n in needles:
+            if n in s:
+                s = s.replace(n, MASK)
+        return s
+
+    return scrub
+
+
+def mask_text(s, values: list[str]):
+    """`s` with every secret in `values` masked (see make_scrubber): for page text the runner reads outside
+    an observation, such as the adjudication lines, an assertion's excerpt, the final page's title and url."""
+    scrub = make_scrubber(values)
+    return scrub(s) if scrub else s
 
 
 def mask_secrets(obs: dict, values: list[str]) -> dict:
@@ -299,35 +392,22 @@ def mask_secrets(obs: dict, values: list[str]) -> dict:
 
     The observer reads fields back after they were typed into, so a secret typed into anything but a
     password field returns as an element's `value` (and, for a contenteditable, its text), from where it
-    would reach the state, the target criteria, the trace and `recent_actions`. Masking here, in Python and
-    right after the observation, closes every one of those channels at once. `fingerprint` is left alone: it
-    is compared in Python only and never sent or written. Empty values are ignored."""
-    needles: list[str] = []
-    for v in values:
-        if not v:
-            continue
-        needles.append(v)
-        needles.extend(v[:cut] for cut in OBSERVED_CUTS if len(v) > cut)
-    if not needles:
+    would reach the state, the target criteria, the trace and `recent_actions`; a GET form or a router puts
+    it in the url and in hrefs, an app may echo it in the title. Masking here, in Python and right after the
+    observation, closes every one of those channels at once. `fingerprint` is left alone: it is compared in
+    Python only and never sent or written. Empty values are ignored."""
+    scrub = make_scrubber(values)
+    if scrub is None:
         return obs
-    needles.sort(key=len, reverse=True)  # longest first, so a prefix never pre-empts the full value
-
-    def scrub(s):
-        if not isinstance(s, str) or not s:
-            return s
-        for n in needles:
-            if n in s:
-                s = s.replace(n, MASK)
-        return s
-
     for e in obs.get("elements") or []:
-        for key in ("name", "text", "value", "context"):
+        for key in ("name", "text", "value", "context", "href"):
             if e.get(key):
                 e[key] = scrub(e[key])
         for o in e.get("options") or []:
             o["text"] = scrub(o.get("text"))
     obs["visible_text"] = scrub(obs.get("visible_text") or "")
     obs["title"] = scrub(obs.get("title") or "")
+    obs["url"] = scrub(obs.get("url") or "")
     return obs
 
 

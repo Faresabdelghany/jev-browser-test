@@ -14,7 +14,9 @@ runs are independent and the pool only bounds how many browsers are open at once
     undetermined); any disagreement -> `flaky`, with the distribution. Flaky is computed, not diagnosed.
   * for the suite: `all_pass` (every spec unanimously ended in a pass outcome) and the elapsed time.
 
-Exit code 0 iff every spec is unanimously `pass`; 1 otherwise; 2 when no spec could be started.
+Exit code 0 iff every spec is unanimously `pass`; 1 otherwise; 2 when the suite itself could not run (a
+spec file missing, two spec files with the same id, or no run at all produced a result: the environment,
+not the flows, failed).
 
 This is the hands-off entry point for Claude: launch it in the background, do nothing until it returns,
 read results.json, and open a trace only for a spec that is `undetermined` or `flaky`.
@@ -31,10 +33,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from bench import _git_commit, _median, measure_trace
+from spec import UNDETERMINED
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUN_TEST = os.path.join(HERE, "run_test.py")
-UNDETERMINED = "undetermined"
 FLAKY = "flaky"
 MEDIAN_FIELDS = ("wall_ms", "duration_ms", "jev_ms", "browser_ms", "requests", "input_tokens", "decision_confidence", "steps")
 
@@ -52,17 +54,23 @@ def run_once(runner: str, python: str, spec_path: str, out_dir: str, run_args: l
     and the trace-derived measures (bench.measure_trace); a run without a result is recorded as an error."""
     cmd = [python, runner, spec_path, "--out", out_dir, *run_args]
     t0 = time.perf_counter()
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
     rec: dict = {"out_dir": out_dir, "exit_code": proc.returncode, "wall_ms": int((time.perf_counter() - t0) * 1000),
                  "outcome": None, "verdict": None, "status": None}
     result_path = os.path.join(out_dir, "result.json")
     trace_path = os.path.join(out_dir, "trace.json")
-    if os.path.exists(trace_path):
-        with open(trace_path, encoding="utf-8") as f:
-            rec.update(measure_trace(json.load(f)))
-    if os.path.exists(result_path):
-        with open(result_path, encoding="utf-8") as f:
-            result = json.load(f)
+    result = None
+    try:
+        if os.path.exists(trace_path):
+            with open(trace_path, encoding="utf-8") as f:
+                rec.update(measure_trace(json.load(f)))
+        if os.path.exists(result_path):
+            with open(result_path, encoding="utf-8") as f:
+                result = json.load(f)
+    except (OSError, ValueError) as e:  # a runner killed mid-write leaves a truncated file: this run, not the suite, is lost
+        rec["error"] = f"unreadable trace/result: {type(e).__name__}: {str(e)[:200]}"
+        result = None
+    if result is not None:
         rec["result"] = result_path
         rec["outcome"] = result.get("outcome")
         rec["verdict"] = result.get("verdict")
@@ -74,7 +82,7 @@ def run_once(runner: str, python: str, spec_path: str, out_dir: str, run_args: l
         # exit 2 (spec / environment) or a crash: no result was written; keep the last lines of stderr
         rec["status"] = rec.get("status") or "error"
         rec["outcome"] = UNDETERMINED
-        rec["error"] = (proc.stderr or proc.stdout or "").strip()[-500:]
+        rec["error"] = rec.get("error") or (proc.stderr or proc.stdout or "").strip()[-500:]
     return rec
 
 
@@ -143,7 +151,7 @@ def render_markdown(report: dict) -> str:
     for sid, sp in report["specs"].items():
         lines += ["", f"## `{sid}`", "", "| # | outcome | verdict | status | wall | exit | evidence | result |", "|---:|---|---|---|---:|---:|---|---|"]
         for i, r in enumerate(sp["runs"], 1):
-            evidence = (r.get("evidence_line") or r.get("error") or "").replace("|", "\\|")[:80]
+            evidence = " ".join((r.get("evidence_line") or r.get("error") or "").split()).replace("|", "\\|")[:80]
             lines.append(f"| {i} | {r.get('outcome')} | {r.get('verdict') or '-'} | {r.get('status')} | {r.get('wall_ms')} ms | "
                          f"{r.get('exit_code')} | {evidence} | `{r.get('result') or r.get('out_dir')}` |")
     if s["flaky"] or s["undetermined"]:
@@ -166,7 +174,12 @@ def run_suite(spec_paths: list[str], repeat: int, workers: int, out_root: str, r
 
     def work(job):
         spec_path, sid, i, out_dir = job
-        rec = run_once(runner, python, spec_path, out_dir, run_args)
+        t0 = time.perf_counter()
+        try:
+            rec = run_once(runner, python, spec_path, out_dir, run_args)
+        except Exception as e:  # noqa: BLE001 - one run's failure to launch or to be read must not lose the suite
+            rec = {"out_dir": out_dir, "exit_code": None, "wall_ms": int((time.perf_counter() - t0) * 1000),
+                   "outcome": UNDETERMINED, "verdict": None, "status": "error", "error": f"{type(e).__name__}: {str(e)[:300]}"}
         print(f"{sid} {i}/{repeat}: {rec.get('outcome')} ({rec.get('verdict') or rec.get('status')}) {rec['wall_ms']} ms", flush=True)
         return sid, i, rec
 
@@ -216,11 +229,23 @@ def main(argv: list[str]) -> int:
     if missing:
         print("spec file(s) not found: " + ", ".join(missing), file=sys.stderr)
         return 2
+    ids: dict[str, str] = {}
+    for p in args.specs:
+        sid = spec_id_of(p)
+        if sid in ids and os.path.abspath(ids[sid]) != os.path.abspath(p):
+            print(f"two spec files share the id '{sid}': {ids[sid]} and {p} (they would write the same run directories)",
+                  file=sys.stderr)
+            return 2
+        ids.setdefault(sid, p)
+    specs = list(dict.fromkeys(os.path.abspath(p) for p in args.specs))  # the same file twice runs once
     out_root = args.out or os.path.join("runs", "suite", datetime.now().strftime("%Y%m%d-%H%M%S"))
-    report = run_suite(args.specs, args.repeat, args.workers, out_root, args.run_arg, args.python, args.runner, args.label)
+    report = run_suite(specs, args.repeat, args.workers, out_root, args.run_arg, args.python, args.runner, args.label)
     print()
     print(render_markdown(report))
     print(f"results: {os.path.join(out_root, 'results.json')}  {os.path.join(out_root, 'results.md')}")
+    if not any(r.get("result") for sp in report["specs"].values() for r in sp["runs"]):
+        print("no run produced a result: the environment, not the flows, failed (see the error column)", file=sys.stderr)
+        return 2
     return 0 if report["suite"]["all_pass"] else 1
 
 

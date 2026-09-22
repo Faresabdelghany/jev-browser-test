@@ -594,6 +594,14 @@ class SpecValidationTests(unittest.TestCase):
         self.assertTrue(any("cdp_url" in p for p in self.problems(browser={"cdp_url": "127.0.0.1:9222"})))
         self.assertTrue(any("cdp_url" in p for p in self.problems(browser={"cdp_url": 9222})))
 
+    def test_budget_and_browser_shapes(self) -> None:
+        from spec import validate
+        for bad in ({"budget": {"max_steps": "5"}}, {"budget": {"max_steps": 5.5}}, {"budget": {"max_steps": True}},
+                    {"budget": {"max_seconds": "120"}}, {"budget": {"max_seconds": -1}}, {"browser": {"viewport": [1280]}},
+                    {"browser": {"viewport": "1280x800"}}, {"browser": {"action_timeout_ms": "8000"}}):
+            self.assertTrue(validate(_merge(SPEC, bad)), bad)
+        self.assertEqual(validate(_merge(SPEC, {"budget": {"max_steps": 5, "max_seconds": 12.5}, "browser": {"viewport": [800, 600]}})), [])
+
     def test_settle_defaults_and_bounds(self) -> None:
         self.assertEqual((DEFAULTS["browser"]["settle_ms"], DEFAULTS["browser"]["quiet_ms"]), (400, 100))
         self.assertEqual(self.problems(), [])
@@ -693,6 +701,25 @@ class MaskSecretsTests(unittest.TestCase):
         obs = {"elements": [{"idx": 0, "role": "textbox", "name": "n", "value": "v"}], "visible_text": "t", "title": "T"}
         self.assertEqual(mask_secrets(dict(obs), []), obs)
         self.assertEqual(mask_secrets(dict(obs), [""]), obs)
+
+    def test_masks_url_href_option_cut_and_tails(self) -> None:
+        from observe import MASK, mask_secrets, mask_text
+        long_secret = "".join(chr(ord("a") + i % 26) for i in range(60))
+        obs = {"url": "http://x/?token=hunter2-not-real", "title": "T",
+               "elements": [{"idx": 0, "role": "link", "name": "Account", "href": "/u/hunter2-not-real"},
+                            {"idx": 1, "role": "select", "name": "S", "options": [{"i": 0, "text": long_secret[:50]}]},
+                            {"idx": 2, "role": "checkbox", "name": "", "context": "Row label: " + long_secret[:59]}],
+               "visible_text": "Token: hunter2-not-real ... " + long_secret[:55]}
+        out = mask_secrets(obs, ["hunter2-not-real", long_secret])
+        self.assertEqual(out["url"], f"http://x/?token={MASK}")           # a GET form or a router
+        self.assertEqual(out["elements"][0]["href"], f"/u/{MASK}")
+        self.assertEqual(out["elements"][1]["options"][0]["text"], MASK)  # the observer's 50-char option cut
+        self.assertEqual(out["elements"][2]["context"], f"Row label: {MASK}")  # cut at an offset (the 70-char context cut)
+        self.assertEqual(out["visible_text"], f"Token: {MASK} ... {MASK}")      # cut at max_text_chars
+        self.assertEqual(mask_text("Your API token is hunter2-not-real", ["hunter2-not-real"]), f"Your API token is {MASK}")
+        self.assertEqual(mask_text("plain", ["hunter2-not-real"]), "plain")
+        self.assertEqual(mask_text("ends in abcdefg", [long_secret]), "ends in abcdefg")  # 7 chars: below the tail floor
+        self.assertIsNone(mask_text(None, ["x"]))
 
 
 class RulesTests(unittest.TestCase):
@@ -813,10 +840,17 @@ class OutcomeSpecTests(unittest.TestCase):
         declared = _merge(spec, {"outcomes": {"logged_in": {"when": "The user is greeted by name", "verdict": "pass"},
                                               "never_err": {"when": "A red error box is shown", "verdict": "test_issue"}}})
         out = effective_outcomes(declared)
-        self.assertEqual(list(out), ["logged_in", "never_err", "goal_reached"])  # declared first; a declared name is not overridden
+        # declared outcomes are the whole contract (design §5.1): done_when / never synthesize nothing beside them,
+        # so a lone `never` Noul cannot race the outcome Choice and end a negative test as bug
+        self.assertEqual(list(out), ["logged_in", "never_err"])
         self.assertEqual(out["never_err"]["verdict"], "test_issue")
         self.assertEqual(out["logged_in"]["requires"], [])
         self.assertEqual(effective_outcomes(_merge(SPEC, {"done_when": [], "outcomes": {"x": {"when": "Something is visible", "verdict": "pass"}}})).keys(), {"x"})
+        # a declared set without a pass outcome defines no success even when done_when is present
+        from spec import validate
+        no_pass = _merge(SPEC, {"outcomes": {"bad": {"when": "A red error box is shown", "verdict": "bug"}}})
+        self.assertTrue(any("nothing defines success" in p for p in validate(no_pass)))
+        self.assertTrue(any("requires" in p for p in validate(_merge(SPEC, {"outcomes": {"x": {"requires": [["ok"]], "verdict": "pass"}}}))))
 
 
 class OutcomePolicyTests(unittest.TestCase):
@@ -861,6 +895,38 @@ class OutcomePolicyTests(unittest.TestCase):
         # outcome_true is respected
         self.assertEqual(seen_outcomes(self.OUTCOMES, {"login_error": 0.9}, got, 0.95), [])
 
+    def test_build_result_reason_and_sightings(self) -> None:
+        from run_test import build_result
+        spec = {"id": "s"}
+        outcomes = {"ok": {"verdict": "pass", "note": "n"}, "err": {"verdict": "bug"}}
+        base = {"duration_ms": 1, "usage": {}, "final": {}}
+
+        def trace(status, step):
+            return {**base, "status": status, "steps": [step]}
+        blocked_step = {"n": 1, "blocked_reason": {"choice": "site_refused_or_error"}, "executed": {"action": "STOP"}}
+        final = {"outcome": None, "seen_at_step": None, "confirmed": False, "assertions": [], "adjudication": None}
+        # done_unverified / assert_failed / unstable_page / error: the step's blocked_reason is about progress, not the verdict
+        for status, want in (("done_unverified", None), ("assert_failed", None), ("unstable_page", "flaky"), ("error", "flaky"),
+                             ("blocked", "bug"), ("low_confidence", "bug"), ("budget_exhausted", "bug")):
+            r = build_result(trace(status, blocked_step), spec, outcomes, dict(final), "out")
+            self.assertEqual((r["reason"]["status"], r["reason"]["suggested_verdict"]), (status, want), status)
+            self.assertEqual(r["reason"]["blocked_reason"], "site_refused_or_error")
+        # a pass first seen on the final look is undetermined and names the sighting
+        pending = {"n": 5, "final_look": True, "pending_outcome": "ok", "executed": {"action": "STOP"}}
+        r = build_result(trace("budget_exhausted", pending), spec, outcomes, dict(final), "out")
+        self.assertEqual((r["outcome"], r["reason"]["pending_outcome"], r["reason"]["suggested_verdict"]), ("undetermined", "ok", "test_issue"))
+        # with fail_fast false a bug outcome seen on the confirming step is reported beside the pass
+        steps = [{"n": 1, "outcome_seen": "err", "executed": {"action": "WAIT", "reason": "confirming outcome ok"}},
+                 {"n": 2, "outcome_seen": "err", "executed": {"action": "AUTO_DONE", "confirmed": True}}]
+        seen = {**final, "outcome": {"name": "ok", "verdict": "pass", "probability": 0.9, "confidence": 0.9},
+                "seen_at_step": 2, "first_seen_at_step": 1, "confirmed": True}
+        r = build_result({**base, "status": "passed", "steps": steps}, spec, outcomes, seen, "out")
+        self.assertEqual((r["outcome"], r["verdict"], r["confirmed"], r["note"]), ("ok", "pass", True, "n"))
+        self.assertEqual(r["outcomes_seen_earlier"], [{"step": 1, "outcome": "err"}, {"step": 2, "outcome": "err"}])
+        r = build_result({**base, "status": "outcome", "steps": [{"n": 3, "outcome_seen": "err", "executed": {"action": "STOP"}}]}, spec,
+                         outcomes, {**final, "outcome": {"name": "err", "verdict": "bug"}, "seen_at_step": 3}, "out")
+        self.assertEqual((r["outcome"], r["outcomes_seen_earlier"]), ("err", []))  # the result itself is not "earlier"
+
     def test_suggested_verdict_table(self) -> None:
         from policy import suggested_verdict
         self.assertEqual(suggested_verdict("blocked", ["missing_data_value"]), "test_issue")
@@ -889,10 +955,16 @@ class OutcomePolicyTests(unittest.TestCase):
 
 class AssertionTests(unittest.TestCase):
     class FakePage:
+        """A page whose body text is `text`; the whole-document observation is not available (observe() fails and
+        check_assertions falls back to the observation it was given)."""
+        url = "https://x.test/secure"
+
         def __init__(self, text: str) -> None:
             self.text = text
 
-        def evaluate(self, js):
+        def evaluate(self, js, *args):
+            if args:  # the observer script takes an args object; a string is not an observation
+                raise RuntimeError("no observer here")
             return self.text
 
     def test_glob_to_regex(self) -> None:
@@ -902,9 +974,27 @@ class AssertionTests(unittest.TestCase):
         self.assertFalse(_re.fullmatch(glob_to_regex("**/secure"), "https://x.test/secure/more"))
         self.assertTrue(_re.fullmatch(glob_to_regex("https://x.test/*/edit"), "https://x.test/42/edit"))
         self.assertFalse(_re.fullmatch(glob_to_regex("https://x.test/*/edit"), "https://x.test/a/b/edit"))
-        self.assertTrue(_re.fullmatch(glob_to_regex("**/item?"), "https://x.test/item7"))
         self.assertTrue(_re.fullmatch(glob_to_regex("file://**/shop.html*"), "file:///tmp/a/shop.html?fail=1"))
         self.assertFalse(_re.fullmatch(glob_to_regex("**/a.b"), "https://x.test/aXb"))  # the dot is literal
+        # Playwright's dialect (1.52+): `?` and `[` are literal, `{a,b}` alternates, `/**/` may match no segment
+        self.assertTrue(_re.fullmatch(glob_to_regex("**/login?next=%2F"), "https://x.test/login?next=%2F"))
+        self.assertFalse(_re.fullmatch(glob_to_regex("**/login?next=%2F"), "https://x.test/loginXnext=%2F"))
+        self.assertFalse(_re.fullmatch(glob_to_regex("**/item?"), "https://x.test/item7"))
+        for url in ("https://x.test/login", "https://x.test/signin"):
+            self.assertTrue(_re.fullmatch(glob_to_regex("**/{login,signin}"), url), url)
+        self.assertFalse(_re.fullmatch(glob_to_regex("**/{login,signin}"), "https://x.test/logout"))
+        self.assertTrue(_re.fullmatch(glob_to_regex("https://x.test/**/cart"), "https://x.test/cart"))
+        self.assertTrue(_re.fullmatch(glob_to_regex("https://x.test/**/cart"), "https://x.test/a/b/cart"))
+        self.assertTrue(_re.fullmatch(glob_to_regex("**/a\\*b"), "https://x.test/a*b"))
+        try:
+            from playwright._impl._glob import glob_to_regex_pattern
+        except ImportError:  # pragma: no cover - the two dialects are only compared when Playwright is installed
+            glob_to_regex_pattern = None
+        if glob_to_regex_pattern:
+            for g, url in (("**/{login,signin}", "https://x.test/login"), ("**/login?x=1", "https://x.test/login?x=1"),
+                           ("https://x.test/**/cart", "https://x.test/cart"), ("**/item?", "https://x.test/item7"),
+                           ("**/secure", "https://x.test/secure/more"), ("https://x.test/*/edit", "https://x.test/a/b/edit")):
+                self.assertEqual(bool(_re.fullmatch(glob_to_regex(g), url)), bool(_re.search(glob_to_regex_pattern(g), url)), (g, url))
 
     def test_check_assertions(self) -> None:
         from run_test import check_assertions
@@ -930,6 +1020,16 @@ class AssertionTests(unittest.TestCase):
         self.assertEqual(got[8]["actual"], "no such element")
         self.assertEqual(got[10]["actual"], ['[1] link "Logout"'])
         self.assertEqual(check_assertions({"assert": []}, self.FakePage(""), obs), [])
+        # comparisons use the real page; what is written back is masked, so a secret can be asserted on
+        secret_page = self.FakePage("Signed in as alice@example.com\nProfile")
+        secret_obs = {"url": "https://x.test/secure", "visible_text": "x",
+                      "elements": [{"idx": 0, "role": "textbox", "name": "Email", "value": "alice@example.com"}]}
+        got = check_assertions({"assert": [{"text_contains": "alice@example.com"}, {"text_contains": "nope"},
+                                           {"field_value": {"label": "Email", "equals": "alice@example.com"}}]},
+                               secret_page, secret_obs, ["alice@example.com"])
+        self.assertEqual([a["ok"] for a in got], [True, False, True])
+        self.assertNotIn("alice@example.com", json.dumps(got))
+        self.assertEqual(got[2]["actual"], {'[0] textbox "Email" value="<secret>"': "<secret>"})
 
 
 class BenchTests(unittest.TestCase):
@@ -966,6 +1066,12 @@ class BenchTests(unittest.TestCase):
         self.assertEqual(m["step_jev_ms"], [800, 300, 320, 310, 290])
         self.assertEqual(m["step_browser_ms"], [600, 110, 140, 200, None])
         self.assertEqual((m["launch_ms"], m["navigation_ms"], m["setup_ms"]), (150, 2000, 0))
+        self.assertIsNone(m["adjudication_ms"])  # no adjudication in this trace: requests == steps' requests
+        m = measure_trace(dict(self.TRACE, adjudication={"latency_ms": 290}))
+        self.assertEqual((m["jev_ms"], m["adjudication_ms"]), (2020, 290))  # the sixth request, beside the per-step sum
+        import bench, run_test, summarize_trace
+        self.assertIs(bench.is_action_step, summarize_trace.is_action_step)
+        self.assertIs(run_test.is_action_step, summarize_trace.is_action_step)
 
     def test_measure_trace_tolerates_an_empty_trace(self) -> None:
         from bench import measure_trace
@@ -1000,14 +1106,17 @@ spec_path, out_dir = sys.argv[1], sys.argv[sys.argv.index("--out") + 1]
 spec = json.load(open(spec_path))
 os.makedirs(os.path.join(out_dir, "steps"), exist_ok=True)
 n = int(os.path.basename(out_dir))  # the repeat number
-if spec["id"] == "always-pass":
+if spec["id"] == "truncated" and n == 2:
+    open(os.path.join(out_dir, "trace.json"), "w").write('{"spec_id": "truncated", "status": "pass')  # killed mid-write
+    sys.exit(1)
+if spec["id"] == "truncated" or spec["id"] == "always-pass":
     outcome, verdict, status, code = "logged_in", "pass", "passed", 0
 elif spec["id"] == "flaky":
     outcome, verdict, status, code = ("logged_in", "pass", "passed", 0) if n % 2 else ("bad_pw", "bug", "outcome", 1)
 elif spec["id"] == "blocked":
     outcome, verdict, status, code = "undetermined", None, "blocked", 1
 else:
-    print("boom", file=sys.stderr); sys.exit(2)
+    print("Spec problems:\\n  - done_when names unknown check 'x'\\n  - goal must not be empty", file=sys.stderr); sys.exit(2)
 time.sleep(0.05)
 trace = {"spec_id": spec["id"], "status": status, "pass": code == 0, "duration_ms": 50, "actions_executed": 1,
          "usage": {"jev_requests": 3, "input_tokens": 1000, "output_tokens": 100},
@@ -1055,16 +1164,21 @@ class SuiteTests(unittest.TestCase):
         with open(runner, "w", encoding="utf-8") as f:
             f.write(FAKE_RUNNER)
         specs = {}
-        for sid in ("always-pass", "flaky", "blocked", "broken"):
+        for sid in ("always-pass", "flaky", "blocked", "broken", "truncated"):
             specs[sid] = os.path.join(tmp, f"{sid}.json")
             with open(specs[sid], "w", encoding="utf-8") as f:
                 json.dump({"id": sid, "start_url": "http://x/", "goal": "g"}, f)
         out = os.path.join(tmp, "suite")
-        report = run_suite([specs["always-pass"], specs["flaky"], specs["blocked"], specs["broken"]], repeat=4, workers=3,
-                           out_root=out, run_args=[], runner=runner, label="unit")
-        self.assertEqual(report["suite"]["verdicts"], {"always-pass": "pass", "flaky": "flaky", "blocked": "undetermined", "broken": "undetermined"})
+        report = run_suite([specs["always-pass"], specs["flaky"], specs["blocked"], specs["broken"], specs["truncated"]], repeat=4,
+                           workers=3, out_root=out, run_args=[], runner=runner, label="unit")
+        self.assertEqual(report["suite"]["verdicts"], {"always-pass": "pass", "flaky": "flaky", "blocked": "undetermined",
+                                                       "broken": "undetermined", "truncated": "flaky"})
         self.assertEqual((report["suite"]["all_pass"], report["suite"]["flaky"], report["suite"]["undetermined"]),
-                         (False, ["flaky"], ["blocked", "broken"]))
+                         (False, ["flaky", "truncated"], ["blocked", "broken"]))
+        # a runner killed mid-write loses that run, not the suite
+        cut = report["specs"]["truncated"]["runs"][1]
+        self.assertEqual((cut["outcome"], cut["status"]), ("undetermined", "error"))
+        self.assertIn("unreadable trace/result: JSONDecodeError", cut["error"])
         fl = report["specs"]["flaky"]
         self.assertEqual((fl["outcome_counts"], fl["agreement"]), ({"logged_in": 2, "bad_pw": 2}, 0.5))
         self.assertEqual([r["exit_code"] for r in fl["runs"]], [0, 1, 0, 1])
@@ -1073,14 +1187,18 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(report["specs"]["always-pass"]["runs"][0]["evidence_line"], "Welcome")
         self.assertEqual(report["specs"]["blocked"]["suggested_verdicts"], {"test_issue": 4})
         broken = report["specs"]["broken"]["runs"][0]
-        self.assertEqual((broken["exit_code"], broken["outcome"], broken["status"], broken["error"]), (2, "undetermined", "error", "boom"))
+        self.assertEqual((broken["exit_code"], broken["outcome"], broken["status"]), (2, "undetermined", "error"))
+        self.assertTrue(broken["error"].startswith("Spec problems:\n"))
         self.assertTrue(os.path.exists(os.path.join(out, "results.json")))
         with open(os.path.join(out, "results.md"), encoding="utf-8") as f:
             md = f.read()
         self.assertIn("**NOT ALL PASS**", md)
         self.assertIn("| `flaky` | **FLAKY** | 50% | logged_in 2/4, bad_pw 2/4 |", md)
         self.assertIn("| `blocked` | **UNDETERMINED (suggested: test_issue 4)** | 100% |", md)
-        self.assertIn("Open a trace only for: `flaky` (flaky), `blocked` (undetermined), `broken` (undetermined)", md)
+        self.assertIn("Open a trace only for: `flaky` (flaky), `truncated` (flaky), `blocked` (undetermined), `broken` (undetermined)", md)
+        # a multi-line stderr tail stays inside its table cell
+        self.assertIn("| 2 | Spec problems: - done_when names unknown check 'x' - goal must not be empty |", md)
+        self.assertNotIn("\n  - ", md)
         # the CLI: exit 0 iff every spec is unanimously pass
         with mock.patch("sys.stdout"):
             self.assertEqual(suite_main(["run_suite.py", specs["always-pass"], "--repeat", "2", "--workers", "2", "--out",
@@ -1088,6 +1206,37 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(suite_main(["run_suite.py", specs["always-pass"], specs["flaky"], "--repeat", "2", "--out",
                                          os.path.join(tmp, "suite3"), "--runner", runner]), 1)
             self.assertEqual(suite_main(["run_suite.py", os.path.join(tmp, "missing.json"), "--runner", runner]), 2)
+            # exit 2: the environment failed for every run (no result anywhere), and two files sharing an id
+            self.assertEqual(suite_main(["run_suite.py", specs["broken"], "--repeat", "2", "--out", os.path.join(tmp, "suite4"),
+                                         "--runner", runner]), 2)
+            twin = os.path.join(tmp, "twin", "always-pass.json")
+            os.makedirs(os.path.dirname(twin))
+            with open(twin, "w", encoding="utf-8") as f:
+                json.dump({"id": "always-pass", "start_url": "http://y/", "goal": "g"}, f)
+            self.assertEqual(suite_main(["run_suite.py", specs["always-pass"], twin, "--out", os.path.join(tmp, "suite5"), "--runner", runner]), 2)
+            # the same file twice runs once
+            self.assertEqual(suite_main(["run_suite.py", specs["always-pass"], specs["always-pass"], "--out", os.path.join(tmp, "suite6"),
+                                         "--runner", runner]), 0)
+            with open(os.path.join(tmp, "suite6", "results.json"), encoding="utf-8") as f:
+                self.assertEqual(len(json.load(f)["specs"]["always-pass"]["runs"]), 1)
+
+
+class SummarizeTests(unittest.TestCase):
+    def test_result_flag_without_result_json(self) -> None:
+        import tempfile
+        from summarize_trace import main as summarize_main
+        tmp = tempfile.mkdtemp(prefix="jev-summ-")
+        old = {"spec_id": "old", "status": "passed", "pass": True, "steps": [], "usage": {}, "duration_ms": 1}
+        with open(os.path.join(tmp, "trace.json"), "w", encoding="utf-8") as f:
+            json.dump(old, f)
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            self.assertEqual(summarize_main(["summarize_trace.py", os.path.join(tmp, "trace.json"), "--result"]), 1)  # a message, not a traceback
+            self.assertEqual(summarize_main(["summarize_trace.py", os.path.join(tmp, "trace.json")]), 0)
+        with open(os.path.join(tmp, "trace.json"), "w", encoding="utf-8") as f:
+            json.dump(dict(old, result={"outcome": "goal_reached"}), f)
+        with mock.patch("sys.stdout") as out:
+            self.assertEqual(summarize_main(["summarize_trace.py", tmp, "--result"]), 0)  # the embedded result serves
+        self.assertIn("goal_reached", "".join(str(c.args[0]) for c in out.write.call_args_list if c.args))
 
 
 class ReportTests(unittest.TestCase):

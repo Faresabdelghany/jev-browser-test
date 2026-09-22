@@ -198,7 +198,12 @@ class JevClient:
                 continue
             raise JevError(f"TypeSafe API HTTP {status}: {detail}")
         latency_ms = int((time.perf_counter() - t0) * 1000)
-        data = json.loads(raw.decode())
+        try:
+            data = json.loads(raw.decode())
+        except ValueError as e:  # a proxy or captive-portal page with a 2xx status, a truncated or non-UTF-8 body
+            raise JevError(f"TypeSafe API returned a non-JSON body: {type(e).__name__}: {raw[:120]!r}") from None
+        if not isinstance(data, dict):
+            raise JevError(f"TypeSafe API returned {type(data).__name__}, not an object")
 
         usage = data.get("usage") or {}
         self.requests += 1

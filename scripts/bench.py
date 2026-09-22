@@ -28,22 +28,16 @@ import sys
 import time
 from datetime import datetime
 
+from summarize_trace import is_action_step
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUN_TEST = os.path.join(HERE, "run_test.py")
 
 RUN_FIELDS = (
-    "wall_ms", "duration_ms", "jev_ms", "browser_ms", "requests", "input_tokens", "output_tokens",
+    "wall_ms", "duration_ms", "jev_ms", "adjudication_ms", "browser_ms", "requests", "input_tokens", "output_tokens",
     "steps", "actions_executed", "decision_confidence", "min_decision_confidence", "stale_steps",
     "jev_first_ms", "jev_warm_ms", "browser_per_action_ms", "launch_ms", "navigation_ms", "setup_ms",
 )
-# executed.action values that are not browser actions (the same rule run_test uses for actions_executed)
-NON_ACTIONS = (None, "STOP", "DONE", "AUTO_DONE", "BLOCKED")
-
-
-def is_action_step(step: dict) -> bool:
-    """True for a step whose action changed the browser: not a terminal marker, not a runner-inserted WAIT."""
-    ex = step.get("executed") or {}
-    return ex.get("action") not in NON_ACTIONS and not ex.get("reason")
 
 
 def _median(values: list) -> float | None:
@@ -70,6 +64,8 @@ def measure_trace(trace: dict) -> dict:
         "error": trace.get("error"),
         "duration_ms": trace.get("duration_ms"),
         "jev_ms": sum(int(v or 0) for v in step_jev),
+        # the adjudication request is not a step: `requests` counts it, `jev_ms` (the per-step sum) does not
+        "adjudication_ms": (trace.get("adjudication") or {}).get("latency_ms"),
         "browser_ms": sum(int(v or 0) for v in step_browser),
         "requests": usage.get("jev_requests"),
         "input_tokens": usage.get("input_tokens"),
@@ -113,6 +109,14 @@ def run_once(spec_path: str, out_dir: str, python: str, run_args: list[str]) -> 
             result = json.load(f)
         rec["outcome"] = result.get("outcome")
         rec["verdict"] = result.get("verdict")
+        # the headline the README quotes beside the medians: when it was seen, whether it was confirmed, the assertions
+        rec["first_seen_at_step"] = result.get("first_seen_at_step")
+        rec["seen_at_step"] = result.get("seen_at_step")
+        rec["confirmed"] = result.get("confirmed")
+        assertions = result.get("assertions") or []
+        rec["assertions_ok"] = sum(1 for a in assertions if a.get("ok"))
+        rec["assertions_total"] = len(assertions)
+        rec["evidence_line"] = (result.get("evidence") or {}).get("line")
     return rec
 
 
@@ -142,11 +146,14 @@ def aggregate(runs: list[dict]) -> dict:
 
 
 def _git_commit() -> str | None:
+    """The commit the runs are made at: `git rev-parse` in the script's own tree, else the GIT_COMMIT environment
+    variable (a `git archive` export has no .git, so a clean-export bench must pass the commit it was cut from)."""
     try:
-        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
-                              cwd=os.path.dirname(HERE)).stdout.strip() or None
+        found = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
+                               cwd=os.path.dirname(HERE)).stdout.strip()
     except OSError:
-        return None
+        found = ""
+    return found or os.environ.get("GIT_COMMIT") or None
 
 
 def format_spec(spec_id: str, runs: list[dict], agg: dict) -> str:
@@ -197,7 +204,7 @@ def main(argv: list[str]) -> int:
         "git_commit": _git_commit(),
         "repeat": args.repeat,
         "run_args": args.run_arg,
-        "env": {k: v for k, v in os.environ.items() if k.startswith("JEV_") or k == "TYPESAFE_MODEL"},
+        "env": {k: v for k, v in os.environ.items() if k == "TYPESAFE_MODEL"},
         "specs": {},
     }
     for spec_path in args.specs:

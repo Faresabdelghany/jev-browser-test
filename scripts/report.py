@@ -17,6 +17,7 @@ import json
 import os
 import sys
 
+from spec import UNDETERMINED
 from summarize_trace import _flags
 
 CSS = """
@@ -122,7 +123,7 @@ def render_report(trace: dict, result: dict | None, images: dict[str, bytes], ru
     spec = trace.get("spec") or {}
     result = result or trace.get("result") or {}
     usage = trace.get("usage") or {}
-    verdict = result.get("verdict") or ("undetermined" if result.get("outcome") == "undetermined" else trace.get("status"))
+    verdict = result.get("verdict") or (UNDETERMINED if result.get("outcome") == UNDETERMINED else trace.get("status"))
     parts = [f"<!doctype html><html><head><meta charset=\"utf-8\"><title>{_e(trace.get('spec_id'))} · {_e(result.get('outcome') or trace.get('status'))}</title>",
              f"<style>{CSS}</style></head><body>",
              f"<h1>{_e(trace.get('spec_id'))} <span class=\"badge {_e(verdict)}\">{_e(result.get('outcome') or trace.get('status'))}"

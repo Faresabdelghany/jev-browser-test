@@ -30,14 +30,15 @@ from datetime import datetime, timezone
 
 from jev_client import JevClient, JevError
 from observe import (
-    GUARD_SKIPPED, TARGET_OPERATIONS, compare_fingerprint, element_label, fingerprint, mask_secrets, observe, signature,
+    GUARD_SKIPPED, LINES_JS, TARGET_OPERATIONS, compare_fingerprint, element_label, fingerprint, mask_secrets, mask_text,
+    observe, signature,
 )
 from policy import (
-    build_adjudication, build_questions, build_state, is_field, read_checks, read_choice, read_outcome, resolve_target,
-    seen_outcomes, suggested_verdict, validate_choice,
+    ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, build_adjudication, build_questions, build_state, is_field, read_checks,
+    read_choice, read_outcome, resolve_target, seen_outcomes, suggested_verdict, validate_choice,
 )
-from spec import effective_outcomes, load_dotenv, load_spec, validate
-from summarize_trace import summarize
+from spec import UNDETERMINED, effective_outcomes, load_dotenv, load_spec, validate
+from summarize_trace import is_action_step, summarize
 
 
 class BrowserUnavailable(RuntimeError):
@@ -56,11 +57,10 @@ TERMINAL_STATUSES = {
     "never_violated": "a 'never' check became true (runs before the results contract; now status outcome)",
     "stuck": "the same action on the same page repeated max_repeat times",
     "low_confidence": "max_low_confidence_steps consecutive low-confidence decisions (none of them executed): Jev could not choose between the offered options",
-    "budget_exhausted": "max_steps or max_seconds reached",
+    "budget_exhausted": "max_steps or max_seconds reached (a pass first seen on the final look is not confirmed: result.reason.pending_outcome)",
     "unstable_page": "the page kept changing while Jev was deciding: max_stale consecutive decisions were stale and nothing was executed",
     "error": "the runner, browser or TypeSafe API failed",
 }
-UNDETERMINED = "undetermined"
 
 
 def now_iso() -> str:
@@ -103,10 +103,11 @@ SETTLE_JS = r"""
     }
     return out;
   };
-  // Only an option that was not already showing counts as "the suggestions arrived": a listbox elsewhere on
-  // the page, or the previous query's suggestions still on screen, must not end the wait early.
-  const initialOptions = waitForOptions ? new Set(visibleOptions()) : null;
-  const newOptionVisible = () => visibleOptions().some(e => !initialOptions.has(e));
+  // Only an option Jev did not see counts as "the suggestions arrived": every [role=option] in the
+  // observation carries data-jev-idx, so a listbox elsewhere on the page or the previous query's suggestions
+  // still on screen cannot end the wait early, while suggestions rendered synchronously by the typing
+  // (already on screen when this settle starts) do count.
+  const newOptionVisible = () => visibleOptions().some(e => !e.hasAttribute('data-jev-idx'));
   const tick = () => {
     if (done) return;
     frames++;
@@ -124,8 +125,6 @@ SETTLE_JS = r"""
 
 AUTOCOMPLETE_ROLES = ("combobox", "searchbox")
 
-# The terminal page as numbered lines for the adjudication request: what a human would quote from.
-LINES_JS = "() => (document.body ? document.body.innerText : '').split('\\n').map(s => s.trim()).filter(Boolean)"
 BODY_TEXT_JS = "() => document.body ? document.body.innerText : ''"
 
 
@@ -135,9 +134,11 @@ def settle(page, spec: dict, after: tuple[str | None, str | None] | None = None)
     Event-based, not a fixed pause: `domcontentloaded` (short timeout, ignored on failure), then a page-side
     promise that resolves once two animation frames have passed AND the DOM has had no mutation for
     `browser.quiet_ms`, capped at `browser.settle_ms`. After TYPE_TEXT into a combobox/searchbox
-    (`after=(operation, target_role)`) it also waits, up to 200 ms, for a visible `[role=option]` that was
-    not already showing when the wait began, so a prediction is not paid for before the autocomplete
-    suggestions arrive (and a listbox elsewhere on the page cannot end the wait). If the evaluate throws because
+    (`after=(operation, target_role)`) it also waits, up to 200 ms, for a visible `[role=option]` that Jev
+    did not see in the observation (no data-jev-idx), so a prediction is not paid for before the autocomplete
+    suggestions arrive, a listbox elsewhere on the page cannot end the wait, and suggestions rendered
+    synchronously by the typing end it at once. A native <datalist> never produces such nodes: the runner
+    passes role None for it. If the evaluate throws because
     the document navigated, it is retried once on the new document. Returns {"ended": "quiet" | "options" |
     "options_timeout" | "cap" | "navigated", "ms": wall-clock spent here}.
     """
@@ -293,47 +294,78 @@ def wait_entry(n: int, operation: str, reason: str) -> dict:
     return {"step": n, "operation": operation, "reason": reason, "ok": True, "page_changed": None}
 
 
-def is_action_step(step: dict) -> bool:
-    """A step whose action changed the browser: not a terminal marker, not a runner-inserted WAIT."""
-    ex = step.get("executed") or {}
-    return ex.get("action") not in (None, "STOP", "DONE", "AUTO_DONE", "BLOCKED") and not ex.get("reason")
-
-
 def glob_to_regex(glob: str) -> str:
-    """Playwright's URL glob as a regex: ** = anything, * = anything but '/', ? = one char but '/'."""
-    out, i = [], 0
+    """Playwright's URL glob (playwright 1.52+) as a regex, so `assert.url_matches` and `setup.wait_for.url`
+    read the same way: `*` = anything but '/', `**` = anything (`/**/` also matches no segment), `{a,b}` =
+    either, `\\x` = the literal x; everything else, `?` and `[` included, is literal."""
+    out, i, in_group = [], 0, False
     while i < len(glob):
         c = glob[i]
+        if c == "\\" and i + 1 < len(glob):
+            out.append(re.escape(glob[i + 1]))
+            i += 2
+            continue
         if c == "*":
-            if glob[i:i + 2] == "**":
-                out.append(".*")
-                i += 2
-                continue
-            out.append("[^/]*")
-        elif c == "?":
-            out.append("[^/]")
+            j = i
+            while j < len(glob) and glob[j] == "*":
+                j += 1
+            if j - i > 1:
+                if glob[j:j + 1] == "/":
+                    out.append("((.+/)|)" if glob[i - 1:i] == "/" else "(.*/)")
+                    j += 1
+                else:
+                    out.append("(.*)")
+            else:
+                out.append("([^/]*)")
+            i = j
+            continue
+        if c == "{":
+            in_group = True
+            out.append("(")
+        elif c == "}" and in_group:
+            in_group = False
+            out.append(")")
+        elif c == "," and in_group:
+            out.append("|")
         else:
             out.append(re.escape(c))
         i += 1
     return "".join(out)
 
 
-def check_assertions(spec: dict, page, obs: dict) -> list[dict]:
-    """Evaluate the spec's `assert` block in code on the final observation (spec §5.1): free, exact, non-model.
+ASSERT_MAX_ELEMENTS = 5000  # the assertion oracle is not a Choice: no need to cut the page to 255 rows
+ELEMENT_ASSERTIONS = ("field_value", "element_present", "element_absent")
+
+
+def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = None) -> list[dict]:
+    """Evaluate the spec's `assert` block in code on the final page (spec §5.1): free, exact, non-model.
 
     Each record repeats the assertion, adds `ok` and `actual` (the value found, or what was there instead).
     `url_matches` is a Playwright glob over the final URL; `text_contains` looks in the whole page text;
     `field_value` matches a text field / select whose label contains the given label (case-insensitive) and
     compares its value; `element_present` / `element_absent` match role and, when given, a name substring.
+    The element assertions look at the WHOLE document (observe(..., whole_document=True)), not at the
+    viewport-and-hit-tested table Jev chose from, so a Logout link below the fold is present and an alert
+    below the fold is not absent. Comparisons use the real page; `actual` is masked with `secrets` before
+    it is written, so a secret can be asserted on without reaching the trace.
     """
     results = []
+    secrets = secrets or []
     body_text: str | None = None
+    elements: list[dict] | None = None
+    url = page.url
     for a in spec.get("assert") or []:
         (kind, arg), = a.items()
-        rec: dict = {kind: arg, "ok": False, "actual": None}
+        shown = mask_text(arg, secrets) if isinstance(arg, str) else {k: mask_text(v, secrets) for k, v in arg.items()}
+        rec: dict = {kind: shown, "ok": False, "actual": None}
+        if kind in ELEMENT_ASSERTIONS and elements is None:
+            try:
+                elements = observe(page, ASSERT_MAX_ELEMENTS, 100, whole_document=True)["elements"]
+            except Exception:  # noqa: BLE001 - fall back to what the observer saw
+                elements = obs["elements"]
         if kind == "url_matches":
-            rec["actual"] = obs["url"]
-            rec["ok"] = re.fullmatch(glob_to_regex(arg), obs["url"]) is not None
+            rec["actual"] = mask_text(url, secrets)
+            rec["ok"] = re.fullmatch(glob_to_regex(arg), url) is not None
         elif kind == "text_contains":
             if body_text is None:
                 try:
@@ -342,28 +374,33 @@ def check_assertions(spec: dict, page, obs: dict) -> list[dict]:
                     body_text = obs["visible_text"]
             at = body_text.find(arg)
             rec["ok"] = at >= 0
-            rec["actual"] = body_text[max(0, at - 60):at + len(arg) + 60] if at >= 0 else re.sub(r"\s+", " ", body_text)[:200]
+            excerpt = body_text[max(0, at - 60):at + len(arg) + 60] if at >= 0 else re.sub(r"\s+", " ", body_text)[:200]
+            rec["actual"] = mask_text(excerpt, secrets)
         elif kind == "field_value":
-            fields = [e for e in obs["elements"] if is_field(e) and arg["label"].lower() in (e.get("name") or "").lower()]
+            fields = [e for e in elements if is_field(e) and arg["label"].lower() in (e.get("name") or "").lower()]
             values = [e.get("value") or "" for e in fields]
             rec["ok"] = arg["equals"] in values
-            rec["actual"] = {f'[{e["idx"]}] {element_label(e)}': v for e, v in zip(fields, values)} or "no field with that label"
+            rec["actual"] = {mask_text(f'[{e["idx"]}] {element_label(e)}', secrets): mask_text(v, secrets)
+                             for e, v in zip(fields, values)} or "no field with that label"
         elif kind in ("element_present", "element_absent"):
             want = (arg.get("name") or "").lower()
-            matches = [e for e in obs["elements"] if e["role"] == arg["role"] and (not want or want in (e.get("name") or "").lower())]
+            matches = [e for e in elements if e["role"] == arg["role"] and (not want or want in (e.get("name") or "").lower())]
             rec["ok"] = bool(matches) if kind == "element_present" else not matches
-            rec["actual"] = [f'[{e["idx"]}] {element_label(e)}' for e in matches[:5]] or "no such element"
+            rec["actual"] = [mask_text(f'[{e["idx"]}] {element_label(e)}', secrets) for e in matches[:5]] or "no such element"
         results.append(rec)
     return results
 
 
-def adjudicate(page, jev, name: str, when: str) -> dict:
+def adjudicate(page, jev, name: str, when: str, secrets: list[str] | None = None) -> dict:
     """One extra request after a seen outcome (spec §5.4): Jev selects the line of the final page that states
     the outcome (`evidence_line`) and re-judges the statement (`evidence_present`). The chosen line is copied
-    verbatim into the result: selection is how a quote is produced. Never fatal: a failure is recorded."""
+    verbatim into the result: selection is how a quote is produced. The lines are masked like every
+    observation, so a secret the page echoes reaches neither Jev nor the result. Never fatal: the run was
+    already decided when this is asked, so any failure (transport, a non-JSON body, a malformed answer) is
+    recorded on the record instead of raised."""
     rec: dict = {"outcome": name, "statement": when, "line": None, "line_id": None, "present": None, "confidence": None}
     try:
-        lines = page.evaluate(LINES_JS)
+        lines = [mask_text(ln, secrets or []) for ln in page.evaluate(LINES_JS, ADJUDICATION_MAX_LINES)]
     except Exception as e:  # noqa: BLE001
         rec["error"] = f"could not read the page text: {type(e).__name__}"
         return rec
@@ -371,29 +408,34 @@ def adjudicate(page, jev, name: str, when: str) -> dict:
     t0 = time.perf_counter()
     try:
         resp = jev.system_one(state, questions)
-    except JevError as e:
-        rec["error"] = str(e)[:300]
-        return rec
-    rec["latency_ms"] = latency_of(resp, t0)
-    answers = resp["answers"]
-    picked = read_choice(answers, "evidence_line", offered)
-    if picked is None:
-        rec["invalid_answer"] = f"evidence_line: {validate_choice(answers.get('evidence_line'), offered)}"
-    else:
-        rec["line_id"] = picked["choice"]
-        rec["confidence"] = picked["confidence"]
-        if picked["choice"] != "none":
-            rec["line"] = state["lines"][int(picked["choice"]) - 1]["text"]
-    present = answers.get("evidence_present")
-    if isinstance(present, dict) and isinstance(present.get("noul"), (int, float)) and 0 <= present["noul"] <= 1:
-        rec["present"] = round(float(present["noul"]), 3)
+        rec["latency_ms"] = latency_of(resp, t0)
+        answers = resp["answers"] if isinstance(resp.get("answers"), dict) else {}
+        picked = read_choice(answers, "evidence_line", offered)
+        if picked is None:
+            rec["invalid_answer"] = f"evidence_line: {validate_choice(answers.get('evidence_line'), offered)}"
+        else:
+            rec["line_id"] = picked["choice"]
+            rec["confidence"] = picked["confidence"]
+            if picked["choice"] != ADJUDICATION_NONE:
+                rec["line"] = state["lines"][int(picked["choice"]) - 1]["text"]
+        present = answers.get("evidence_present")
+        if isinstance(present, dict) and isinstance(present.get("noul"), (int, float)) and 0 <= present["noul"] <= 1:
+            rec["present"] = round(float(present["noul"]), 3)
+    except Exception as e:  # noqa: BLE001 - JevError or anything the seam returned that is not the expected shape
+        rec["error"] = f"{type(e).__name__}: {str(e)[:300]}"
     return rec
+
+
+# The statuses whose terminal step's `blocked_reason` answer says something about the ending (spec §5.3). For
+# done_unverified, assert_failed, unstable_page and error the answer is about progress on that page, not about
+# the verdict, so the status row alone decides the suggestion.
+BLOCKED_REASON_STATUSES = {"blocked", "stuck", "low_confidence", "budget_exhausted"}
 
 
 def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: str) -> dict:
     """result.json (spec §5.5): the one file Claude reads first. `final` is the loop's verdict record:
-    {outcome: {name, verdict, probability, confidence}, seen_at_step, confirmed, assertions, adjudication,
-    typed: {blocked_reason, stuck_reason}}."""
+    {outcome: {name, verdict, probability, confidence}, seen_at_step, first_seen_at_step, confirmed,
+    assertions, adjudication}; the typed reasons come from the terminal step."""
     status = trace["status"]
     steps = trace["steps"]
     # A pass whose assertions failed is not that outcome: it is undetermined, with the failing assertions
@@ -417,7 +459,7 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
         "spec_id": spec["id"],
         "outcome": seen["name"] if seen else UNDETERMINED,
         "verdict": seen["verdict"] if seen else None,
-        "note": (outcomes.get(seen["name"]) or {}).get("note") if seen else None,
+        "note": outcomes[seen["name"]].get("note") if seen else None,
         "probability": seen.get("probability") if seen else None,
         "confidence": seen.get("confidence") if seen else None,
         "seen_at_step": final.get("seen_at_step"),
@@ -432,8 +474,12 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
             "checks": (seen_step or terminal).get("checks", {}),
         },
         "assertions": final.get("assertions") or [],
+        # every non-pass sighting that is not the result itself (the confirming step's included), and every pass
+        # sighting that vanished on its recheck (a flapping success toast is worth knowing about)
         "outcomes_seen_earlier": [{"step": s["n"], "outcome": s["outcome_seen"]} for s in steps if s.get("outcome_seen")
-                                  and s["n"] != final.get("seen_at_step")],
+                                  and not (seen and s["n"] == final.get("seen_at_step") and s["outcome_seen"] == seen["name"])]
+                                 + [{"step": s["n"], "outcome": s["outcome_unconfirmed"], "unconfirmed": True}
+                                    for s in steps if s.get("outcome_unconfirmed")],
         "story": story,
         "status": status,
         "duration_ms": trace["duration_ms"],
@@ -441,17 +487,21 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
         "trace": os.path.join(out_dir, "trace.json"),
     }
     if not seen:
-        typed = final.get("typed") or {}
+        blocked = (terminal.get("blocked_reason") or {}).get("choice")
+        stuck = (terminal.get("stuck_reason") or {}).get("choice")
         result["reason"] = {
             "status": status,
-            "blocked_reason": typed.get("blocked_reason"),
-            "stuck_reason": typed.get("stuck_reason"),
-            "suggested_verdict": suggested_verdict(status, [typed.get("stuck_reason") if status == "stuck" else None,
-                                                            typed.get("blocked_reason")]),
+            "blocked_reason": blocked,
+            "stuck_reason": stuck,
+            "suggested_verdict": suggested_verdict(status, [stuck if status == "stuck" else None,
+                                                            blocked if status in BLOCKED_REASON_STATUSES else None]),
         }
         if status == "assert_failed":
             result["reason"]["outcome_seen"] = (final.get("outcome") or {}).get("name")
             result["reason"]["failed_assertions"] = [a for a in result["assertions"] if not a["ok"]]
+        if status == "budget_exhausted" and terminal.get("pending_outcome"):
+            # a pass first seen on the final look: the budget ran out before it could be rechecked
+            result["reason"]["pending_outcome"] = terminal["pending_outcome"]
         if status == "error":
             result["reason"]["error"] = trace.get("error")
     return result
@@ -476,7 +526,6 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     budget = spec["budget"]
     obs_cfg = spec["observation"]
     outcomes = effective_outcomes(spec)  # declared + synthesized: the runner only knows outcomes
-    verdict_of = {name: o["verdict"] for name, o in outcomes.items()}
 
     trace: dict = {
         "spec_id": spec["id"],
@@ -503,8 +552,9 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     repeats: dict = {}
     status: str | None = None
     error: str | None = None
-    final: dict = {"outcome": None, "seen_at_step": None, "confirmed": False, "assertions": [], "adjudication": None, "typed": {}}
+    final: dict = {"outcome": None, "seen_at_step": None, "confirmed": False, "assertions": [], "adjudication": None}
     # first_seen_at_step is added when a pass sighting starts its confirmation (the confirming step becomes seen_at_step)
+    secret_values = [spec["data"][k] for k in spec["secrets"] if spec["data"].get(k)]
 
     def record(entry: dict, step: dict, sig: str) -> None:
         """Append a history entry and remember which observation it was decided on, so the next
@@ -538,7 +588,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     def key_step(step: dict) -> bool:
         """The steps worth a picture in "key" mode: something went wrong or the runner refused to act."""
         return bool(step.get("never_violated") or step.get("low_confidence") or step.get("stale")
-                    or step.get("outcome_seen") or step.get("repeat_count", 0) >= 2)
+                    or step.get("outcome_seen") or step.get("pending_outcome") or step.get("outcome_unconfirmed")
+                    or step.get("repeat_count", 0) >= 2)
 
     def capture(page, step: dict, terminal: bool = False) -> None:
         """Screenshot policy. Taken after Jev's answer and before execution, so the picture is the page
@@ -556,10 +607,22 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         step["executed"] = executed
         capture(page, step, terminal=True)
         trace["steps"].append(step)
-        final["typed"] = {
-            "blocked_reason": (step.get("blocked_reason") or {}).get("choice"),
-            "stuck_reason": (step.get("stuck_reason") or {}).get("choice"),
-        }
+
+    def park(step: dict, reason: str, entry: dict | None, sig: str, pause: bool = True) -> None:
+        """A step the runner refuses to act on (a pending confirmation, a low-confidence decision, a stale
+        decision): recorded as a WAIT, pictured per the policy, `entry` (when given) appended to Jev's
+        recent_actions, then a real wait like the WAIT operation - settle_ms, then the event-based settle -
+        and the step is appended. Every runner-inserted WAIT goes through here, so they all wait the same."""
+        step["executed"] = {"action": "WAIT", "ok": True, "error": None, "reason": reason}
+        capture(page, step)
+        if entry is not None:
+            record(entry, step, sig)
+        t_b = time.perf_counter()
+        if pause:
+            page.wait_for_timeout(spec["browser"]["settle_ms"])
+        step["settle"] = settle(page, spec)
+        step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
+        trace["steps"].append(step)
 
     STOP = {"action": "STOP", "ok": True, "error": None}
 
@@ -574,13 +637,13 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         final["seen_at_step"] = step["n"]
         final.setdefault("first_seen_at_step", step["n"])
         final["confirmed"] = True
-        final["assertions"] = check_assertions(spec, page, obs)
+        final["assertions"] = check_assertions(spec, page, obs, secret_values)
         ok = all(a["ok"] for a in final["assertions"])
         step["assertions"] = final["assertions"]
         finish(page, step, "passed" if ok else "assert_failed", {"action": action, "ok": True, "error": None, "confirmed": True})
         if ok and not spec["setup"] and not any("reason" not in h for h in history):
             trace["passed_without_actions"] = True
-        final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]))
+        final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]), secret_values)
 
     def end_with_outcome(page, step: dict, seen: dict, jev) -> None:
         """A non-pass outcome is terminal at first confident sighting (fail_fast): the picture is forced."""
@@ -588,7 +651,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         final["seen_at_step"] = final["first_seen_at_step"] = step["n"]
         step["outcome_seen"] = seen["name"]
         finish(page, step, "outcome", dict(STOP))
-        final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]))
+        final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]), secret_values)
 
     timing: dict = {}  # where the wall-clock went: launch, navigation, setup, steps, final
 
@@ -596,12 +659,19 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         timing[name] = int((time.perf_counter() - since) * 1000)
         return time.perf_counter()
 
-    secret_values = [spec["data"][k] for k in spec["secrets"] if spec["data"].get(k)]
-
     def look() -> dict:
         """Observe the page with every secret value masked in what Jev and the trace will see."""
         return mask_secrets(observe(page, obs_cfg["max_elements"], obs_cfg["max_text_chars"]), secret_values)
 
+    def final_page(checks: dict) -> dict:
+        """trace.final for a run that ends without a fresh observation: url and title masked like a step's."""
+        try:
+            url, title = page.url, page.title()
+        except Exception:  # noqa: BLE001 - the page is gone
+            url, title = None, None
+        return {"url": mask_text(url, secret_values), "title": mask_text(title, secret_values), "checks": checks}
+
+    os.makedirs(os.path.join(out_dir, "steps"), exist_ok=True)  # before any tab is opened: nothing to close if it fails
     with sync_playwright() as p:
         t_lap = time.perf_counter()
         cdp_url = spec["browser"]["cdp_url"]
@@ -635,7 +705,12 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         except Exception as e:  # noqa: BLE001 - nothing to trace yet: this is the environment, not the test
             what = (f"could not attach to the browser at {cdp_url} (is Chrome running with --remote-debugging-port?)"
                     if cdp_url else "could not launch the browser")
-            raise BrowserUnavailable(f"{what}: {type(e).__name__}: {str(e).splitlines()[0][:300]}") from None
+            for d in (os.path.join(out_dir, "steps"), out_dir):  # leave no empty run directory behind
+                try:
+                    os.rmdir(d)
+                except OSError:
+                    pass
+            raise BrowserUnavailable(f"{what}: {type(e).__name__}: {str(e).split(chr(10), 1)[0][:300]}") from None
         # Tabs the flow itself opens (target=_blank, window.open) are ours to close: launch mode closes them
         # with the context; in attached mode they would otherwise stay in the user's browser.
         popups: list = []
@@ -646,7 +721,6 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
 
         page.on("popup", track_popup)
         page.set_default_timeout(spec["browser"]["action_timeout_ms"])
-        os.makedirs(os.path.join(out_dir, "steps"), exist_ok=True)
         t_lap = lap("launch_ms", t_lap)
         try:
             page.goto(spec["start_url"], wait_until="domcontentloaded")
@@ -742,21 +816,15 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                         finish(page, step, "done_unverified", {"action": "DONE", "ok": True, "error": None, "confirmed": True})
                         break
                     step["outcome_unconfirmed"] = was["name"]  # a transient sighting: carry on with this step's answers
+                    final.pop("first_seen_at_step", None)  # it was not the first sighting of the pass
 
                 def confirm_later(name: str | None, action: str, reason: str, entry_op: str) -> None:
                     nonlocal pending
                     pending = {"name": name, "action": action}
-                    step["executed"] = {"action": "WAIT", "ok": True, "error": None, "reason": reason}
                     step["pending_outcome"] = name
                     if name:
                         final["first_seen_at_step"] = n  # the sighting; seen_at_step will be the confirming step
-                    capture(page, step)
-                    record(wait_entry(n, entry_op, "checking the result before finishing"), step, sig)
-                    t_b = time.perf_counter()
-                    page.wait_for_timeout(spec["browser"]["settle_ms"])
-                    step["settle"] = settle(page, spec)
-                    step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
-                    trace["steps"].append(step)
+                    park(step, reason, wait_entry(n, entry_op, "checking the result before finishing"), sig)
 
                 if passes and spec["auto_done"]:
                     confirm_later(passes[0]["name"], "AUTO_DONE", f"confirming outcome {passes[0]['name']}", "WAIT")
@@ -802,15 +870,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     if low_streak >= th["max_low_confidence_steps"]:
                         finish(page, step, "low_confidence", dict(STOP))
                         break
-                    step["executed"] = {"action": "WAIT", "ok": True, "error": None,
-                                        "reason": f"low confidence; {operation} not executed"}
-                    capture(page, step)
-                    record(wait_entry(n, "WAIT", "undecided between the offered options; nothing was executed"), step, sig)
-                    t_b = time.perf_counter()
-                    page.wait_for_timeout(spec["browser"]["settle_ms"])  # a real wait, like the WAIT operation
-                    step["settle"] = settle(page, spec)
-                    step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
-                    trace["steps"].append(step)
+                    park(step, f"low confidence; {operation} not executed",
+                         wait_entry(n, "WAIT", "undecided between the offered options; nothing was executed"), sig)
                     continue
                 low_streak = 0
 
@@ -833,13 +894,9 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                         if stale_streak >= th["max_stale"]:
                             finish(page, step, "unstable_page", dict(STOP))
                             break
-                        step["executed"] = {"action": "WAIT", "ok": True, "error": None,
-                                            "reason": f"page changed during the decision: {reason}"}
-                        capture(page, step)
-                        t_b = time.perf_counter()
-                        step["settle"] = settle(page, spec)
-                        step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
-                        trace["steps"].append(step)
+                        # not in recent_actions: nothing was decided on this page; no extra pause either, the
+                        # page is already moving and the event-based settle is what waits for it to stop
+                        park(step, f"page changed during the decision: {reason}", None, sig, pause=False)
                         continue
                 stale_streak = 0
 
@@ -870,8 +927,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                 executed = execute(page, spec, operation, target, value_key)
                 if not executed["ok"]:
                     step["screenshot_after_failure"] = shot(page, f"{n:03d}-failed.png", step)
-                target_role = next((e["role"] for e in obs["elements"] if e["idx"] == (target or {}).get("element")), None)
-                step["settle"] = settle(page, spec, after=(operation, target_role))
+                target_el = next((e for e in obs["elements"] if e["idx"] == (target or {}).get("element")), {})
+                step["settle"] = settle(page, spec, after=(operation, None if target_el.get("datalist") else target_el.get("role")))
                 step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
                 step["executed"] = executed
                 record(history_entry(n, operation, target, value_key, executed), step, sig)
@@ -882,54 +939,62 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
             t_lap = lap("steps_ms", t_lap)
 
             if status == "budget_exhausted":
-                # One last look: did the final action happen to reach an outcome?
+                # The final look, as one more terminal step: the page after the last allowed action, asked only
+                # the check and outcome questions. It is the recheck of a sighting made on the last step (or of
+                # Jev's DONE there), so such a pass ends confirmed like any other; a non-pass outcome ends the
+                # run under the same fail_fast rule as inside the loop; a pass FIRST seen here has had no
+                # settle-and-recheck, so it stays budget_exhausted with `pending_outcome` naming it (the next
+                # run gets one more step). Any other ending stays budget_exhausted.
+                n = (trace["steps"][-1]["n"] + 1) if trace["steps"] else 1
                 obs = look()
-                note_page_change(signature(obs))
+                sig = signature(obs)
+                note_page_change(sig)
+                step = {
+                    "n": n, "url": obs["url"], "title": obs["title"], "signature": sig, "screenshot": None,
+                    "elements": obs["elements"], "truncated_elements": obs["truncated"],
+                    "visible_text": obs["visible_text"][:600], "final_look": True, "offered_operations": [],
+                }
                 questions, meta = build_questions(spec, obs, last_operation, outcomes)
-                last_look = {k: v for k, v in questions.items() if k in spec["checks"] or k == "outcome"}
-                final_checks: dict = {}
-                final_outcome = None
-                if last_look:
-                    try:
-                        resp = jev.system_one(build_state(spec, obs, len(trace["steps"]) + 1, history), last_look)
-                        final_checks = read_checks(resp["answers"], spec)
-                        if "outcome" in last_look:
-                            final_outcome = read_outcome(resp["answers"], meta["offered"]["outcome"])
-                    except JevError as e:
-                        error = str(e)
-                seen = seen_outcomes(outcomes, final_checks, final_outcome, th["outcome_true"])
+                last_look = {k: v for k, v in questions.items() if k in spec["checks"] or k in ("outcome", "blocked_reason")}
+                checks, outcome_answer = {}, None
+                try:
+                    t_jev = time.perf_counter()
+                    resp = jev.system_one(build_state(spec, obs, n, history), last_look)
+                    step["latency_ms"] = {"jev": latency_of(resp, t_jev)}
+                    checks = read_checks(resp["answers"], spec)
+                    if "outcome" in last_look:
+                        outcome_answer = read_outcome(resp["answers"], meta["offered"]["outcome"])
+                        step["outcome"] = outcome_answer
+                    step["blocked_reason"] = read_choice(resp["answers"], "blocked_reason", meta["offered"]["blocked_reason"])
+                except JevError as e:
+                    error = step["error"] = str(e)
+                step["checks"] = checks
+                seen = seen_outcomes(outcomes, checks, outcome_answer, th["outcome_true"])
                 non_pass = [s for s in seen if s["verdict"] != "pass"]
                 passes = [s for s in seen if s["verdict"] == "pass"]
-                trace["final"] = {"url": obs["url"], "title": obs["title"], "checks": final_checks, "outcome": final_outcome}
-                if non_pass:
-                    status = "outcome"
-                    final["outcome"] = non_pass[0]
-                    final["adjudication"] = adjudicate(page, jev, non_pass[0]["name"], outcome_when(non_pass[0]["name"]))
-                elif passes and spec["auto_done"]:
-                    final["outcome"] = passes[0]
-                    final["assertions"] = check_assertions(spec, page, obs)
-                    status = "passed" if all(a["ok"] for a in final["assertions"]) else "assert_failed"
-                    final["adjudication"] = adjudicate(page, jev, passes[0]["name"], outcome_when(passes[0]["name"]))
-                if trace["steps"]:
-                    last = trace["steps"][-1]
-                    final["typed"] = {"blocked_reason": (last.get("blocked_reason") or {}).get("choice"),
-                                      "stuck_reason": (last.get("stuck_reason") or {}).get("choice")}
+                trace["final"] = {"url": obs["url"], "title": obs["title"], "checks": checks}
+                if non_pass and spec["fail_fast"]:
+                    end_with_outcome(page, step, non_pass[0], jev)
+                elif passes and pending:
+                    settle_pass(page, step, obs, passes[0], pending["action"], jev)
+                else:
+                    if non_pass:
+                        step["outcome_seen"] = non_pass[0]["name"]
+                    if passes:
+                        step["pending_outcome"] = passes[0]["name"]  # seen, not rechecked: undetermined
+                    finish(page, step, "budget_exhausted", dict(STOP))
             else:
                 last = trace["steps"][-1] if trace["steps"] else {}
-                trace["final"] = {
-                    "url": page.url,
-                    "title": page.title(),
-                    "checks": last.get("checks", {}),
-                }
+                trace["final"] = final_page(last.get("checks", {}))
             trace["final"]["screenshot"] = shot(page, "final.png", trace["final"])
             lap("final_ms", t_lap)
         except Exception as e:  # noqa: BLE001
             status, error = "error", f"{type(e).__name__}: {str(e)[:500]}"
+            trace["final"] = final_page({})
             try:
-                trace["final"] = {"url": page.url, "title": page.title(), "checks": {}}
                 trace["final"]["screenshot"] = shot(page, "final.png", trace["final"])
-            except Exception:
-                trace["final"] = {"url": None, "title": None, "checks": {}}
+            except Exception:  # noqa: BLE001 - no picture of a page that is gone
+                pass
         finally:
             if cdp_url:
                 # Only what we opened goes away: the user's tabs stay. On a connected browser,

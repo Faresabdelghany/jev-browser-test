@@ -24,9 +24,10 @@ RESERVED_QUESTIONS = {
     "evidence_present",
 }
 OUTCOME_NONE = "none_yet"  # the outcome Choice's "nothing listed is visible yet" option; not a valid outcome name
+UNDETERMINED = "undetermined"  # result.outcome when the run ended in no declared outcome
 VERDICTS = ("pass", "bug", "test_issue", "needs_human")
 ASSERTIONS = {
-    "url_matches": str,       # Playwright-style glob over the final URL: ** any chars, * any chars but /, ? one char
+    "url_matches": str,       # Playwright's URL glob over the final URL: ** any chars, * any chars but /, {a,b} either
     "text_contains": str,     # substring of the final page's visible text (body.innerText)
     "field_value": dict,      # {"label": ..., "equals": ...}: a text field / select found by its label
     "element_present": dict,  # {"role": ..., "name"?: ...} in the final element table
@@ -46,7 +47,7 @@ DEFAULTS = {
     "never": [],
     # The results contract: the endings Claude accepts back, each with a pre-declared verdict, and exact
     # expectations checked in code on the final page. See references/spec-format.md. When `outcomes` is
-    # empty the runner synthesizes them from done_when / never (see run_test.effective_outcomes).
+    # empty the runner synthesizes them from done_when / never (see effective_outcomes below).
     "outcomes": {},
     "assert": [],
     "auto_done": True,
@@ -190,14 +191,17 @@ def validate(spec: dict) -> list[str]:
             elif when.strip().endswith("?"):
                 errors.append(f"outcome '{name}': 'when' should be a statement, not a question")
         requires = o.get("requires", [])
-        if not isinstance(requires, list) or any(r not in checks for r in requires):
+        if not isinstance(requires, list) or any(not isinstance(r, str) or r not in checks for r in requires):
             errors.append(f"outcome '{name}': 'requires' must list known check names")
         if when is None and not requires:
             errors.append(f"outcome '{name}' needs a 'when' statement and/or 'requires' checks")
         if "note" in o and not isinstance(o["note"], str):
             errors.append(f"outcome '{name}': 'note' must be a string")
     has_pass_outcome = any(isinstance(o, dict) and o.get("verdict") == "pass" for o in outcomes.values())
-    if not spec.get("done_when") and not has_pass_outcome:
+    if outcomes and not has_pass_outcome:
+        errors.append("'outcomes' must declare an outcome with verdict \"pass\" (done_when / never are shorthand for "
+                      "outcomes only when none are declared); otherwise nothing defines success")
+    if not outcomes and not spec.get("done_when"):
         errors.append("'done_when' must list at least one check, or 'outcomes' must declare an outcome with verdict "
                       "\"pass\"; otherwise nothing defines success")
 
@@ -252,9 +256,19 @@ def validate(spec: dict) -> list[str]:
                 errors.append(f"setup[{i}] (wait_for): 'state' must be attached|detached|visible|hidden")
 
     b = spec.get("budget", {})
-    if not (1 <= int(b.get("max_steps", 1)) <= 200):
-        errors.append("'budget.max_steps' must be between 1 and 200")
+    ms = b.get("max_steps", 1)
+    if not (isinstance(ms, int) and not isinstance(ms, bool) and 1 <= ms <= 200):
+        errors.append("'budget.max_steps' must be an integer between 1 and 200")
+    secs = b.get("max_seconds", 1)
+    if not (isinstance(secs, (int, float)) and not isinstance(secs, bool) and secs > 0):
+        errors.append("'budget.max_seconds' must be a number of seconds greater than 0")
     br = spec.get("browser", {})
+    vp = br.get("viewport", [1, 1])
+    if not (isinstance(vp, list) and len(vp) == 2 and all(isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in vp)):
+        errors.append("'browser.viewport' must be [width, height] in pixels")
+    at = br.get("action_timeout_ms", 1)
+    if not (isinstance(at, int) and not isinstance(at, bool) and at >= 1):
+        errors.append("'browser.action_timeout_ms' must be an integer number of milliseconds >= 1")
     settle_ms, quiet_ms = br.get("settle_ms", 0), br.get("quiet_ms", 0)
     if not (isinstance(settle_ms, int) and not isinstance(settle_ms, bool) and 0 <= settle_ms <= 10000):
         errors.append("'browser.settle_ms' must be an integer between 0 and 10000 (the cap on the post-action settle)")
@@ -289,24 +303,27 @@ def validate(spec: dict) -> list[str]:
 
 
 def effective_outcomes(spec: dict) -> dict:
-    """The outcomes the runner works with: the declared ones plus those synthesized from done_when / never.
+    """The outcomes the runner works with: the declared ones, or those synthesized from done_when / never.
 
-    `goal_reached` (verdict pass, requires every done_when check at check_true) and `never_<check>` (verdict
-    bug, requires that check at never_true) are added when the spec did not declare an outcome of that
-    name, so an old-style spec keeps its pass / fail semantics and a new-style spec may still use done_when
-    and never as shorthand. Every outcome comes back with `requires` (a list) and `requires_threshold`
-    filled in; synthesized ones carry `synthesized: true`. Declared outcomes come first, in declaration
-    order, which is also the order of preference when several are seen on the same page."""
+    When the spec declares no `outcomes`, `goal_reached` (verdict pass, requires every done_when check at
+    check_true) and `never_<check>` (verdict bug, requires that check at never_true) are synthesized, so an
+    old-style spec keeps its pass / fail semantics (design §5.1). When outcomes ARE declared they are the whole
+    contract: done_when / never are not turned into competing outcomes, because a lone `never` Noul judging
+    the same message a declared outcome describes would race the outcome Choice at its own threshold and
+    could end a negative test as `bug`. Every outcome comes back with `requires` (a list) and
+    `requires_threshold` filled in; synthesized ones carry `synthesized: true`. Declaration order is the
+    order of preference when several are seen on the same page."""
     th = spec["thresholds"]
     out: dict = {}
     for name, o in (spec.get("outcomes") or {}).items():
         out[name] = {**o, "requires": list(o.get("requires") or []), "requires_threshold": th["check_true"]}
-    if spec.get("done_when") and "goal_reached" not in out:
+    if out:
+        return out
+    if spec.get("done_when"):
         out["goal_reached"] = {"verdict": "pass", "requires": list(spec["done_when"]),
                                "requires_threshold": th["check_true"], "synthesized": True}
     for n in spec.get("never") or []:
-        if f"never_{n}" not in out:
-            out[f"never_{n}"] = {"verdict": "bug", "requires": [n], "requires_threshold": th["never_true"], "synthesized": True}
+        out[f"never_{n}"] = {"verdict": "bug", "requires": [n], "requires_threshold": th["never_true"], "synthesized": True}
     return out
 
 
@@ -339,10 +356,11 @@ def main(argv: list[str]) -> int:
     print(f"  goal: {spec['goal']}")
     print(f"  checks: {', '.join(spec['checks'])}")
     print(f"  done_when: {spec['done_when']}  never: {spec['never']}")
-    if spec["outcomes"]:
-        print("  outcomes: " + ", ".join(f"{k} -> {v.get('verdict')}" for k, v in spec["outcomes"].items()))
-    else:
-        print("  outcomes: none declared (goal_reached / never_<check> are synthesized from done_when / never)")
+    eff = effective_outcomes(spec)
+    print("  outcomes: " + ", ".join(f"{k} -> {v.get('verdict')}{' (synthesized)' if v.get('synthesized') else ''}"
+                                    for k, v in eff.items()))
+    if spec["outcomes"] and (spec["done_when"] or spec["never"]):
+        print("  note: done_when / never are ignored by the runner when outcomes are declared")
     if spec["assert"]:
         print(f"  assert: {len(spec['assert'])} assertion(s) on the final page")
     print(f"  data keys: {list(spec['data'])}  secrets: {spec['secrets']}")

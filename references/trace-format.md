@@ -21,7 +21,7 @@ evidence, the file Claude reads first. The trace is the *evidence* behind it; th
                 "screenshot": "steps/005.png",                  // the sighting step's picture (forced for non-pass outcomes), else final.png
                 "checks": { "logged_in": 0.03, "login_error": 0.81 } },   // the checks at the sighting step
   "assertions": [ { "url_matches": "**/login", "ok": true, "actual": "https://.../login" } ],   // every assertion with what was found
-  "outcomes_seen_earlier": [],                                  // non-terminal sightings (fail_fast: false)
+  "outcomes_seen_earlier": [],                                  // non-terminal sightings: non-pass ones (fail_fast: false) and pass sightings that vanished on their recheck ({.., "unconfirmed": true})
   "story": [ "1 TYPE_TEXT [0] textbox \"Username\" <- username", "2 TYPE_TEXT [1] textbox \"Password\" <- password", "3 CLICK [2] button \"Login\"" ],
   "status": "passed", "duration_ms": 6200,
   "usage": { "jev_requests": 6, "input_tokens": 9774, "output_tokens": 1741, "model": "jev-1.13.0", "reconnects": 0 },
@@ -33,12 +33,16 @@ evidence, the file Claude reads first. The trace is the *evidence* behind it; th
 low_confidence | done_unverified | budget_exhausted | unstable_page | error`, or a pass outcome was seen but
 an assertion failed (`assert_failed`). Then `reason` is `{ "status", "blocked_reason", "stuck_reason",
 "suggested_verdict" }` plus `failed_assertions` (with `actual` values) and `outcome_seen` for
-`assert_failed`, and `error` for `error`. `blocked_reason` is Jev's answer on the terminal step to "what most
+`assert_failed`, `pending_outcome` for a `budget_exhausted` whose final look saw a pass for the first time
+(not rechecked, so not a pass: give the run one more step), and `error` for `error`. `blocked_reason` is Jev's answer on the terminal step to "what most
 prevents progress" (`nothing | missing_data_value | control_not_on_page | site_refused_or_error |
 human_step_required | wrong_page | other`); `stuck_reason` is asked only after an action with
 `page_changed: false` (`control_had_no_effect | overlay_or_modal | still_loading |
-needs_scroll_or_other_control | other`). The suggestion comes from a fixed table, the typed reason winning
-over the status when both have a row:
+needs_scroll_or_other_control | other`). The suggestion comes from a fixed table: `stuck_reason` counts for
+`stuck`, `blocked_reason` for `blocked`, `stuck`, `low_confidence` and `budget_exhausted` (a typed reason with
+a row wins over the status row there); for `done_unverified`, `assert_failed`, `unstable_page` and `error`
+the status row alone decides, because on those endings the step's `blocked_reason` is about progress on the
+page, not about the verdict:
 
 | reason or status | suggested verdict |
 |---|---|
@@ -88,8 +92,9 @@ lines in `error`. The exit code is 0 iff `suite.all_pass`.
 1. `python scripts/summarize_trace.py runs/<id>/<ts>/trace.json` — one line per step, flags on the right.
 2. For any flagged or suspicious step: `--step N` dumps it in full (probabilities, checks, the element table
    Jev was offered) and `steps/NNN.png` shows the page Jev decided on (taken after its answer, before the
-   action). With the default `screenshots: "key"` only the terminal step and flagged steps (`never_violated`,
-   `low_confidence`, `stale`, `repeat_count ≥ 2`) have one; a failed action also leaves `NNN-failed.png`.
+   action). With the default `screenshots: "key"` only the terminal step and flagged steps (`outcome_seen`,
+   `pending_outcome`, `outcome_unconfirmed`, `never_violated`, `low_confidence`, `stale`, `repeat_count ≥ 2`)
+   have one; a failed action also leaves `NNN-failed.png`.
    The step *before* a divergence usually has no picture: its element table and probabilities are still in
    the trace, and `--screenshots all` restores a picture per step for a rerun.
 3. `steps/final.png` shows where the run ended (always written unless screenshots are off).
@@ -107,7 +112,7 @@ lines in `error`. The exit code is 0 iff `suite.all_pass`.
 | `never_violated` | (Runs before the results contract only.) A `never` check crossed its threshold; today this ends as `outcome` with `never_<check>` | Often a product bug. Confirm the error is real in the screenshot, and that the preceding action was reasonable |
 | `stuck` | Same action on an unchanged page `max_repeat` times | The action had no effect: dead button (bug), or Jev is confused by the page (test issue: add a note or a `setup` step) |
 | `low_confidence` | `max_low_confidence_steps` consecutive uncertain decisions, none of them executed | Jev could not choose between the offered options: look at `decision_confidence` and the probabilities in `--step N`. A split over `type_value` means the `data` key names do not match the field labels (rename them); a split over targets means the goal/notes do not say which of several similar controls to use |
-| `budget_exhausted` | Ran out of steps or seconds | Wandering (test issue, tighten the goal) or a very long flow (raise the budget) |
+| `budget_exhausted` | Ran out of steps or seconds. The final look is one more step (`final_look: true`): a sighting or DONE on the last step is confirmed by it (then the status is `passed`), a pass first seen there is recorded as `reason.pending_outcome` | Wandering (test issue, tighten the goal) or a very long flow (raise the budget); with `pending_outcome`, one more step would very likely have passed |
 | `unstable_page` | `thresholds.max_stale` consecutive decisions were stale: the page changed between the observation and Jev's answer every time, so nothing was executed | Environment: the page never holds still (animation, polling, a slow render). Raise `browser.quiet_ms` / `settle_ms`, or add a `setup` `wait_for` for the thing that keeps changing. Each stale step's `stale` says what moved |
 | `error` | Runner, browser or API failure (`trace.error`). `invalid operation answer: <reason>` means Jev's `operation` answer failed validation twice in a row for one step (the step carries `invalid_answer` and `retried`) | Environment issue; rerun before concluding anything |
 
@@ -149,6 +154,7 @@ lines in `error`. The exit code is 0 iff `suite.all_pass`.
       "outcome_seen": "app_error",                                   // a non-pass outcome was seen here (terminal with fail_fast)
       "pending_outcome": "item_added",                               // a pass was seen here; executed is a WAIT "confirming outcome ..." and the next step decides
       "outcome_unconfirmed": "item_added",                           // the recheck did not see it again: a transient sighting, the run went on
+      "final_look": true,                                            // the one step after the budget ran out: asked only the checks, the outcome and blocked_reason
       "assertions": [ ... ],                                         // on the confirming step: the assert block's results
       "low_confidence": false, "decision_confidence": 0.94, "repeat_count": 1,
       "page_changed": true,                                          // set once the next observation exists: did this step's action change the page signature?
@@ -161,7 +167,7 @@ lines in `error`. The exit code is 0 iff `suite.all_pass`.
       "latency_ms": { "jev": 131, "browser": 640 }
     }
   ],
-  "final": { "url": "...", "title": "...", "checks": { "cart_has_item": 0.97 }, "screenshot": "steps/final.png" }
+  "final": { "url": "...", "title": "...", "checks": { "cart_has_item": 0.97 }, "screenshot": "steps/final.png" }  // url and title masked like a step's
 }
 ```
 

@@ -107,7 +107,8 @@ python scripts/summarize_trace.py runs/<id>/<ts>/trace.json --step 7  # full det
 weakest decision on the way), `assertions`, `story`, and for `undetermined` the `reason` with a typed cause
 and a `suggested_verdict`. Open the step table only for `undetermined` or to sanity-check a surprising
 outcome. Then look at the pictures. With the default `screenshots: "key"` the terminal step and every flagged step
-(`never_violated`, `low_confidence`, `stale`, `repeat_count ≥ 2`) have a `steps/NNN.png` of the page Jev
+(`outcome_seen`, `pending_outcome`, `outcome_unconfirmed`, `never_violated`, `low_confidence`, `stale`,
+`repeat_count ≥ 2`) have a `steps/NNN.png` of the page Jev
 decided on (taken after its answer, before the action), a failed action leaves `NNN-failed.png`, and
 `steps/final.png` shows where the run ended. The step *before* a divergence usually has no picture: its
 element table and probabilities are in `--step N`, and `--screenshots all` gives every step a picture on a

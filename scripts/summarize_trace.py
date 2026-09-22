@@ -13,6 +13,17 @@ import json
 import os
 import sys
 
+# executed.action values that are not browser actions: terminal markers. Runner-inserted WAITs carry a `reason`.
+NON_ACTIONS = (None, "STOP", "DONE", "AUTO_DONE", "BLOCKED")
+
+
+def is_action_step(step: dict) -> bool:
+    """True for a step whose action changed the browser: not a terminal marker, not a runner-inserted WAIT.
+    The one definition behind trace.actions_executed, result.story / path_confidence (run_test) and the
+    per-action latencies (bench, run_suite)."""
+    ex = step.get("executed") or {}
+    return ex.get("action") not in NON_ACTIONS and not ex.get("reason")
+
 
 def _fmt_conf(step: dict) -> str:
     op = step.get("operation") or {}
@@ -57,6 +68,8 @@ def _flags(step: dict) -> str:
         f.append("OUTCOME:" + step["outcome_seen"])
     if step.get("pending_outcome"):
         f.append("PENDING:" + step["pending_outcome"])
+    if step.get("final_look"):
+        f.append("FINAL-LOOK")
     if step.get("outcome_unconfirmed"):
         f.append("UNCONFIRMED:" + step["outcome_unconfirmed"])
     if step.get("assertions") and not all(a.get("ok") for a in step["assertions"]):
@@ -196,9 +209,21 @@ def main(argv: list[str]) -> int:
         path = os.path.join(path, "trace.json")
     run_dir = os.path.dirname(path)
     if args.result or os.path.basename(path) == "result.json":
-        with open(os.path.join(run_dir, "result.json"), encoding="utf-8") as f:
-            print(json.dumps(json.load(f), indent=2, ensure_ascii=False))
-        return 0
+        result_path = os.path.join(run_dir, "result.json")
+        if os.path.exists(result_path):
+            with open(result_path, encoding="utf-8") as f:
+                print(json.dumps(json.load(f), indent=2, ensure_ascii=False))
+            return 0
+        trace_path = os.path.join(run_dir, "trace.json")
+        if os.path.exists(trace_path):  # a run recorded before the results contract, or a trace handed over alone
+            with open(trace_path, encoding="utf-8") as f:
+                embedded = json.load(f).get("result")
+            if embedded:
+                print(json.dumps(embedded, indent=2, ensure_ascii=False))
+                return 0
+        print(f"no result.json in {run_dir or '.'} (a run from before the results contract, or a trace on its own): "
+              f"read the step summary instead", file=sys.stderr)
+        return 1
     with open(path, encoding="utf-8") as f:
         trace = json.load(f)
     if args.step:

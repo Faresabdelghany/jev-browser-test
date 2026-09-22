@@ -61,17 +61,22 @@ The same flow, saying which endings Claude will accept back and what must be exa
   wrong behaviour you are testing for or the ticket reports (bug); a negative test (wrong password, invalid
   input) declares the rejection as its `pass` outcome and the success as the `bug`, with a `note` saying so.
 - **`assert`** — exact expectations checked **in code** on the final observation, free and non-model, the
-  "DONE is never proof" verifier: `url_matches` (a Playwright-style glob: `**` anything, `*` anything but
-  `/`), `text_contains` (substring of the whole page text), `field_value` (`{label, equals}`: a text field or
-  select whose label contains `label`, case-insensitive), `element_present` / `element_absent` (`{role,
-  name?}`, `name` a case-insensitive substring). A failed assertion makes the run `undetermined` with reason
-  `assert_failed` and the actual values, for Claude to decide whether the assertion or the app is wrong.
+  "DONE is never proof" verifier: `url_matches` (Playwright's URL glob, the same dialect as `setup.wait_for.url`:
+  `**` anything, `*` anything but `/`, `{a,b}` either, everything else literal, `?` included), `text_contains`
+  (substring of the whole page text), `field_value` (`{label, equals}`: a text field or select whose label
+  contains `label`, case-insensitive), `element_present` / `element_absent` (`{role, name?}`, `name` a
+  case-insensitive substring). The element assertions look at the **whole document**, not only at the
+  viewport-and-hit-tested table Jev chooses from, so a Logout link below the fold is present. Values are
+  compared against the real page and the recorded `actual` is masked, so a `secrets` value can be asserted
+  on. A failed assertion makes the run `undetermined` with reason `assert_failed` and the actual values, for
+  Claude to decide whether the assertion or the app is wrong.
 - **Compatibility.** Without `outcomes`, the runner synthesizes `goal_reached` (verdict `pass`, requires
   `done_when`) and one `never_<check>` per `never` check (verdict `bug`, at `never_true`), so an old spec
   keeps its meaning and gains a `result.json`; a fired `never` check now ends with status `outcome` and
-  `outcome: never_<check>`. With `outcomes` present, `done_when` and `never` still synthesize the same
-  two shapes unless you declare those names yourself, so a negative test drops `never` for the message it
-  expects. `checks` stay as **progress** signals (where did the run diverge).
+  `outcome: never_<check>`. With `outcomes` declared they are the whole contract: `done_when` and `never`
+  are ignored (a lone `never` Noul would otherwise race the outcome Choice at its own threshold and could end
+  a negative test as `bug`), and `outcomes` must then include a `pass` verdict. `checks` stay as **progress**
+  signals (where did the run diverge).
 
 ## Fields
 
@@ -85,8 +90,8 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `secrets` | list | `[]` | Names in `data` whose values must never appear in the trace or in the state sent to Jev. Shown as `<secret>` in `available_data_values`, and masked again in every observation (a secret typed into a plain text field or a contenteditable reads back as `<secret>`, not as the value) |
 | `setup` | list | `[]` | Deterministic Playwright steps run **before** Jev takes over (see below) |
 | `checks` | object | `{}` | `name -> statement` evaluated as a Noul (0–1) against the page at every step |
-| `done_when` | list | `[]` | Check names that must all be ≥ `thresholds.check_true` for the synthesized `goal_reached` pass outcome. Required unless `outcomes` declares an outcome with verdict `pass` |
-| `never` | list | `[]` | Check names that end the run as the synthesized `never_<check>` outcome (verdict `bug`) at `thresholds.never_true` |
+| `done_when` | list | `[]` | Check names that must all be ≥ `thresholds.check_true` for the synthesized `goal_reached` pass outcome. Required when no `outcomes` are declared; ignored when they are |
+| `never` | list | `[]` | Check names that end the run as the synthesized `never_<check>` outcome (verdict `bug`) at `thresholds.never_true`. Ignored when `outcomes` are declared |
 | `outcomes` | object | `{}` | `name -> {when, verdict, requires?, note?}`: the endings the run may return, see above. Names are identifiers; `none_yet` and the reserved question names are not allowed |
 | `assert` | list | `[]` | Exact expectations checked in code on the final page before a pass counts, see above |
 | `auto_done` | bool | `true` | Start the settle-and-recheck as soon as a pass outcome is seen, even if Jev has not chosen DONE (false: only Jev's DONE starts it) |
@@ -111,7 +116,7 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `browser.cdp_url` | URL | null | Attach to a browser that is already running instead of launching one (see below). `storage_state`, `headless` and `channel` are ignored when attached |
 | `observation.max_elements` | int | 200 | Cap on numbered elements per step (largest Choice Jev sees), 1–250. Elements beyond it are reported as `truncated_elements` and cannot be chosen |
 | `observation.max_text_chars` | int | 4000 | Visible text sent as state, viewport-first: what is on screen comes first, then the rest of the page, cut here (≥ 100) |
-| `observation.screenshots` | `true` \| `false` \| `"key"` | `"key"` | Which steps get a `steps/NNN.png`, taken after Jev's answer and before the action (so it shows the page Jev decided on). `"key"`: the terminal step and any step flagged `never_violated`, `low_confidence`, `stale` or `repeat_count ≥ 2`, plus `NNN-failed.png` after a failed action and `final.png`. `true`: every step. `false`: nothing. CLI: `--screenshots all|key|none`. Capture, not encoding, is the cost, so `"key"` is the default; rerun with `--screenshots all` when a human needs the picture of an ordinary step |
+| `observation.screenshots` | `true` \| `false` \| `"key"` | `"key"` | Which steps get a `steps/NNN.png`, taken after Jev's answer and before the action (so it shows the page Jev decided on). `"key"`: the terminal step and any step flagged `outcome_seen`, `pending_outcome`, `outcome_unconfirmed`, `never_violated`, `low_confidence`, `stale` or `repeat_count ≥ 2`, plus `NNN-failed.png` after a failed action and `final.png`. `true`: every step. `false`: nothing. CLI: `--screenshots all|key|none`. Capture, not encoding, is the cost, so `"key"` is the default; rerun with `--screenshots all` when a human needs the picture of an ordinary step |
 
 ## Attach to a running browser
 
@@ -183,8 +188,9 @@ Checks are Noul questions: Jev returns the probability that the statement is tru
   from each other on sight. Two outcomes true of the same page split the probability and neither is seen.
 - Name `data` keys after the field labels the app shows. Jev picks a key per field; `username`/`password`
   for fields labelled Username/Password is unambiguous, `user`/`pw` is a coin flip it will refuse to call.
-- Check names are identifiers (`cart_has_item`), not sentences, and must not be one of the reserved names
-  `operation`, `click_target`, `type_target`, `type_value`, `select_target`.
+- Check names are identifiers (`cart_has_item`), not sentences, and must not be one of the reserved question
+  names `operation`, `click_target`, `type_target`, `type_value`, `select_target`, `outcome`, `blocked_reason`,
+  `stuck_reason`, `evidence_line`, `evidence_present`.
 
 ## Writing the goal and data
 

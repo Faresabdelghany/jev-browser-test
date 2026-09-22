@@ -12,8 +12,6 @@
     "on_secure_page": "The page heading says 'Secure Area' and a Logout button is visible",
     "login_error": "A red flash message says the username or password is invalid"
   },
-  "done_when": ["logged_in", "on_secure_page"],
-  "never": ["login_error"],
   "outcomes": {
     "logged_in": {
       "when": "The page heading says 'Secure Area' and a green flash message says 'You logged into a secure area!'",
