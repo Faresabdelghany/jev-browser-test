@@ -366,9 +366,10 @@ def quoted_pick(picks: list[dict | None]) -> dict | None:
 
 
 def build_adjudication(name: str, when: str, lines: list[str]) -> tuple[dict, dict, list[str]]:
-    """The final adjudication request (spec §5.4): the terminal page's text as numbered lines plus the seen
-    outcome's statement; `evidence_line` chooses the line that states it (or none), `evidence_present`
-    is the Noul over the statement. Code copies the chosen line verbatim: selection is how Jev quotes.
+    """The final adjudication request (spec §5.4): the terminal page's text as numbered lines (in the state, once)
+    plus the seen outcome's statement; `evidence_line` chooses the line that states it (or none) among criteria
+    that point at the lines by id, `evidence_present` is the Noul over the statement. Code copies the chosen line
+    verbatim: selection is how Jev quotes.
     A statement with several sentences (`split_statement`) gets one Choice per sentence in the same request,
     `evidence_line_1` … `evidence_line_n`, each over the same lines: a compound statement rarely has a
     single line that states all of it, one of its sentences usually does. The caller quotes the most
@@ -376,18 +377,20 @@ def build_adjudication(name: str, when: str, lines: list[str]) -> tuple[dict, di
     lines = [ln[:300] for ln in lines[:ADJUDICATION_MAX_LINES]]
     ids = [str(i + 1) for i in range(len(lines))]
     state = {"outcome": name, "statement": when, "lines": [{"id": i, "text": t} for i, t in zip(ids, lines)]}
-    criteria = {i: t for i, t in zip(ids, lines)}
+    # Lever F3: each line is sent once, in state.lines; the criteria point at it by id (until F3 every criterion
+    # repeated its line's text: a second copy of the whole page in the same request, ~2.4k tokens on a long article).
+    criteria = {i: f"line {i} of state.lines" for i in ids}
     criteria[ADJUDICATION_NONE] = "No line of the page states this outcome"
     sentences = split_statement(when)
     questions: dict = {}
     if len(sentences) == 1:
-        questions[EVIDENCE_LINE] = choice({"question": "Which numbered line of the page states the outcome?", "outcome": name,
-                                           "statement": when}, criteria)
+        questions[EVIDENCE_LINE] = choice({"question": "Which line of the page (state.lines, by id) states the outcome?",
+                                           "outcome": name, "statement": when}, criteria)
     else:
         for n, sentence in enumerate(sentences, 1):
             questions[f"{EVIDENCE_LINE}_{n}"] = choice(
-                {"question": "Which numbered line of the page states this sentence of the outcome?", "outcome": name,
-                 "statement": when, "sentence": sentence}, criteria)
+                {"question": "Which line of the page (state.lines, by id) states this sentence of the outcome?",
+                 "outcome": name, "statement": when, "sentence": sentence}, criteria)
     questions["evidence_present"] = noul(when)
     return state, questions, ids + [ADJUDICATION_NONE]
 

@@ -267,6 +267,16 @@ def note_invalid(step: dict, text: str) -> None:
     step["invalid_answer"] = f"{step['invalid_answer']}; {text}" if step.get("invalid_answer") else text
 
 
+def add_usage(a: dict | None, b: dict | None) -> dict | None:
+    """The token usage of two requests made for one step (a retry, the reason follow-up), added up."""
+    if not a or not b:
+        return b or a
+    out = dict(a)
+    for k, v in b.items():
+        out[k] = (a.get(k) or 0) + v if isinstance(v, (int, float)) and isinstance(a.get(k, 0), (int, float)) else v
+    return out
+
+
 def latency_of(resp: dict, started: float) -> int:
     """The Jev round trip in ms: the client's own measurement when it has one, else ours."""
     return resp.get("latency_ms", int((time.perf_counter() - started) * 1000))
@@ -412,6 +422,7 @@ def adjudicate(page, jev, name: str, when: str, secrets: list[str] | None = None
     try:
         resp = jev.system_one(state, questions)
         rec["latency_ms"] = latency_of(resp, t0)
+        rec["usage"] = resp.get("usage")
         answers = resp["answers"] if isinstance(resp.get("answers"), dict) else {}
         picks: list[dict | None] = []
         invalid = []
@@ -657,6 +668,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         try:
             resp = jev.system_one(state, questions)
             step.setdefault("latency_ms", {})["jev"] = step.get("latency_ms", {}).get("jev", 0) + latency_of(resp, t_r)
+            step["usage"] = add_usage(step.get("usage"), resp.get("usage"))
             answers = resp["answers"] if isinstance(resp.get("answers"), dict) else {}
             got = read_choice(answers, "blocked_reason", offered["blocked_reason"])
             if got is None:
@@ -812,6 +824,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     t_jev = time.perf_counter()
                     resp = jev.system_one(state, questions)
                     step["latency_ms"] = {"jev": latency_of(resp, t_jev)}
+                    step["usage"] = resp.get("usage")  # this request's tokens (a retry or the reason follow-up adds to it)
                     answers = resp["answers"]
                     op_problem = validate_choice(answers.get("operation"), offered["operation"])
                     if op_problem:
@@ -823,6 +836,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                         t_jev = time.perf_counter()
                         resp = jev.system_one(state, questions)
                         step["latency_ms"]["jev"] += latency_of(resp, t_jev)
+                        step["usage"] = add_usage(step.get("usage"), resp.get("usage"))
                         answers = resp["answers"]
                         op_problem = validate_choice(answers.get("operation"), offered["operation"])
                         if op_problem:
@@ -1027,6 +1041,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     t_jev = time.perf_counter()
                     resp = jev.system_one(build_state(spec, obs, n, history), last_look)
                     step["latency_ms"] = {"jev": latency_of(resp, t_jev)}
+                    step["usage"] = resp.get("usage")
                     checks = read_checks(resp["answers"], spec)
                     if "outcome" in last_look:
                         outcome_answer = read_outcome(resp["answers"], meta["offered"]["outcome"])

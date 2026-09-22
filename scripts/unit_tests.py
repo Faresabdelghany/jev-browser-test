@@ -995,6 +995,9 @@ class OutcomePolicyTests(unittest.TestCase):
         self.assertEqual((state["outcome"], state["statement"]), ("bad_pw", "A red flash says the password is invalid"))
         self.assertEqual(offered, [str(i) for i in range(1, 201)] + ["none"])
         self.assertEqual(list(questions["evidence_line"]["criteria"]), offered)
+        self.assertEqual(questions["evidence_line"]["criteria"]["1"], "line 1 of state.lines")  # a pointer: the text is sent once (lever F3)
+        self.assertEqual(questions["evidence_line"]["criteria"]["none"], "No line of the page states this outcome")
+        self.assertEqual(json.dumps(questions).count("line 0"), 0)
         self.assertEqual(questions["evidence_present"], {"type": "noul", "instructions": "A red flash says the password is invalid"})
 
     def test_split_statement(self) -> None:

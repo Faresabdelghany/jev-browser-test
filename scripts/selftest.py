@@ -479,8 +479,8 @@ def observer_check(url: str) -> list[str]:
         class PickEditor:
             def system_one(self, state, questions):
                 self.state = state
-                crit = questions["evidence_line"]["criteria"]
-                pick = next((k for k, v in crit.items() if "note" in v), "none")
+                crit = questions["evidence_line"]["criteria"]  # pointers by id (lever F3): the text is in state.lines
+                pick = next((ln["id"] for ln in state["lines"] if "note" in ln["text"]), "none")
                 return {"answers": {"evidence_line": {"type": "choice", "choice": pick, "confidence": 0.9,
                                                       "probabilities": {k: (1.0 if k == pick else 0.0) for k in crit}},
                                     "evidence_present": {"type": "noul", "noul": 0.9}}, "usage": {}, "latency_ms": 1}
