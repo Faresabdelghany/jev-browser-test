@@ -117,7 +117,7 @@ clickables that carry no role (an avatar menu, a card, a table row). A `<label>`
 in the table is skipped here: it adds nothing but a tempting no-op click (measured: with the structured
 state Jev clicked "Username" before typing into it). Anonymous controls get a `context`
 (the text of their row / list item / label) so `checkbox ""` in a table reads
-`checkbox "" in "1000-05-1100L Residual 1100L Nile Bakery"`. Each element records
+`checkbox "" in "SKU-1005 Gadget 6-pack Acme Ltd"`. Each element records
 `via: "semantic" | "label" | "cursor"`.
 
 Executing a click on a control that something sits on top of dispatches the click on the control itself

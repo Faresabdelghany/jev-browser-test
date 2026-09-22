@@ -114,10 +114,11 @@ Checks are Noul questions: Jev returns the probability that the statement is tru
   flow-specific ones (`"The cart total is $0.00"`, `"A field shows a red validation message"`).
 - Prefer wording the app actually uses. If the success page says "Thanks for your order", say so.
 - Anchor a check on text that exists **only** in the state you mean, and avoid widget nouns the app uses
-  elsewhere. Measured: "An account menu is open" read 0.44 long after the menu closed, and "A dropdown menu
-  listing 'Impersonate' is visible" still read ~0.4 closed, because the app's sidebar is 17 permanent
-  `menuitem`s, so "menu … is visible" is half-true on every page. Naming two or three strings unique to the
-  popup ("a small popup over the page with the entries 'Impersonate' and 'Logout'") is what discriminates.
+  elsewhere. Measured on an admin app (entries anonymised): "An account menu is open" read 0.44 long after
+  the menu closed, and "A dropdown menu listing 'Switch account' is visible" still read ~0.4 closed, because
+  the app's sidebar is a long list of permanent `menuitem`s, so "menu … is visible" is half-true on every
+  page. Naming two or three strings unique to the popup ("a small popup over the page with the entries
+  'Switch account' and 'Logout'") is what discriminates.
 - A `never` check that hovers at 0.7–0.8 for several steps is half-matching the page ("username or password
   is invalid" against a page saying "Your password is invalid!"). Fix the wording, not the threshold.
 - Name `data` keys after the field labels the app shows. Jev picks a key per field; `username`/`password`

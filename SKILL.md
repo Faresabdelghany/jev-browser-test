@@ -31,7 +31,7 @@ Use plain Playwright (or a `setup` step) for anything with a stable selector tha
 testing: login, dismissing a known banner, seeding data. Jev adds latency there and no value. Jev earns
 its place where a human would have to look at the screen and decide:
 
-- the flow is described as a goal, not a script ("create a pickup order for Nile Bakery and save it");
+- the flow is described as a goal, not a script ("create an order for Acme Ltd and save it");
 - the UI changes often, so selector-based tests keep breaking;
 - the assertion is fuzzy ("a success toast confirms the save", "the error explains the card was declined");
 - you want to explore a screen for breakage without knowing its structure in advance.

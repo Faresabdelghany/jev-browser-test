@@ -516,7 +516,7 @@ class CriteriaTests(unittest.TestCase):
         {"idx": 1, "role": "textbox", "name": "Password"},
         {"idx": 2, "role": "checkbox", "name": "", "checked": True, "context": "Remember me"},
         {"idx": 3, "role": "link", "name": "Help", "value": None},
-        {"idx": 4, "role": "clickable", "name": "", "text": "Nile row", "context": "1000-05 Residual Nile"},
+        {"idx": 4, "role": "clickable", "name": "", "text": "Acme row", "context": "SKU-1005 Gadget Acme Ltd"},
         {"idx": 5, "role": "select", "name": "Size", "value": "S", "options": [{"i": 0, "text": "S"}, {"i": 1, "text": "M"}, {"i": 2, "text": "L", "disabled": True}]},
     ]
 
@@ -530,8 +530,8 @@ class CriteriaTests(unittest.TestCase):
         self.assertEqual(typ["1"], {"element": '[1] textbox "Password"', "role": "textbox", "current_value": ""})
         self.assertEqual(click["2"], {"element": '[2] checkbox ""', "role": "checkbox", "checked": "true", "context": "Remember me"})
         self.assertEqual(click["3"], {"element": '[3] link "Help"', "role": "link"})  # no empty fields
-        self.assertEqual(click["4"], {"element": '[4] clickable ""', "role": "clickable", "text": "Nile row",
-                                      "context": "1000-05 Residual Nile"})
+        self.assertEqual(click["4"], {"element": '[4] clickable ""', "role": "clickable", "text": "Acme row",
+                                      "context": "SKU-1005 Gadget Acme Ltd"})
         self.assertNotIn("5", click)  # a select is a SELECT target, not a click target
 
     def test_fields_carry_current_value_only_and_buttons_no_value(self) -> None:

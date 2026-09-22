@@ -1,11 +1,11 @@
 {
-  "id": "orders-create-pickup",
+  "id": "orders-create",
   "start_url": "${APP_BASE_URL}/login",
-  "goal": "From the orders list, create a new pickup order for the customer 'Nile Bakery', choose the 'Cardboard 660L' container type, set quantity 2 and save. Finish when the new order appears in the list.",
+  "goal": "From the orders list, create a new order for the customer 'Acme Ltd', choose the product 'Widget 12-pack', set quantity 2 and save. Finish when the new order appears in the list.",
   "notes": "The app shows a 'Got it' onboarding tooltip on first visit; dismiss it. Dropdowns are custom widgets: click the field, then click the option text.",
   "data": {
-    "customer_name": "Nile Bakery",
-    "container_type": "Cardboard 660L",
+    "customer_name": "Acme Ltd",
+    "product": "Widget 12-pack",
     "quantity": "2"
   },
   "secrets": [],
@@ -13,11 +13,11 @@
     { "action": "fill",  "selector": "input[name=email]",    "value": "${TEST_USER_EMAIL}" },
     { "action": "fill",  "selector": "input[name=password]", "value": "${TEST_USER_PASSWORD}" },
     { "action": "press", "selector": "input[name=password]", "key": "Enter" },
-    { "action": "wait",  "ms": 1500 },
-    { "action": "goto",  "url": "${APP_BASE_URL}/orders" }
+    { "action": "wait_for", "url": "**/app/**", "timeout_ms": 15000 },
+    { "action": "goto",  "url": "${APP_BASE_URL}/app/orders" }
   ],
   "checks": {
-    "order_in_list":        "The orders list shows a pickup order for Nile Bakery with 2 x Cardboard 660L",
+    "order_in_list":        "The orders list shows an order for Acme Ltd with 2 x Widget 12-pack",
     "success_toast":        "A success notification confirms the order was created or saved",
     "validation_error":     "A form field shows a red validation message or the save button reports an error",
     "server_error_visible": "An error page, stack trace, 'something went wrong' or 500 message is visible",
@@ -28,5 +28,5 @@
   "budget": { "max_steps": 30, "max_seconds": 300 },
   "thresholds": { "check_true": 0.8, "never_true": 0.85, "min_confidence": 0.5 },
   "browser": { "headless": true, "viewport": [1366, 850], "settle_ms": 800 },
-  "observation": { "max_elements": 70, "screenshots": true }
+  "observation": { "screenshots": true }
 }

@@ -112,9 +112,9 @@ CONTROLS_PAGE = """<!doctype html><html><head><title>Controls</title><style>
 </style></head><body>
 <table><tbody>
 <tr class="ant-table-row"><td><label class="ant-checkbox-wrapper"><span class="ant-checkbox"><input class="ant-checkbox-input" type="checkbox"><span class="ant-checkbox-inner"></span></span></label></td>
-    <td><a href="#c1">1000-04-660L</a></td><td>Cardboard 660L</td><td>Provas2 Depot</td></tr>
+    <td><a href="#c1">SKU-1004</a></td><td>Widget 12-pack</td><td>Warehouse A</td></tr>
 <tr class="ant-table-row"><td><label class="ant-checkbox-wrapper"><span class="ant-checkbox"><input class="ant-checkbox-input" type="checkbox"><span class="ant-checkbox-inner"></span></span></label></td>
-    <td><a href="#c2">1000-05-1100L</a></td><td>Residual 1100L</td><td>Nile Bakery</td></tr>
+    <td><a href="#c2">SKU-1005</a></td><td>Gadget 6-pack</td><td>Acme Ltd</td></tr>
 </tbody></table>
 <div><input type="checkbox" class="custom-control-input" id="terms"><label class="custom-control-label" for="terms">I accept the terms</label></div>
 <div><span class="mui-box"><svg viewBox="0 0 20 20"><rect x="2" y="2" width="16" height="16" fill="none" stroke="#666"/></svg><input type="checkbox" aria-label="Notify me"></span></div>
@@ -311,7 +311,7 @@ def observer_check(url: str) -> list[str]:
         boxes = [e for e in obs["elements"] if e["role"] == "checkbox"]
         if len(boxes) != 4:
             failures.append(f"expected 4 checkboxes in the table, got {len(boxes)}: {[e['name'] for e in boxes]}")
-        if not any("Nile Bakery" in (e.get("context") or "") for e in boxes):
+        if not any("Acme Ltd" in (e.get("context") or "") for e in boxes):
             failures.append("antd row checkbox has no row context")
         if not any(e["name"] == "I accept the terms" for e in boxes):
             failures.append("offscreen-input label not offered as a checkbox")
@@ -319,7 +319,7 @@ def observer_check(url: str) -> list[str]:
             failures.append("sr-only input leaked into the table")
         if any(e.get("value") == "on" for e in boxes):
             failures.append("checkbox value noise")
-        for key in ("Notify me", "Nile Bakery", "terms"):
+        for key in ("Notify me", "Acme Ltd", "terms"):
             e = next((e for e in boxes if key in e["name"] or key in (e.get("context") or "")), None)
             if not e:
                 continue
