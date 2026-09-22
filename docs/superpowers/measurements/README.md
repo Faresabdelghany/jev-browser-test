@@ -65,6 +65,42 @@ two A/B batches taken minutes earlier (`2026-09-22-track1-ab-structured-no-rules
 loosened to get green, and Track 2's outcome Choice is the designed fix (a Choice compares the endings
 instead of thresholding one Noul).
 
+## Track 2 (2026-09-22): the results contract
+
+Both smoke specs, 5 repeats, medians. Before = commit `5954577` (Track 1 plus the review fixes; the specs
+still written with `done_when` / `never`), after = commit `1aec493` (outcomes + assert in the runner and
+in both specs). Files: `2026-09-22-track2-before.json`, `2026-09-22-track2-after.json`.
+
+| spec | measure | before | after |
+|---|---|---:|---:|
+| `smoke-login` | result | passed 5/5 | `logged_in` (pass) 5/5, confirmed, 3/3 assertions |
+| | wall-clock | 4,825 ms | 6,030 ms (+25%) |
+| | Jev requests | 4 | 6 (+1 confirmation step, +1 adjudication) |
+| | input tokens per run | 5,126 | 8,932 (+74%: the outcome and blocked_reason Choices every step) |
+| | decision confidence (median) | 0.96 | 0.96 |
+| | Jev request, warm | 285 ms | 307 ms |
+| | browser per action | 151 ms | 146 ms |
+| `smoke-login-badpw` | result | never_violated 2/5, low_confidence 3/5 | `bad_credentials` (pass, negative test) 5/5, confirmed, 3/3 assertions |
+| | first sighting of the message | step 4–6 or never (threshold straddled) | step 4 in 5/5 runs (the first step it is on screen) |
+| | wall-clock | 6,439 ms | 6,062 ms (−6%) |
+| | Jev requests | 6 | 6 |
+| | input tokens per run | 8,564 | 9,774 |
+| | decision confidence (median) | 0.41 | 0.93 |
+
+Acceptance (spec §5.8): `smoke-login-badpw` returns `bad_credentials` at the first step the message is
+visible, no hovering under a threshold ✓ (5/5; the same message read 0.73–0.84 as a lone `never` Noul and
+ended 3 of 5 before-runs `low_confidence`); `smoke-login` returns `logged_in`, confirmed, all assertions ok
+✓ (5/5); old-style specs unchanged in status ✓ (the selftest's `done_when` / `never` spec still ends
+`passed` and, on the error page, in the synthesized `never_error_visible` outcome with exit 1); selftest OK ✓.
+
+The price is written down rather than hidden: the pass path costs one more step (the settle-and-recheck
+that used to apply only to Jev's DONE now applies to every pass sighting, +`settle_ms` and one request)
+and one adjudication request, and every request carries the outcome Choice and the blocked_reason Choice,
+which is where the 74% more input tokens go. On the demo login that is +1.2 s per passing run. What it
+buys: the run comes back as one declared outcome with the page's own line as evidence, the negative test
+is decided on the first step its message appears, and the hesitant post-error steps (0.04–0.12 operation
+confidence, three refused WAITs) are gone.
+
 ### Per-item A/B (3 repeats each, both specs)
 
 `2026-09-21-track1-after-all-items.json` is the first after-measurement with every Track 1 item on: it

@@ -1,0 +1,596 @@
+{
+  "label": "track2-before",
+  "timestamp": "2026-09-22T09:57:21+03:00",
+  "git_commit": null,
+  "repeat": 5,
+  "run_args": [],
+  "env": {},
+  "specs": {
+    "smoke-login": {
+      "spec": "specs/smoke-login.json",
+      "runs": [
+        {
+          "out_dir": "/private/tmp/claude-501/-Users-fares-Downloads-jev-browser-test/0a38b4c5-666a-411e-adbd-b06c037e2420/scratchpad/bench-before/runs/bench/smoke-login/20260922-095721-01",
+          "exit_code": 0,
+          "wall_ms": 5295,
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 5191,
+          "jev_ms": 1688,
+          "browser_ms": 789,
+          "requests": 4,
+          "input_tokens": 5126,
+          "output_tokens": 739,
+          "model": "jev-1.13.0",
+          "steps": 4,
+          "actions_executed": 3,
+          "decision_confidence": 0.94,
+          "min_decision_confidence": 0.92,
+          "step_confidences": [
+            1.0,
+            0.92,
+            0.94
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 805,
+          "jev_warm_ms": 291,
+          "browser_per_action_ms": 160,
+          "step_jev_ms": [
+            805,
+            291,
+            280,
+            312
+          ],
+          "step_browser_ms": [
+            160,
+            151,
+            478,
+            null
+          ],
+          "action_browser_ms": [
+            160,
+            151,
+            478
+          ],
+          "launch_ms": 276,
+          "navigation_ms": 2051,
+          "setup_ms": 0
+        },
+        {
+          "out_dir": "/private/tmp/claude-501/-Users-fares-Downloads-jev-browser-test/0a38b4c5-666a-411e-adbd-b06c037e2420/scratchpad/bench-before/runs/bench/smoke-login/20260922-095721-02",
+          "exit_code": 0,
+          "wall_ms": 4844,
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 4765,
+          "jev_ms": 1686,
+          "browser_ms": 771,
+          "requests": 4,
+          "input_tokens": 5126,
+          "output_tokens": 739,
+          "model": "jev-1.13.0",
+          "steps": 4,
+          "actions_executed": 3,
+          "decision_confidence": 0.96,
+          "min_decision_confidence": 0.93,
+          "step_confidences": [
+            1.0,
+            0.93,
+            0.96
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 783,
+          "jev_warm_ms": 304,
+          "browser_per_action_ms": 152,
+          "step_jev_ms": [
+            783,
+            326,
+            273,
+            304
+          ],
+          "step_browser_ms": [
+            152,
+            145,
+            474,
+            null
+          ],
+          "action_browser_ms": [
+            152,
+            145,
+            474
+          ],
+          "launch_ms": 95,
+          "navigation_ms": 1985,
+          "setup_ms": 0
+        },
+        {
+          "out_dir": "/private/tmp/claude-501/-Users-fares-Downloads-jev-browser-test/0a38b4c5-666a-411e-adbd-b06c037e2420/scratchpad/bench-before/runs/bench/smoke-login/20260922-095721-03",
+          "exit_code": 0,
+          "wall_ms": 4795,
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 4715,
+          "jev_ms": 1616,
+          "browser_ms": 747,
+          "requests": 4,
+          "input_tokens": 5126,
+          "output_tokens": 739,
+          "model": "jev-1.13.0",
+          "steps": 4,
+          "actions_executed": 3,
+          "decision_confidence": 0.96,
+          "min_decision_confidence": 0.9,
+          "step_confidences": [
+            1.0,
+            0.9,
+            0.96
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 778,
+          "jev_warm_ms": 278,
+          "browser_per_action_ms": 140,
+          "step_jev_ms": [
+            778,
+            273,
+            287,
+            278
+          ],
+          "step_browser_ms": [
+            140,
+            134,
+            473,
+            null
+          ],
+          "action_browser_ms": [
+            140,
+            134,
+            473
+          ],
+          "launch_ms": 97,
+          "navigation_ms": 1996,
+          "setup_ms": 0
+        },
+        {
+          "out_dir": "/private/tmp/claude-501/-Users-fares-Downloads-jev-browser-test/0a38b4c5-666a-411e-adbd-b06c037e2420/scratchpad/bench-before/runs/bench/smoke-login/20260922-095721-04",
+          "exit_code": 0,
+          "wall_ms": 4700,
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 4623,
+          "jev_ms": 1589,
+          "browser_ms": 774,
+          "requests": 4,
+          "input_tokens": 5126,
+          "output_tokens": 739,
+          "model": "jev-1.13.0",
+          "steps": 4,
+          "actions_executed": 3,
+          "decision_confidence": 0.95,
+          "min_decision_confidence": 0.93,
+          "step_confidences": [
+            1.0,
+            0.93,
+            0.95
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 738,
+          "jev_warm_ms": 285,
+          "browser_per_action_ms": 150,
+          "step_jev_ms": [
+            738,
+            287,
+            285,
+            279
+          ],
+          "step_browser_ms": [
+            143,
+            150,
+            481,
+            null
+          ],
+          "action_browser_ms": [
+            143,
+            150,
+            481
+          ],
+          "launch_ms": 89,
+          "navigation_ms": 1925,
+          "setup_ms": 0
+        },
+        {
+          "out_dir": "/private/tmp/claude-501/-Users-fares-Downloads-jev-browser-test/0a38b4c5-666a-411e-adbd-b06c037e2420/scratchpad/bench-before/runs/bench/smoke-login/20260922-095721-05",
+          "exit_code": 0,
+          "wall_ms": 4825,
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 4742,
+          "jev_ms": 1585,
+          "browser_ms": 753,
+          "requests": 4,
+          "input_tokens": 5126,
+          "output_tokens": 739,
+          "model": "jev-1.13.0",
+          "steps": 4,
+          "actions_executed": 3,
+          "decision_confidence": 0.96,
+          "min_decision_confidence": 0.89,
+          "step_confidences": [
+            0.99,
+            0.89,
+            0.96
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 723,
+          "jev_warm_ms": 281,
+          "browser_per_action_ms": 143,
+          "step_jev_ms": [
+            723,
+            304,
+            277,
+            281
+          ],
+          "step_browser_ms": [
+            143,
+            138,
+            472,
+            null
+          ],
+          "action_browser_ms": [
+            143,
+            138,
+            472
+          ],
+          "launch_ms": 100,
+          "navigation_ms": 2044,
+          "setup_ms": 0
+        }
+      ],
+      "medians": {
+        "wall_ms": 4825,
+        "duration_ms": 4742,
+        "jev_ms": 1616,
+        "browser_ms": 771,
+        "requests": 4,
+        "input_tokens": 5126,
+        "output_tokens": 739,
+        "steps": 4,
+        "actions_executed": 3,
+        "decision_confidence": 0.96,
+        "min_decision_confidence": 0.92,
+        "stale_steps": 0,
+        "jev_first_ms": 778,
+        "jev_warm_ms": 285,
+        "browser_per_action_ms": 150,
+        "launch_ms": 97,
+        "navigation_ms": 1996,
+        "setup_ms": 0,
+        "decision_confidence_all_steps": 0.96,
+        "jev_warm_ms_all_steps": 285,
+        "browser_per_action_ms_all_steps": 151
+      },
+      "status_counts": {
+        "passed": 5
+      },
+      "outcome_counts": {},
+      "stale_steps_total": 0,
+      "passes": 5
+    },
+    "smoke-login-badpw": {
+      "spec": "specs/smoke-login-badpw.json",
+      "runs": [
+        {
+          "out_dir": "/private/tmp/claude-501/-Users-fares-Downloads-jev-browser-test/0a38b4c5-666a-411e-adbd-b06c037e2420/scratchpad/bench-before/runs/bench/smoke-login-badpw/20260922-095721-01",
+          "exit_code": 1,
+          "wall_ms": 5549,
+          "status": "never_violated",
+          "pass": false,
+          "error": null,
+          "duration_ms": 5468,
+          "jev_ms": 1875,
+          "browser_ms": 1259,
+          "requests": 5,
+          "input_tokens": 6980,
+          "output_tokens": 1009,
+          "model": "jev-1.13.0",
+          "steps": 5,
+          "actions_executed": 3,
+          "decision_confidence": 0.7,
+          "min_decision_confidence": 0.02,
+          "step_confidences": [
+            0.88,
+            0.71,
+            0.69,
+            0.02
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 1,
+          "jev_first_ms": 761,
+          "jev_warm_ms": 276.5,
+          "browser_per_action_ms": 145,
+          "step_jev_ms": [
+            761,
+            261,
+            300,
+            271,
+            282
+          ],
+          "step_browser_ms": [
+            137,
+            145,
+            470,
+            507,
+            null
+          ],
+          "action_browser_ms": [
+            137,
+            145,
+            470
+          ],
+          "launch_ms": 82,
+          "navigation_ms": 1955,
+          "setup_ms": 0
+        },
+        {
+          "out_dir": "/private/tmp/claude-501/-Users-fares-Downloads-jev-browser-test/0a38b4c5-666a-411e-adbd-b06c037e2420/scratchpad/bench-before/runs/bench/smoke-login-badpw/20260922-095721-02",
+          "exit_code": 1,
+          "wall_ms": 6288,
+          "status": "never_violated",
+          "pass": false,
+          "error": null,
+          "duration_ms": 6207,
+          "jev_ms": 2009,
+          "browser_ms": 1299,
+          "requests": 5,
+          "input_tokens": 6980,
+          "output_tokens": 1009,
+          "model": "jev-1.13.0",
+          "steps": 5,
+          "actions_executed": 3,
+          "decision_confidence": 0.755,
+          "min_decision_confidence": 0.23,
+          "step_confidences": [
+            0.88,
+            0.78,
+            0.73,
+            0.23
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 1,
+          "jev_first_ms": 785,
+          "jev_warm_ms": 303.5,
+          "browser_per_action_ms": 153,
+          "step_jev_ms": [
+            785,
+            320,
+            300,
+            307,
+            297
+          ],
+          "step_browser_ms": [
+            149,
+            153,
+            488,
+            509,
+            null
+          ],
+          "action_browser_ms": [
+            149,
+            153,
+            488
+          ],
+          "launch_ms": 93,
+          "navigation_ms": 2512,
+          "setup_ms": 0
+        },
+        {
+          "out_dir": "/private/tmp/claude-501/-Users-fares-Downloads-jev-browser-test/0a38b4c5-666a-411e-adbd-b06c037e2420/scratchpad/bench-before/runs/bench/smoke-login-badpw/20260922-095721-03",
+          "exit_code": 1,
+          "wall_ms": 6593,
+          "status": "low_confidence",
+          "pass": false,
+          "error": null,
+          "duration_ms": 6516,
+          "jev_ms": 2365,
+          "browser_ms": 1779,
+          "requests": 6,
+          "input_tokens": 8564,
+          "output_tokens": 1212,
+          "model": "jev-1.13.0",
+          "steps": 6,
+          "actions_executed": 3,
+          "decision_confidence": 0.415,
+          "min_decision_confidence": 0.04,
+          "step_confidences": [
+            0.92,
+            0.7,
+            0.74,
+            0.04,
+            0.13,
+            0.09
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 3,
+          "jev_first_ms": 734,
+          "jev_warm_ms": 315,
+          "browser_per_action_ms": 151,
+          "step_jev_ms": [
+            734,
+            290,
+            325,
+            409,
+            292,
+            315
+          ],
+          "step_browser_ms": [
+            151,
+            133,
+            472,
+            514,
+            509,
+            null
+          ],
+          "action_browser_ms": [
+            151,
+            133,
+            472
+          ],
+          "launch_ms": 80,
+          "navigation_ms": 1960,
+          "setup_ms": 0
+        },
+        {
+          "out_dir": "/private/tmp/claude-501/-Users-fares-Downloads-jev-browser-test/0a38b4c5-666a-411e-adbd-b06c037e2420/scratchpad/bench-before/runs/bench/smoke-login-badpw/20260922-095721-04",
+          "exit_code": 1,
+          "wall_ms": 6439,
+          "status": "low_confidence",
+          "pass": false,
+          "error": null,
+          "duration_ms": 6359,
+          "jev_ms": 2249,
+          "browser_ms": 1792,
+          "requests": 6,
+          "input_tokens": 8564,
+          "output_tokens": 1212,
+          "model": "jev-1.13.0",
+          "steps": 6,
+          "actions_executed": 3,
+          "decision_confidence": 0.405,
+          "min_decision_confidence": 0.01,
+          "step_confidences": [
+            0.92,
+            0.76,
+            0.68,
+            0.13,
+            0.01,
+            0.03
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 3,
+          "jev_first_ms": 725,
+          "jev_warm_ms": 304,
+          "browser_per_action_ms": 149,
+          "step_jev_ms": [
+            725,
+            291,
+            328,
+            292,
+            309,
+            304
+          ],
+          "step_browser_ms": [
+            143,
+            149,
+            472,
+            519,
+            509,
+            null
+          ],
+          "action_browser_ms": [
+            143,
+            149,
+            472
+          ],
+          "launch_ms": 103,
+          "navigation_ms": 1880,
+          "setup_ms": 0
+        },
+        {
+          "out_dir": "/private/tmp/claude-501/-Users-fares-Downloads-jev-browser-test/0a38b4c5-666a-411e-adbd-b06c037e2420/scratchpad/bench-before/runs/bench/smoke-login-badpw/20260922-095721-05",
+          "exit_code": 1,
+          "wall_ms": 6558,
+          "status": "low_confidence",
+          "pass": false,
+          "error": null,
+          "duration_ms": 6478,
+          "jev_ms": 2281,
+          "browser_ms": 1778,
+          "requests": 6,
+          "input_tokens": 8564,
+          "output_tokens": 1212,
+          "model": "jev-1.13.0",
+          "steps": 6,
+          "actions_executed": 3,
+          "decision_confidence": 0.415,
+          "min_decision_confidence": 0.01,
+          "step_confidences": [
+            0.93,
+            0.7,
+            0.74,
+            0.11,
+            0.01,
+            0.13
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 3,
+          "jev_first_ms": 792,
+          "jev_warm_ms": 308,
+          "browser_per_action_ms": 142,
+          "step_jev_ms": [
+            792,
+            280,
+            275,
+            308,
+            318,
+            308
+          ],
+          "step_browser_ms": [
+            141,
+            142,
+            463,
+            520,
+            512,
+            null
+          ],
+          "action_browser_ms": [
+            141,
+            142,
+            463
+          ],
+          "launch_ms": 100,
+          "navigation_ms": 1974,
+          "setup_ms": 0
+        }
+      ],
+      "medians": {
+        "wall_ms": 6439,
+        "duration_ms": 6359,
+        "jev_ms": 2249,
+        "browser_ms": 1778,
+        "requests": 6,
+        "input_tokens": 8564,
+        "output_tokens": 1212,
+        "steps": 6,
+        "actions_executed": 3,
+        "decision_confidence": 0.415,
+        "min_decision_confidence": 0.02,
+        "stale_steps": 0,
+        "jev_first_ms": 761,
+        "jev_warm_ms": 304,
+        "browser_per_action_ms": 149,
+        "launch_ms": 93,
+        "navigation_ms": 1960,
+        "setup_ms": 0,
+        "decision_confidence_all_steps": 0.695,
+        "jev_warm_ms_all_steps": 300,
+        "browser_per_action_ms_all_steps": 149
+      },
+      "status_counts": {
+        "never_violated": 2,
+        "low_confidence": 3
+      },
+      "outcome_counts": {},
+      "stale_steps_total": 0,
+      "passes": 0
+    }
+  }
+}
