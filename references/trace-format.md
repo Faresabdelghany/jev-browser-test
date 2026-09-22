@@ -57,15 +57,22 @@ spec or environment problem (no result is written).
 
 ## Suite results (`scripts/run_suite.py`)
 
-A suite run writes `results.json` and `results.md` into `runs/suite/<ts>/`:
+A suite run writes `results.json` and `results.md` into `runs/suite/<ts>/`. Every path under `specs` (the
+`spec` file, each run's `out_dir`, `trace` and `result`) is **relative to the directory holding
+`results.json`**, so the files stay meaningful when the directory is moved, copied or committed; the top-level
+`out_dir` is the output directory as it was given on the command line. `python scripts/report.py
+runs/suite/<ts>` (or its `results.json`) resolves them against that location and writes one `report.html`
+per run that has a trace.
 
 ```jsonc
 {
   "label": "", "timestamp": "...", "git_commit": "185a10f", "repeat": 5, "workers": 4, "elapsed_ms": 18400,
+  "out_dir": "runs/suite/<ts>",
   "specs": {
     "smoke-login": {
-      "spec": "specs/smoke-login.json",
-      "runs": [ { "out_dir": "runs/suite/<ts>/smoke-login/01", "result": ".../result.json", "exit_code": 0, "wall_ms": 6100,
+      "spec": "../../../specs/smoke-login.json",
+      "runs": [ { "run": 1, "out_dir": "smoke-login/01", "trace": "smoke-login/01/trace.json", "result": "smoke-login/01/result.json",
+                  "exit_code": 0, "wall_ms": 6100,
                   "outcome": "logged_in", "verdict": "pass", "status": "passed", "first_seen_at_step": 4,
                   "evidence_line": "You logged into a secure area!", "suggested_verdict": null,
                   "duration_ms": 6000, "jev_ms": 2000, "requests": 6, "input_tokens": 8900, "decision_confidence": 0.96, ... } ],

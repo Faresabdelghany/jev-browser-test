@@ -43,7 +43,7 @@ secrets out of any model that does not need them, and turns a missing value into
 | `scripts/run_test.py` | The loop, setup steps, action execution, stop conditions, the results contract (outcome sightings, confirmation, assertions, adjudication), trace and result writing |
 | `scripts/summarize_trace.py` | Summary table, `--step N` dump, `--result` |
 | `scripts/run_suite.py` | Specs × repeats as `run_test.py` subprocesses on a thread pool; `aggregate_spec` (outcome distribution, agreement, unanimous verdict or `flaky`), `suite_verdict`, `results.json` + `results.md`; exit 0 iff all unanimously pass |
-| `scripts/report.py` | `render_report(trace, result, images)`: one self-contained `report.html` per run, screenshots inline as base64 |
+| `scripts/report.py` | `render_report(trace, result, images)`: one self-contained `report.html` per run, screenshots inline as base64; given a suite directory, `suite_run_dirs` resolves the relative paths of its `results.json` and renders every run that has a trace |
 | `scripts/bench.py` | Runs a spec N times as subprocesses and reports medians; every number in the docs comes from its `--json` output |
 | `scripts/selftest.py` | Offline end-to-end test with local pages and a rule-based fake Jev |
 | `scripts/unit_tests.py` | Stdlib `unittest` for the pure parts: client, validation, criteria, fingerprint compare, masking, bench |

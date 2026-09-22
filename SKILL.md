@@ -197,7 +197,9 @@ at its `evidence_line`. Two specs × 5 repeats with 4 workers finish in well und
 
 For a human reader (a PR, a ticket), `python scripts/report.py runs/<id>/<ts>` writes a single static
 `report.html` beside the trace: the result, the step table with the operation and target probabilities,
-checks, outcome answers, flags, and the screenshots inline. No server, no external resources.
+checks, outcome answers, flags, and the screenshots inline. No server, no external resources. Given a suite
+directory (`python scripts/report.py runs/suite/<ts>`) it writes one per run; the paths in `results.json`
+are relative to that directory, so it still works after the directory has been moved.
 
 Keep specs independent (each has its own `setup`); shared state between specs is the fastest way to
 manufacture flakiness. Store `runs/` outside version control.

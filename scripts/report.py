@@ -1,6 +1,12 @@
 """Render one run as a single static report.html a human can open from a PR.
 
     python scripts/report.py runs/<id>/<ts> [more run dirs ...] [--out report.html]
+    python scripts/report.py runs/suite/<ts>            # or its results.json: one report.html per run of the suite
+
+A suite argument (a directory holding `results.json`, or the file itself) expands to every run of that suite
+that wrote a trace: the paths in `results.json` are relative to the directory it is in, and are resolved
+against it here, so a suite directory that was moved or copied still renders. Runs that never produced a
+trace (environment failures) are skipped.
 
 The page holds the result (outcome, verdict, evidence line, assertions, story), then one row per step with
 the operation and target answers and their top probabilities, the type_value, every check, the outcome
@@ -223,21 +229,64 @@ def build(run_dir: str, out_path: str | None = None) -> str:
     return out_path
 
 
+def suite_run_dirs(results_path: str) -> list[str]:
+    """The run directories of a suite, in spec and repeat order, resolved against the directory that holds its
+    `results.json` (run_suite.py writes `out_dir` relative to it; an absolute `out_dir` from an older file is
+    kept as it is). Runs without a trace.json (environment failures) are left out."""
+    with open(results_path, encoding="utf-8") as f:
+        results = json.load(f)
+    base = os.path.dirname(os.path.abspath(results_path))
+    dirs: list[str] = []
+    for sp in (results.get("specs") or {}).values():
+        for r in sp.get("runs") or []:
+            if r.get("environment_failure") or not r.get("out_dir"):
+                continue
+            run_dir = os.path.normpath(os.path.join(base, r["out_dir"]))
+            if os.path.exists(os.path.join(run_dir, "trace.json")):
+                dirs.append(run_dir)
+    return dirs
+
+
+def _suite_results(arg: str) -> str | None:
+    """`arg` as a suite: the results.json path when `arg` is one or a directory holding one (and no trace.json), else None."""
+    if os.path.isfile(arg) and os.path.basename(arg) == "results.json":
+        return arg
+    candidate = os.path.join(arg, "results.json")
+    if os.path.isdir(arg) and os.path.isfile(candidate) and not os.path.exists(os.path.join(arg, "trace.json")):
+        return candidate
+    return None
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("run_dirs", nargs="+", help="run directories (each holding trace.json)")
+    ap.add_argument("run_dirs", nargs="+", help="run directories (each holding trace.json), or a suite directory / its results.json")
     ap.add_argument("--out", help="output file (only with a single run directory; default <run dir>/report.html)")
     args = ap.parse_args(argv[1:])
-    if args.out and len(args.run_dirs) != 1:
+    code = 0
+    run_dirs: list[str] = []
+    for arg in args.run_dirs:
+        results = _suite_results(arg)
+        if results is None:
+            run_dirs.append(arg)
+            continue
+        expanded = suite_run_dirs(results)
+        if not expanded:
+            print(f"no run with a trace.json in the suite {results}", file=sys.stderr)
+            code = 2
+        run_dirs += expanded
+    if args.out and len(run_dirs) != 1:
         print("--out needs exactly one run directory", file=sys.stderr)
         return 2
-    code = 0
-    for run_dir in args.run_dirs:
+    for run_dir in run_dirs:
         if not os.path.exists(os.path.join(run_dir, "trace.json")):
             print(f"no trace.json in {run_dir}", file=sys.stderr)
             code = 2
             continue
-        print(build(run_dir, args.out))
+        try:
+            print(build(run_dir, args.out))
+        except (OSError, ValueError) as e:  # a trace the runner never finished writing
+            print(f"unreadable trace.json in {run_dir}: {type(e).__name__}: {str(e)[:200]}", file=sys.stderr)
+            code = 2
     return code
 
 

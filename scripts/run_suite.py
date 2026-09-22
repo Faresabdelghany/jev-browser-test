@@ -23,6 +23,10 @@ every run failed that way ends `undetermined` with `reason` saying so. A run who
 unreadable (the runner was killed mid-write) is different: it ran, so it is an `undetermined` error run in
 the distribution.
 
+Every path in `results.json` / `results.md` (`spec`, each run's `out_dir`, `trace`, `result`) is relative
+to the output directory, so the files stay readable after the directory moves; `report.py <suite dir>`
+resolves them against the `results.json` it reads. The top-level `out_dir` is the directory as it was given.
+
 Exit code 0 iff every spec is unanimously `pass`; 1 otherwise; 2 when the suite itself could not run (a
 spec file missing, two spec files with the same id, or every run of every spec was an environment failure:
 the environment, not the flows, failed).
@@ -59,11 +63,21 @@ def spec_id_of(spec_path: str) -> str:
         return os.path.splitext(os.path.basename(spec_path))[0]
 
 
-def run_once(runner: str, python: str, spec_path: str, out_dir: str, run_args: list[str]) -> dict:
+def _rel(path: str | None, base: str | None) -> str | None:
+    """`path` relative to `base` (the directory that holds results.json); unchanged without a base or a common root."""
+    if not path or not base:
+        return path
+    try:
+        return os.path.relpath(path, base)
+    except ValueError:  # another drive on Windows: no relative form exists
+        return path
+
+
+def run_once(runner: str, python: str, spec_path: str, out_dir: str, run_args: list[str], base: str | None = None) -> dict:
     """One runner subprocess. Returns the run record: exit code, wall-clock, the result.json headline fields
     and the trace-derived measures (bench.measure_trace). No trace.json at all -> an environment failure
     (`environment_failure: true`, status error, the stderr tail, no outcome); an unreadable trace or result
-    -> an undetermined error run."""
+    -> an undetermined error run. `out_dir`, `trace` and `result` are written relative to `base` when given."""
     cmd = [python, runner, spec_path, "--out", out_dir, *run_args]
     t0 = time.perf_counter()
     proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
@@ -75,7 +89,8 @@ def run_once(runner: str, python: str, spec_path: str, out_dir: str, run_args: l
     if not os.path.exists(trace_path):
         # nothing was observed: exit 2 (spec / environment problem), or the runner died before its first step
         rec.update({"status": "error", "environment_failure": True, "error": tail})
-        return rec
+        return _relativize(rec, base)
+    rec["trace"] = trace_path
     result = None
     try:
         with open(trace_path, encoding="utf-8") as f:
@@ -99,6 +114,13 @@ def run_once(runner: str, python: str, spec_path: str, out_dir: str, run_args: l
         rec["status"] = rec.get("status") or "error"
         rec["outcome"] = UNDETERMINED
         rec["error"] = rec.get("error") or tail
+    return _relativize(rec, base)
+
+
+def _relativize(rec: dict, base: str | None) -> dict:
+    for key in ("out_dir", "trace", "result"):
+        if rec.get(key):
+            rec[key] = _rel(rec[key], base)
     return rec
 
 
@@ -210,9 +232,9 @@ def run_suite(spec_paths: list[str], repeat: int, workers: int, out_root: str, r
         spec_path, sid, i, out_dir = job
         t0 = time.perf_counter()
         try:
-            rec = run_once(runner, python, spec_path, out_dir, run_args)
+            rec = run_once(runner, python, spec_path, out_dir, run_args, base=out_root)
         except Exception as e:  # noqa: BLE001 - one run's failure to launch or to be read must not lose the suite
-            rec = {"out_dir": out_dir, "exit_code": None, "wall_ms": int((time.perf_counter() - t0) * 1000),
+            rec = {"out_dir": _rel(out_dir, out_root), "exit_code": None, "wall_ms": int((time.perf_counter() - t0) * 1000),
                    "outcome": None, "verdict": None, "status": "error", "environment_failure": True,
                    "error": f"{type(e).__name__}: {str(e)[:300]}"}
         rec = {"run": i, **rec}
@@ -229,7 +251,7 @@ def run_suite(spec_paths: list[str], repeat: int, workers: int, out_root: str, r
     for spec_path in spec_paths:
         sid = spec_id_of(spec_path)
         runs = [r for r in records[sid] if r is not None]
-        specs[sid] = {"spec": spec_path, "runs": runs, **aggregate_spec(runs)}
+        specs[sid] = {"spec": _rel(spec_path, out_root), "runs": runs, **aggregate_spec(runs)}
     report = {
         "label": label,
         "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),

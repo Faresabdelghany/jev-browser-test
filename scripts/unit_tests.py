@@ -1207,6 +1207,15 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual([os.path.basename(r["out_dir"]) for r in fl["runs"]], ["01", "02", "03", "04"])  # ordered by repeat, not by finish time
         self.assertEqual(report["specs"]["always-pass"]["medians"]["requests"], 3)
         self.assertEqual(report["specs"]["always-pass"]["runs"][0]["evidence_line"], "Welcome")
+        # every path under specs is relative to the output directory (the top-level out_dir is the directory as given)
+        first = report["specs"]["always-pass"]["runs"][0]
+        self.assertEqual((first["out_dir"], first["trace"], first["result"]), ("always-pass/01", "always-pass/01/trace.json", "always-pass/01/result.json"))
+        self.assertEqual(report["specs"]["always-pass"]["spec"], os.path.join("..", "always-pass.json"))
+        self.assertEqual(report["out_dir"], out)
+        self.assertNotIn(tmp, json.dumps(report["specs"]))
+        self.assertNotIn("trace", report["specs"]["broken"]["runs"][0])           # no trace was written
+        self.assertNotIn("result", report["specs"]["truncated"]["runs"][1])        # a trace, but no readable result
+        self.assertEqual(report["specs"]["truncated"]["runs"][1]["trace"], "truncated/02/trace.json")
         self.assertEqual(report["specs"]["blocked"]["suggested_verdicts"], {"test_issue": 4})
         broken = report["specs"]["broken"]["runs"][0]
         self.assertEqual((broken["exit_code"], broken["outcome"], broken["status"], broken["environment_failure"]), (2, None, "error", True))
@@ -1229,6 +1238,35 @@ class SuiteTests(unittest.TestCase):
         # a multi-line stderr tail stays inside its table cell
         self.assertIn("| 2 | Spec problems: - done_when names unknown check 'x' - goal must not be empty |", md)
         self.assertNotIn("\n  - ", md)
+        self.assertIn("| `always-pass/01/result.json` |", md)
+        self.assertNotIn(tmp, md)
+        # report.py resolves the relative paths against the results.json it reads, and skips runs without a trace
+        from report import _suite_results, main as report_main, suite_run_dirs
+        dirs = suite_run_dirs(os.path.join(out, "results.json"))
+        self.assertEqual(len(dirs), 4 + 4 + 4 + 4 + 3)                       # broken wrote nothing; launch-flake run 2 neither
+        self.assertEqual(dirs[0], os.path.join(out, "always-pass", "01"))
+        self.assertTrue(all(os.path.isabs(d) and os.path.exists(os.path.join(d, "trace.json")) for d in dirs))
+        self.assertEqual(_suite_results(out), os.path.join(out, "results.json"))
+        self.assertEqual(_suite_results(os.path.join(out, "results.json")), os.path.join(out, "results.json"))
+        self.assertIsNone(_suite_results(os.path.join(out, "always-pass", "01")))  # a run directory is not a suite
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            self.assertEqual(report_main(["report.py", out]), 2)                # the truncated trace is reported, the rest rendered
+            self.assertEqual(report_main(["report.py", os.path.join(out, "flaky", "02")]), 0)
+        self.assertTrue(os.path.exists(os.path.join(out, "always-pass", "01", "report.html")))
+        self.assertTrue(os.path.exists(os.path.join(out, "launch-flake", "04", "report.html")))
+        self.assertFalse(os.path.exists(os.path.join(out, "truncated", "02", "report.html")))
+        self.assertFalse(os.path.exists(os.path.join(out, "broken", "01", "report.html")))
+        with open(os.path.join(out, "flaky", "02", "report.html"), encoding="utf-8") as f:
+            self.assertIn('class="badge bug"', f.read())
+        # an older results.json with absolute paths still resolves
+        with open(os.path.join(out, "results.json"), encoding="utf-8") as f:
+            old = json.load(f)
+        old["specs"]["always-pass"]["runs"][0]["out_dir"] = os.path.join(out, "always-pass", "01")
+        legacy = os.path.join(tmp, "elsewhere", "results.json")
+        os.makedirs(os.path.dirname(legacy))
+        with open(legacy, "w", encoding="utf-8") as f:
+            json.dump(old, f)
+        self.assertEqual(suite_run_dirs(legacy), [os.path.join(out, "always-pass", "01")])
         # the CLI: exit 0 iff every spec is unanimously pass
         with mock.patch("sys.stdout"):
             self.assertEqual(suite_main(["run_suite.py", specs["always-pass"], "--repeat", "2", "--workers", "2", "--out",
