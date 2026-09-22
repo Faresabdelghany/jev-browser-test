@@ -70,9 +70,12 @@ python scripts/run_test.py specs/orders.json --cdp-url http://127.0.0.1:9222
 ```
 
 or `"browser": { "cdp_url": "http://127.0.0.1:9222" }` in the spec. The runner opens **one new tab** in the
-first existing context (so cookies and sessions are shared), runs the flow there, and on exit closes only
-that tab; your other tabs are untouched. `storage_state` is ignored when attached (the profile already holds
-the session), and the trace records `browser: { attached: true, cdp_url, storage_state_ignored }`.
+first existing context (so cookies and sessions are shared), runs the flow there, and on exit closes that
+tab and any tab the flow itself opened (`target=_blank`, `window.open`); your other tabs are untouched.
+`storage_state` is ignored when attached (the profile already holds the session), and the trace records
+`browser: { attached: true, cdp_url, storage_state_ignored }`. If nothing answers at the address (Chrome not
+started, wrong port) the run exits 2 with `could not attach to the browser at <url>` and writes no trace: an
+environment problem, like a missing key.
 
 ## Setup steps (deterministic Playwright, no Jev)
 

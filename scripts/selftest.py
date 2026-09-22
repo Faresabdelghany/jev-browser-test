@@ -34,7 +34,8 @@ PAGE = """<!doctype html><html><head><title>Mini Shop</title>
  .item{margin:8px 0}
 </style></head><body>
 <div id="filler" style="position:absolute;top:3000px;left:0;width:600px" hidden></div>
-<header><a href="#home">Home</a> &nbsp; <span id="cart">Cart: 0 items</span></header>
+<header><a href="#home">Home</a> &nbsp; <span id="cart">Cart: 0 items</span> &nbsp;
+  <button id="apply" onclick="void 0">Apply filter</button> &nbsp; <a id="help" href="#help" target="_blank">Help</a></header>
 <h1>Mini Shop</h1>
 <form id="search" onsubmit="event.preventDefault(); showResults();">
   <input id="q" placeholder="Search products">
@@ -218,6 +219,7 @@ def cdp_check(url: str, tmp: str) -> list[str]:
         spec = base_spec(url)
         spec["browser"]["cdp_url"] = endpoint
         spec["browser"]["storage_state"] = os.path.join(tmp, "ignored-state.json")  # must be ignored, not opened
+        spec["setup"] = [{"action": "click", "selector": "#help"}]  # opens a second tab: the run must close it too
         out = os.path.join(tmp, "run-cdp")
         trace = run(spec, FakeJev(), out, screenshots=False)
         print(summarize(trace, out))
@@ -237,6 +239,34 @@ def cdp_check(url: str, tmp: str) -> list[str]:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+    # A browser nobody runs at that address is an environment problem: run() raises BrowserUnavailable
+    # before anything is traced, and the CLI turns that into exit 2 with a hint, not a traceback.
+    from run_test import BrowserUnavailable, main as run_main
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        closed_port = s.getsockname()[1]
+    dead = f"http://127.0.0.1:{closed_port}"
+    spec = base_spec(url)
+    spec["browser"]["cdp_url"] = dead
+    out = os.path.join(tmp, "run-cdp-dead")
+    try:
+        run(spec, FakeJev(), out, screenshots=False)
+        failures.append("cdp: an unreachable cdp_url did not raise BrowserUnavailable")
+    except BrowserUnavailable as e:
+        if dead not in str(e) or "remote-debugging-port" not in str(e):
+            failures.append(f"cdp: BrowserUnavailable should name the url and the hint: {e}")
+    if os.path.exists(out):
+        failures.append("cdp: an unreachable browser left a run directory behind")
+    spec_path = os.path.join(tmp, "dead-cdp-spec.json")
+    with open(spec_path, "w", encoding="utf-8") as f:
+        json.dump({k: v for k, v in base_spec(url).items()}, f)
+    os.environ.setdefault("TYPESAFE_API_KEY", "selftest-dummy-key-never-sent")  # the browser fails first, no request is made
+    code = run_main(["run_test.py", spec_path, "--cdp-url", dead, "--out", os.path.join(tmp, "run-cdp-dead-cli")])
+    if code != 2:
+        failures.append(f"cdp: the CLI should exit 2 for an unreachable browser, got {code}")
+    print(f"cdp: unreachable {dead} -> BrowserUnavailable, CLI exit {code}")
+    print()
     return failures
 
 
@@ -289,7 +319,7 @@ class FakeJev:
 
     def __init__(self, mode: str = "normal", delay_ms: int = 0) -> None:
         # normal | hedge_value | early_low_done | early_confident_done | done_after_add
-        # | invalid_operation_once | invalid_operation_always
+        # | invalid_operation_once | invalid_operation_always | dead_click
         self.mode = mode
         self.delay_ms = delay_ms  # a slow "model", so a page mutation can land between observation and decision
         self.requests = 0
@@ -353,7 +383,9 @@ class FakeJev:
         typed_before = any(a["operation"] == "TYPE_TEXT" for a in recent)
         search_box_visible = any(e["label"] == "Search products" for e in state["elements"])
 
-        if self._find(clicks, "Accept cookies"):
+        if self.mode == "dead_click" and self._find(clicks, "Apply filter"):
+            op, target = "CLICK", ("click_target", self._find(clicks, "Apply filter"))  # a button that does nothing
+        elif self._find(clicks, "Accept cookies"):
             op, target = "CLICK", ("click_target", self._find(clicks, "Accept cookies"))
         elif not results_shown and self._find(types, "Search products") and not typed_before and "TYPE_TEXT" in ops:
             op, target = "TYPE_TEXT", ("type_target", self._find(types, "Search products"))
@@ -488,6 +520,9 @@ def main() -> int:
     settles = [s.get("settle") for s in trace["steps"] if (s.get("executed") or {}).get("action") == "CLICK"]
     if not settles or not all(isinstance(s, dict) and s.get("ended") in ("quiet", "cap") and isinstance(s.get("ms"), int) for s in settles):
         failures.append(f"action steps do not carry a settle record: {settles}")
+    timing = trace.get("timing") or {}
+    if set(timing) != {"launch_ms", "navigation_ms", "setup_ms", "steps_ms", "final_ms"} or not all(isinstance(v, int) and v >= 0 for v in timing.values()):
+        failures.append(f"trace.timing should hold the five non-negative laps: {timing}")
 
     # 1b. the same flow with the default policy ("key"): only the terminal step gets a picture, plus final.png
     spec = base_spec(url)
@@ -541,6 +576,29 @@ def main() -> int:
         failures.append(f"a low-confidence value choice was executed: {ops}")
     if not all(bool(s.get("screenshot")) == bool(s.get("low_confidence") or s is trace["steps"][-1]) for s in trace["steps"]):
         failures.append(f"key mode: low-confidence steps should have screenshots and clean ones not: {[(s.get('low_confidence'), s.get('screenshot')) for s in trace['steps']]}")
+    waited = [s for s in trace["steps"] if s.get("low_confidence") and (s.get("executed") or {}).get("action") == "WAIT"]
+    if not waited or not all(isinstance(s.get("settle"), dict) and s["latency_ms"]["browser"] >= spec["browser"]["settle_ms"] for s in waited):
+        failures.append(f"a low-confidence WAIT should wait settle_ms and record its settle: {[(s.get('settle'), s.get('latency_ms')) for s in waited]}")
+
+    # 4b. a button that does nothing: the same click on an unchanged page three times -> stuck; the trace and
+    #     Jev's recent_actions both say page_changed: false; in key mode the repeat (>= 2) and terminal steps
+    #     have pictures, the first click does not
+    spec = base_spec(url)
+    jev = FakeJev("dead_click")
+    out = os.path.join(tmp, "run-dead-click")
+    trace = run(spec, jev, out, screenshots="key")
+    print(summarize(trace, out))
+    print()
+    steps = trace["steps"]
+    if trace["status"] != "stuck" or trace["actions_executed"] != 2 or len(steps) != 3:
+        failures.append(f"dead click: expected stuck after 2 executed clicks and 3 steps, got {trace['status']} {trace['actions_executed']} {len(steps)}")
+    if [s.get("page_changed") for s in steps] != [False, False, None] or not all("Apply filter" in (s.get("target") or {}).get("label", "") for s in steps):
+        failures.append(f"dead click: page_changed should be false on both executed clicks: {[(s.get('page_changed'), (s.get('target') or {}).get('label')) for s in steps]}")
+    recent = jev.seen_states[-1]["recent_actions"]
+    if len(recent) != 2 or any(a.get("page_changed") is not False for a in recent):
+        failures.append(f"dead click: Jev was not told the clicks changed nothing: {recent}")
+    if [bool(s.get("screenshot")) for s in steps] != [False, True, True] or [s.get("repeat_count") for s in steps] != [1, 2, 3]:
+        failures.append(f"dead click: key mode should picture the repeat and terminal steps only: {[(s.get('repeat_count'), s.get('screenshot')) for s in steps]}")
 
     # 5. a low-confidence DONE is a WAIT, not a verdict -> the flow continues and passes
     spec = base_spec(url)

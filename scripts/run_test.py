@@ -26,6 +26,13 @@ from policy import build_questions, build_state, read_checks, read_choice, resol
 from spec import load_dotenv, load_spec, validate
 from summarize_trace import summarize
 
+class BrowserUnavailable(RuntimeError):
+    """The browser could not be launched or attached to: an environment problem (exit 2), not a test result."""
+
+
+SCREENSHOT_TIMEOUT_MS = 3000  # a capture is ~50-100 ms; a page whose web font never loads must not stall every capture
+
+
 TERMINAL_STATUSES = {
     "passed": "all done_when checks satisfied",
     "done_unverified": "Jev chose DONE confidently, and after a settle-and-recheck the done_when checks are still not satisfied",
@@ -273,7 +280,6 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     mode = spec["observation"]["screenshots"] if screenshots is None else screenshots
     if not (mode is True or mode is False or mode == "key"):
         raise ValueError(f"screenshots must be one of {SCREENSHOT_MODES}, got {mode!r}")
-    os.makedirs(os.path.join(out_dir, "steps"), exist_ok=True)
     th = spec["thresholds"]
     budget = spec["budget"]
     obs_cfg = spec["observation"]
@@ -313,14 +319,18 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
             entry["page_changed"] = prev_step["page_changed"] = sig != before
             pending_change = None
 
-    def shot(page, name: str) -> str | None:
+    def shot(page, name: str, holder: dict | None = None) -> str | None:
+        """Write steps/<name>; None when screenshots are off or the capture failed (the reason lands in
+        holder["screenshot_error"] so a missing picture is explained, not silent)."""
         if mode is False:
             return None
         rel = os.path.join("steps", name)
         try:
-            page.screenshot(path=os.path.join(out_dir, rel))
+            page.screenshot(path=os.path.join(out_dir, rel), timeout=SCREENSHOT_TIMEOUT_MS)
             return rel
-        except Exception:
+        except Exception as e:  # noqa: BLE001 - a picture is evidence, never a reason to stop the run
+            if holder is not None:
+                holder["screenshot_error"] = f"{type(e).__name__}: {str(e)[:120]}"
             return None
 
     def key_step(step: dict) -> bool:
@@ -334,7 +344,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         if step.get("screenshot") or mode is False:
             return
         if mode is True or terminal or key_step(step):
-            step["screenshot"] = shot(page, f"{step['n']:03d}.png")
+            step["screenshot"] = shot(page, f"{step['n']:03d}.png", step)
 
     def finish(page, step: dict, new_status: str, executed: dict) -> None:
         """Every terminal site ends here: set the status, record what was (not) executed, take the terminal
@@ -364,31 +374,46 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         cdp_url = spec["browser"]["cdp_url"]
         viewport = {"width": spec["browser"]["viewport"][0], "height": spec["browser"]["viewport"][1]}
         created_context = True
-        if cdp_url:
-            # Attach to a browser the user already runs (Chrome started with --remote-debugging-port). Its
-            # logged-in profile is the point: SSO-walled apps get tested without scripting the login.
-            # storage_state is meaningless here and ignored. We open one tab and close only that tab.
-            browser = p.chromium.connect_over_cdp(cdp_url)
-            if browser.contexts:
-                context, created_context = browser.contexts[0], False
+        try:
+            if cdp_url:
+                # Attach to a browser the user already runs (Chrome started with --remote-debugging-port). Its
+                # logged-in profile is the point: SSO-walled apps get tested without scripting the login.
+                # storage_state is meaningless here and ignored. We open one tab and close only that tab.
+                browser = p.chromium.connect_over_cdp(cdp_url)
+                if browser.contexts:
+                    context, created_context = browser.contexts[0], False
+                else:
+                    context = browser.new_context(viewport=viewport)
+                page = context.new_page()
+                page.set_viewport_size(viewport)
+                trace["browser"] = {"attached": True, "cdp_url": cdp_url,
+                                    "storage_state_ignored": bool(spec["browser"]["storage_state"])}
             else:
-                context = browser.new_context(viewport=viewport)
-            page = context.new_page()
-            page.set_viewport_size(viewport)
-            trace["browser"] = {"attached": True, "cdp_url": cdp_url,
-                                "storage_state_ignored": bool(spec["browser"]["storage_state"])}
-        else:
-            browser = p.chromium.launch(
-                headless=not headed and spec["browser"]["headless"],
-                channel=spec["browser"]["channel"],
-            )
-            ctx_kwargs = {"viewport": viewport}
-            if spec["browser"]["storage_state"]:
-                ctx_kwargs["storage_state"] = spec["browser"]["storage_state"]
-            context = browser.new_context(**ctx_kwargs)
-            page = context.new_page()
-            trace["browser"] = {"attached": False}
+                browser = p.chromium.launch(
+                    headless=not headed and spec["browser"]["headless"],
+                    channel=spec["browser"]["channel"],
+                )
+                ctx_kwargs = {"viewport": viewport}
+                if spec["browser"]["storage_state"]:
+                    ctx_kwargs["storage_state"] = spec["browser"]["storage_state"]
+                context = browser.new_context(**ctx_kwargs)
+                page = context.new_page()
+                trace["browser"] = {"attached": False}
+        except Exception as e:  # noqa: BLE001 - nothing to trace yet: this is the environment, not the test
+            what = (f"could not attach to the browser at {cdp_url} (is Chrome running with --remote-debugging-port?)"
+                    if cdp_url else "could not launch the browser")
+            raise BrowserUnavailable(f"{what}: {type(e).__name__}: {str(e).splitlines()[0][:300]}") from None
+        # Tabs the flow itself opens (target=_blank, window.open) are ours to close: launch mode closes them
+        # with the context; in attached mode they would otherwise stay in the user's browser.
+        popups: list = []
+
+        def track_popup(popup) -> None:
+            popups.append(popup)
+            popup.on("popup", track_popup)
+
+        page.on("popup", track_popup)
         page.set_default_timeout(spec["browser"]["action_timeout_ms"])
+        os.makedirs(os.path.join(out_dir, "steps"), exist_ok=True)
         t_lap = lap("launch_ms", t_lap)
         try:
             page.goto(spec["start_url"], wait_until="domcontentloaded")
@@ -501,6 +526,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
 
                 if low:
                     low_streak += 1
+                    stale_streak = 0  # a refused decision is not a stale one: `max_stale` counts consecutive stale steps
                     if low_streak >= th["max_low_confidence_steps"]:
                         finish(page, step, "low_confidence", dict(STOP))
                         break
@@ -509,7 +535,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     capture(page, step)
                     record(wait_entry(n, "WAIT", "undecided between the offered options; nothing was executed"), step, sig)
                     t_b = time.perf_counter()
-                    settle(page, spec)
+                    page.wait_for_timeout(spec["browser"]["settle_ms"])  # a real wait, like the WAIT operation
+                    step["settle"] = settle(page, spec)
                     step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
                     trace["steps"].append(step)
                     continue
@@ -574,11 +601,13 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     finish(page, step, "stuck", dict(STOP))
                     break
 
-                capture(page, step)  # the page Jev decided on, before anything changes it
+                # The page Jev decided on, before anything changes it. The last allowed step is terminal
+                # for the budget (the for-else below), so it gets its picture like every terminal step.
+                capture(page, step, terminal=(n == budget["max_steps"]))
                 t_b = time.perf_counter()
                 executed = execute(page, spec, operation, target, value_key)
                 if not executed["ok"]:
-                    step["screenshot_after_failure"] = shot(page, f"{n:03d}-failed.png")
+                    step["screenshot_after_failure"] = shot(page, f"{n:03d}-failed.png", step)
                 target_role = next((e["role"] for e in obs["elements"] if e["idx"] == (target or {}).get("element")), None)
                 step["settle"] = settle(page, spec, after=(operation, target_role))
                 step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
@@ -613,22 +642,24 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     "title": page.title(),
                     "checks": last.get("checks", {}),
                 }
-            trace["final"]["screenshot"] = shot(page, "final.png")
+            trace["final"]["screenshot"] = shot(page, "final.png", trace["final"])
             lap("final_ms", t_lap)
         except Exception as e:  # noqa: BLE001
             status, error = "error", f"{type(e).__name__}: {str(e)[:500]}"
             try:
-                trace["final"] = {"url": page.url, "title": page.title(), "checks": {}, "screenshot": shot(page, "final.png")}
+                trace["final"] = {"url": page.url, "title": page.title(), "checks": {}}
+                trace["final"]["screenshot"] = shot(page, "final.png", trace["final"])
             except Exception:
                 trace["final"] = {"url": None, "title": None, "checks": {}}
         finally:
             if cdp_url:
                 # Only what we opened goes away: the user's tabs stay. On a connected browser,
                 # browser.close() just disconnects (and drops a context only if we created it).
-                try:
-                    page.close()
-                except Exception:  # noqa: BLE001 - already gone
-                    pass
+                for tab in [*popups, page]:
+                    try:
+                        tab.close()
+                    except Exception:  # noqa: BLE001 - already gone
+                        pass
                 if created_context:
                     context.close()
             else:
@@ -691,6 +722,9 @@ def main(argv: list[str]) -> int:
     screenshots = {"all": True, "key": "key", "none": False, None: None}["none" if args.no_screenshots else args.screenshots]
     try:
         trace = run(spec, jev, out_dir, screenshots=screenshots, headed=args.headed)
+    except BrowserUnavailable as e:
+        print(str(e), file=sys.stderr)
+        return 2
     finally:
         close = getattr(jev, "close", None)  # the seam only requires system_one() and usage_summary()
         if close:

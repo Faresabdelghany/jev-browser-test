@@ -50,6 +50,7 @@ the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to re
     {
       "n": 1, "url": "...", "title": "...", "signature": "7be5a4cf2445",
       "screenshot": "steps/001.png",       // null unless the policy captured this step; "screenshot_after_failure": "steps/001-failed.png" when the action failed
+                                           // "screenshot_error": "TimeoutError: ..." when a capture the policy wanted failed (3 s cap; a web font that never loads)
       "elements": [ { "idx": 3, "role": "button", "name": "Add to cart", "x": 116, "y": 151, "w": 79, "h": 21, ... } ],
       "truncated_elements": 0, "visible_text": "first 600 chars of the viewport-first text Jev saw...",
       "offered_operations": ["CLICK", "TYPE_TEXT", "WAIT", "DONE", "BLOCKED"],
@@ -82,7 +83,8 @@ Notes that matter when judging:
   *would* have done next.
 - `decision_confidence` is the weakest of the operation, target and (for TYPE_TEXT) `type_value` confidences.
   When it is below `min_confidence`, `low_confidence` is true and **nothing was executed**: `executed` is
-  `{ "action": "WAIT", "reason": "low confidence; <op> not executed" }`. The runner never acts on a guess.
+  `{ "action": "WAIT", "reason": "low confidence; <op> not executed" }`, the runner waits `settle_ms` and
+  settles like the WAIT operation (`settle` records how that ended), then observes again. It never acts on a guess.
 - `executed.action == "WAIT"` with `reason == "confirming DONE"` means Jev chose DONE while `done_when` was
   unsatisfied; the next step's checks are the verdict and carry `executed.confirmed == true`. This absorbs
   reloads and redirects still in flight when Jev declared victory.
