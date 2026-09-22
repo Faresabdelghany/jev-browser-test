@@ -43,7 +43,8 @@ DEFAULTS = {
     "browser": {
         "headless": True,
         "viewport": [1280, 800],
-        "settle_ms": 600,
+        "settle_ms": 400,   # cap on the event-based settle after every action
+        "quiet_ms": 100,    # the DOM must stay unchanged this long (and 2 animation frames) before observing
         "action_timeout_ms": 8000,
         "storage_state": None,
         "channel": None,
@@ -175,6 +176,12 @@ def validate(spec: dict) -> list[str]:
     b = spec.get("budget", {})
     if not (1 <= int(b.get("max_steps", 1)) <= 200):
         errors.append("'budget.max_steps' must be between 1 and 200")
+    br = spec.get("browser", {})
+    settle_ms, quiet_ms = br.get("settle_ms", 0), br.get("quiet_ms", 0)
+    if not (isinstance(settle_ms, int) and not isinstance(settle_ms, bool) and 0 <= settle_ms <= 10000):
+        errors.append("'browser.settle_ms' must be an integer between 0 and 10000 (the cap on the post-action settle)")
+    elif not (isinstance(quiet_ms, int) and not isinstance(quiet_ms, bool) and 0 <= quiet_ms <= settle_ms):
+        errors.append("'browser.quiet_ms' must be an integer between 0 and browser.settle_ms")
     t = spec.get("thresholds", {})
     for k in ("check_true", "never_true", "min_confidence"):
         v = t.get(k, 0.5)

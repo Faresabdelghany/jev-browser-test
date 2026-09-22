@@ -90,6 +90,61 @@ CONTROLS_PAGE = """<!doctype html><html><head><title>Controls</title><style>
 """
 
 
+SETTLE_PAGE = """<!doctype html><html><head><title>Settle</title></head><body>
+<button id="burst" onclick="burst()">Burst</button>
+<button id="forever" onclick="forever()">Forever</button>
+<input id="cb" role="combobox" aria-label="Product" oninput="suggest()">
+<ul id="list" role="listbox"></ul>
+<div id="counter">0</div>
+<script>
+ let n = 0;
+ const paint = () => { document.getElementById('counter').textContent = ++n; };
+ function burst(){ const t = setInterval(paint, 20); setTimeout(() => clearInterval(t), 150); }
+ function forever(){ setInterval(paint, 20); }
+ function suggest(){ setTimeout(() => {
+   const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = 'Blue Hoodie';
+   document.getElementById('list').appendChild(li); }, 120); }
+</script></body></html>"""
+
+
+def settle_check(url: str) -> list[str]:
+    """settle() ends on DOM quiet, on the cap, or on a visible autocomplete option. No Jev involved."""
+    from playwright.sync_api import sync_playwright
+    from run_test import settle
+    from spec import DEFAULTS, _merge
+
+    failures = []
+
+    def sp(cap: int, quiet: int) -> dict:
+        return _merge(DEFAULTS, {"id": "settle", "start_url": url, "goal": "x", "browser": {"settle_ms": cap, "quiet_ms": quiet}})
+
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page(viewport={"width": 800, "height": 600})
+        pg.goto(url)
+        pg.click("#burst")  # mutates every 20 ms for 150 ms, then stops
+        r1 = settle(pg, sp(1000, 50))
+        if r1["ended"] != "quiet" or not (150 <= r1["ms"] < 800):
+            failures.append(f"settle after a 150 ms burst should end quiet at >= 150 ms and well under the cap: {r1}")
+        pg.click("#forever")  # never stops mutating
+        r2 = settle(pg, sp(300, 50))
+        if r2["ended"] != "cap" or not (280 <= r2["ms"] <= 700):
+            failures.append(f"settle on a never-quiet page should end at the cap (300 ms): {r2}")
+        pg.goto(url)  # a fresh document: no interval running
+        pg.fill("#cb", "blu")  # the option appears 120 ms later
+        r3 = settle(pg, sp(1000, 50), after=("TYPE_TEXT", "combobox"))
+        visible = pg.locator('[role="option"]').count()
+        if r3["ended"] != "options" or not (120 <= r3["ms"] < 600) or visible != 1:
+            failures.append(f"settle after typing into a combobox should wait for the option: {r3}, options visible={visible}")
+        r4 = settle(pg, sp(1000, 50))  # a plain settle right after: nothing changes, quiet within ~quiet_ms
+        if r4["ended"] != "quiet" or r4["ms"] >= 400:
+            failures.append(f"a quiet page should settle in about quiet_ms: {r4}")
+        b.close()
+    print(f"settle check: burst={r1} forever={r2} combobox={r3} quiet={r4}")
+    print()
+    return failures
+
+
 def observer_check(url: str) -> list[str]:
     """Observation + execution sanity on CONTROLS_PAGE. No Jev involved."""
     from playwright.sync_api import sync_playwright
@@ -99,7 +154,7 @@ def observer_check(url: str) -> list[str]:
 
     failures = []
     sp = _merge(DEFAULTS, {"id": "obs", "start_url": url, "goal": "x", "checks": {}, "done_when": [],
-                           "browser": {"action_timeout_ms": 1500, "settle_ms": 50}})
+                           "browser": {"action_timeout_ms": 1500, "settle_ms": 50, "quiet_ms": 20}})
     with sync_playwright() as p:
         b = p.chromium.launch()
         pg = b.new_page(viewport={"width": 1280, "height": 800})
@@ -282,7 +337,9 @@ def base_spec(url: str) -> dict:
             "done_when": ["cart_has_item"],
             "never": ["error_visible"],
             "budget": {"max_steps": 10, "max_seconds": 60},
-            "browser": {"settle_ms": 100},
+            # cap 300 / quiet 50: the ?slow=1 fixture paints 250 ms after the click, so the DONE
+            # confirmation (a settle_ms pause, then settle) must still see it
+            "browser": {"settle_ms": 300, "quiet_ms": 50},
         },
     )
     problems = validate(spec)
@@ -299,10 +356,15 @@ def main() -> int:
     controls = os.path.join(tmp, "controls.html")
     with open(controls, "w", encoding="utf-8") as f:
         f.write(CONTROLS_PAGE)
+    settle_html = os.path.join(tmp, "settle.html")
+    with open(settle_html, "w", encoding="utf-8") as f:
+        f.write(SETTLE_PAGE)
     failures = []
 
     # 0. observer: hidden-input checkboxes are seen, described with their row, and clickable
     failures += observer_check("file://" + controls)
+    # 0b. settle: ends on DOM quiet, on the cap, or on a visible autocomplete option
+    failures += settle_check("file://" + settle_html)
 
     # 1. happy path -> passed via auto_done
     spec = base_spec(url)
@@ -325,6 +387,9 @@ def main() -> int:
     if not os.path.exists(os.path.join(out, "trace.json")):
         failures.append("trace.json missing")
     failures += state_shape_check(jev.seen_states[-1], trace)
+    settles = [s.get("settle") for s in trace["steps"] if (s.get("executed") or {}).get("action") == "CLICK"]
+    if not settles or not all(isinstance(s, dict) and s.get("ended") in ("quiet", "cap") and isinstance(s.get("ms"), int) for s in settles):
+        failures.append(f"action steps do not carry a settle record: {settles}")
 
     # 2. the app shows an error -> never_violated
     spec = base_spec(url + "?fail=1")

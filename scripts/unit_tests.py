@@ -545,6 +545,21 @@ class CriteriaTests(unittest.TestCase):
         self.assertNotIn("pw", json.dumps(self.questions))
 
 
+class SpecValidationTests(unittest.TestCase):
+    def problems(self, **overrides) -> list[str]:
+        from spec import validate
+        return validate(_merge(SPEC, overrides))
+
+    def test_settle_defaults_and_bounds(self) -> None:
+        self.assertEqual((DEFAULTS["browser"]["settle_ms"], DEFAULTS["browser"]["quiet_ms"]), (400, 100))
+        self.assertEqual(self.problems(), [])
+        self.assertEqual(self.problems(browser={"settle_ms": 0, "quiet_ms": 0}), [])
+        self.assertTrue(any("quiet_ms" in p for p in self.problems(browser={"settle_ms": 50})))  # default quiet 100 > cap
+        self.assertTrue(any("settle_ms" in p for p in self.problems(browser={"settle_ms": 20000})))
+        self.assertTrue(any("settle_ms" in p for p in self.problems(browser={"settle_ms": "400"})))
+        self.assertTrue(any("quiet_ms" in p for p in self.problems(browser={"quiet_ms": -1})))
+
+
 class RulesTests(unittest.TestCase):
     def test_questions_carry_structured_instructions(self) -> None:
         from rules import CHECK, NEXT_ACTION, TARGET, VALUE

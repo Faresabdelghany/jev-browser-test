@@ -52,13 +52,86 @@ def redacted_spec(spec: dict) -> dict:
     return s
 
 
-def settle(page, spec: dict) -> None:
-    ms = spec["browser"]["settle_ms"]
-    try:
-        page.wait_for_load_state("load", timeout=ms * 5)
-    except Exception:
-        pass
-    page.wait_for_timeout(ms)
+SETTLE_JS = r"""
+(args) => new Promise(resolve => {
+  const { quietMs, capMs, waitForOptions } = args;
+  const t0 = performance.now();
+  let frames = 0, lastMutation = t0, done = false, cap = null;
+  const mo = new MutationObserver(() => { lastMutation = performance.now(); });
+  try {
+    mo.observe(document.documentElement || document, { subtree: true, childList: true, attributes: true, characterData: true });
+  } catch (e) { /* no document yet: the frame/cap logic below still resolves */ }
+  const finish = (ended) => {
+    if (done) return;
+    done = true;
+    mo.disconnect();
+    if (cap !== null) clearTimeout(cap);
+    resolve({ ended, ms: Math.round(performance.now() - t0) });
+  };
+  cap = setTimeout(() => finish('cap'), capMs);
+  const optionVisible = () => {
+    for (const e of document.querySelectorAll('[role="option"]')) {
+      const r = e.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight &&
+          (!e.checkVisibility || e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }))) return true;
+    }
+    return false;
+  };
+  const tick = () => {
+    if (done) return;
+    frames++;
+    const now = performance.now();
+    if (frames >= 2 && now - lastMutation >= quietMs) {
+      if (!waitForOptions) return finish('quiet');
+      if (optionVisible()) return finish('options');
+      if (now - t0 >= 200) return finish('options_timeout');
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+})
+"""
+
+AUTOCOMPLETE_ROLES = ("combobox", "searchbox")
+
+
+def settle(page, spec: dict, after: tuple[str | None, str | None] | None = None) -> dict:
+    """Wait for the page to stop changing after an action, then return how the wait ended.
+
+    Event-based, not a fixed pause: `domcontentloaded` (short timeout, ignored on failure), then a page-side
+    promise that resolves once two animation frames have passed AND the DOM has had no mutation for
+    `browser.quiet_ms`, capped at `browser.settle_ms`. After TYPE_TEXT into a combobox/searchbox
+    (`after=(operation, target_role)`) it also waits, up to 200 ms, for a visible `[role=option]`, so a
+    prediction is not paid for before the autocomplete suggestions arrive. If the evaluate throws because
+    the document navigated, it is retried once on the new document. Returns {"ended": "quiet" | "options" |
+    "options_timeout" | "cap" | "navigated", "ms": wall-clock spent here}.
+    """
+    cap = spec["browser"]["settle_ms"]
+    quiet = min(spec["browser"]["quiet_ms"], cap)
+    operation, role = after or (None, None)
+    args = {"quietMs": quiet, "capMs": cap, "waitForOptions": operation == "TYPE_TEXT" and role in AUTOCOMPLETE_ROLES}
+    t0 = time.perf_counter()
+
+    def loaded() -> None:
+        try:
+            page.wait_for_load_state("domcontentloaded", timeout=max(cap, 1))
+        except Exception:
+            pass
+
+    loaded()
+    result = None
+    for attempt in range(2):
+        try:
+            result = page.evaluate(SETTLE_JS, args)
+            break
+        except Exception:  # noqa: BLE001 - the document navigated while we waited (execution context destroyed)
+            if attempt == 0:
+                loaded()
+    if not isinstance(result, dict):
+        page.wait_for_timeout(quiet)
+        result = {"ended": "navigated"}
+    result["ms"] = int((time.perf_counter() - t0) * 1000)
+    return result
 
 
 def run_setup(page, spec: dict) -> list[dict]:
@@ -143,7 +216,7 @@ def execute(page, spec: dict, operation: str, target: dict | None, value_key: st
         elif operation == "SCROLL_UP":
             page.evaluate("window.scrollBy(0, -Math.round(window.innerHeight * 0.8))")
         elif operation == "WAIT":
-            page.wait_for_timeout(spec["browser"]["settle_ms"] * 2)
+            page.wait_for_timeout(spec["browser"]["settle_ms"])  # then the loop's normal settle
         else:
             raise RuntimeError(f"unknown operation {operation}")
     except Exception as e:  # noqa: BLE001
@@ -406,8 +479,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
                     step["executed"] = {"action": "WAIT", "ok": True, "error": None, "reason": "confirming DONE"}
                     record(wait_entry(n, "DONE", "checking the result before finishing"), step, sig)
                     t_b = time.perf_counter()
-                    settle(page, spec)
-                    page.wait_for_timeout(spec["browser"]["settle_ms"] * 2)
+                    page.wait_for_timeout(spec["browser"]["settle_ms"])
+                    step["settle"] = settle(page, spec)
                     step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
                     trace["steps"].append(step)
                     continue
@@ -428,7 +501,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
 
                 t_b = time.perf_counter()
                 executed = execute(page, spec, operation, target, value_key)
-                settle(page, spec)
+                target_role = next((e["role"] for e in obs["elements"] if e["idx"] == (target or {}).get("element")), None)
+                step["settle"] = settle(page, spec, after=(operation, target_role))
                 step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
                 step["executed"] = executed
                 record(history_entry(n, operation, target, value_key, executed), step, sig)

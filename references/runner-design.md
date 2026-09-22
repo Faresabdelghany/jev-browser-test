@@ -106,6 +106,20 @@ intercepted clicks still fall back to `force=True` (`executed.forced`).
 Known blind spots: canvas content (maps, charts) has no elements at all; a clickable element with no
 role, no handler attribute and no pointer cursor. Both need a `setup` step.
 
+## Settle: event-based, capped
+
+`run_test.settle()` runs after every action, setup step and the initial navigation. It is not a fixed
+pause: `domcontentloaded` (short timeout, ignored on failure), then a page-side promise that resolves once
+two animation frames have passed **and** the DOM has had no mutation for `browser.quiet_ms` (a
+`MutationObserver` on the document), capped at `browser.settle_ms`. After TYPE_TEXT into a
+`combobox`/`searchbox` it also waits, up to 200 ms, for a visible `[role=option]`, so Jev is not asked for
+a decision before the autocomplete suggestions arrive. If the evaluate throws because the document
+navigated meanwhile, it is retried once on the new document. The result lands on the step as
+`settle: {ended: quiet | options | options_timeout | cap | navigated, ms}`: a run full of `cap` endings
+means the page never goes quiet (animations, polling) and the cap is what you are paying; raise
+`quiet_ms` only if observations come back before the app has rendered. The WAIT operation sleeps
+`settle_ms` and then settles normally.
+
 ## Rules
 
 `scripts/rules.py` holds the standing rules Jev gets with every question, attached as structured
@@ -146,6 +160,6 @@ into a Password field and the old runner typed the wrong one. Two consequences: 
 never terminal (a real run stopped at 0.36 mid-reload), and an undecided answer on an unchanged page ends
 the run after `max_low_confidence_steps` with a status that tells Claude exactly what to fix.
 
-A *confident* DONE with `done_when` unsatisfied gets one settle-and-recheck (`settle()` plus
-`2 × settle_ms`) before the verdict. Reloads and redirects are often still in flight when Jev declares
+A *confident* DONE with `done_when` unsatisfied gets one settle-and-recheck (a `settle_ms` pause, then
+`settle()`) before the verdict. Reloads and redirects are often still in flight when Jev declares
 victory; the recheck turned a 3-of-4 flaky spec into a stable one without touching the spec.

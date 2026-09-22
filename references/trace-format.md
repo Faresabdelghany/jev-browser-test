@@ -57,6 +57,7 @@ the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to re
       "invalid_answer": "operation: choice 'FLY' was not offered",   // only when an answer failed validation
       "retried": true,                                               // only when the request was re-sent
       "executed": { "action": "CLICK", "ok": true, "error": null, "element": 3 },
+      "settle": { "ended": "quiet", "ms": 118 },                     // how the post-action wait ended: quiet | options | options_timeout | cap | navigated
       "latency_ms": { "jev": 131, "browser": 640 }
     }
   ],

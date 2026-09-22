@@ -45,7 +45,8 @@ it without opening a browser. Unknown fields are ignored; every optional field h
 | `thresholds.max_repeat` | int | 3 | Same action on an unchanged page this many times → `stuck` |
 | `browser.headless` | bool | `true` | `--headed` on the CLI overrides |
 | `browser.viewport` | [w, h] | [1280, 800] | |
-| `browser.settle_ms` | int | 600 | Pause after every action before observing again. Raise for slow apps |
+| `browser.settle_ms` | int | 400 | **Cap** on the wait after every action: the runner observes as soon as two animation frames have passed and the DOM has been quiet for `quiet_ms`, or when this cap is reached. Raise for slow apps (specs that raised it for the old fixed pause just get a longer cap) |
+| `browser.quiet_ms` | int | 100 | How long the DOM must go without a mutation before the page counts as settled. Must be ≤ `settle_ms` |
 | `browser.action_timeout_ms` | int | 8000 | Playwright timeout per click/fill |
 | `browser.storage_state` | path | null | Playwright storage state file (cookies/localStorage) for pre-authenticated sessions |
 | `browser.channel` | string | null | e.g. `"chrome"` to use an installed Chrome instead of bundled Chromium |
