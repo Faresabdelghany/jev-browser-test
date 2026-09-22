@@ -1,0 +1,22 @@
+{
+  "id": "wiki-search",
+  "start_url": "https://en.wikipedia.org/wiki/Main_Page",
+  "goal": "Use the search box to search for the given term and open the article about the Playwright end-to-end testing framework, so that the article page 'Playwright (software)' is shown.",
+  "notes": "Typing in the search box opens a list of suggestions; choosing the suggestion 'Playwright (software)' or pressing Enter both lead to the article.",
+  "data": { "search_wikipedia": "Playwright (software)" },
+  "checks": {
+    "suggestions_open": "A list of search suggestions is open under the search box",
+    "on_article": "The page heading is 'Playwright (software)' and the article describes a testing framework"
+  },
+  "outcomes": {
+    "article_shown": { "when": "The page heading is 'Playwright (software)' and the first paragraph describes an end-to-end testing framework", "verdict": "pass" },
+    "search_results_only": { "when": "A 'Search results' page lists matching pages instead of showing the article", "verdict": "test_issue",
+                             "note": "the exact title should open the article directly; adjust the term or the goal" },
+    "no_results": { "when": "The page says there were no results matching the query", "verdict": "bug" }
+  },
+  "assert": [
+    { "url_matches": "**/wiki/Playwright_(software)" },
+    { "text_contains": "Microsoft" }
+  ],
+  "budget": { "max_steps": 10, "max_seconds": 150 }
+}

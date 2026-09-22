@@ -1,0 +1,43 @@
+{
+  "id": "todo-add-filter",
+  "start_url": "https://demo.playwright.dev/todomvc/",
+  "goal": "Add the two given todos, mark 'buy milk' as completed, then open the Active filter, so that only 'walk the dog' is listed and the footer says '1 item left'.",
+  "notes": "Type a todo into the 'What needs to be done?' field and press Enter to add it. Each todo has a round checkbox on its left that marks it completed. The filters All / Active / Completed are links in the footer.",
+  "data": {
+    "first_todo": "buy milk",
+    "second_todo": "walk the dog"
+  },
+  "checks": {
+    "two_todos": "The list shows both 'buy milk' and 'walk the dog'",
+    "milk_done": "The todo 'buy milk' is shown as completed (checked and struck through)",
+    "one_left": "The footer says '1 item left'"
+  },
+  "outcomes": {
+    "active_filtered": {
+      "when": "The Active filter is selected and the list shows only 'walk the dog'. The footer says '1 item left'",
+      "verdict": "pass",
+      "requires": [
+        "one_left"
+      ]
+    },
+    "app_error": {
+      "when": "An error message or a blank page is shown instead of the todo list",
+      "verdict": "bug"
+    }
+  },
+  "assert": [
+    {
+      "url_matches": "**/#/active"
+    },
+    {
+      "text_contains": "1 item left"
+    },
+    {
+      "text_contains": "walk the dog"
+    }
+  ],
+  "budget": {
+    "max_steps": 12,
+    "max_seconds": 150
+  }
+}

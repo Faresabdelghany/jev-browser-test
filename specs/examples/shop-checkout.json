@@ -1,0 +1,31 @@
+{
+  "id": "shop-checkout",
+  "start_url": "https://www.saucedemo.com/",
+  "goal": "Add the Sauce Labs Bolt T-Shirt to the cart, open the cart, check out with the given first name, last name and postal code, and finish the order, so that the confirmation 'Thank you for your order!' is shown.",
+  "notes": "Every product card has its own Add to cart button; use the one in the Sauce Labs Bolt T-Shirt card. The cart icon in the top-right corner opens the cart. Checkout asks for First Name, Last Name and Zip/Postal Code, then Continue, then Finish.",
+  "data": { "first_name": "Ada", "last_name": "Lovelace", "zip_postal_code": "12345" },
+  "setup": [
+    { "action": "fill", "selector": "#user-name", "value": "standard_user" },
+    { "action": "fill", "selector": "#password", "value": "secret_sauce" },
+    { "action": "click", "selector": "#login-button" },
+    { "action": "wait_for", "url": "**/inventory.html" }
+  ],
+  "checks": {
+    "cart_has_one_item": "The cart icon in the header shows the badge 1",
+    "on_checkout_form": "The page heading says 'Checkout: Your Information' and shows First Name, Last Name and Zip/Postal Code fields",
+    "overview_lists_tshirt": "The page heading says 'Checkout: Overview' and the item list includes Sauce Labs Bolt T-Shirt",
+    "field_error": "A red error message says a field is required or has a problem"
+  },
+  "outcomes": {
+    "order_complete": { "when": "The page heading says 'Checkout: Complete!' and the text 'Thank you for your order!' is shown", "verdict": "pass" },
+    "form_error": { "when": "The checkout form shows a red error message such as 'Error: Last Name is required'", "verdict": "bug",
+                    "note": "every field has a value in data; a required-field error after they were filled is the app's defect" },
+    "app_error": { "when": "An error page, a stack trace or 'something went wrong' text is shown", "verdict": "bug" }
+  },
+  "assert": [
+    { "url_matches": "**/checkout-complete.html" },
+    { "text_contains": "Thank you for your order!" },
+    { "element_present": { "role": "button", "name": "Back Home" } }
+  ],
+  "budget": { "max_steps": 16, "max_seconds": 180 }
+}

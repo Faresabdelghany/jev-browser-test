@@ -1,0 +1,16 @@
+{
+  "id": "load-wait",
+  "start_url": "https://the-internet.herokuapp.com/dynamic_loading/1",
+  "goal": "Press Start and wait for the loading to finish, so that the text 'Hello World!' is displayed.",
+  "notes": "After Start the page shows a loading indicator for several seconds; wait for it rather than pressing anything else.",
+  "checks": {
+    "loading": "A loading indicator or the text 'Loading...' is visible",
+    "hello": "The text 'Hello World!' is displayed"
+  },
+  "outcomes": {
+    "loaded": { "when": "The text 'Hello World!' is displayed below the heading", "verdict": "pass" },
+    "app_error": { "when": "An error message or an error page is shown", "verdict": "bug" }
+  },
+  "assert": [ { "text_contains": "Hello World!" } ],
+  "budget": { "max_steps": 14, "max_seconds": 120 }
+}

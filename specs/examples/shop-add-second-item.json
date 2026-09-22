@@ -1,0 +1,27 @@
+{
+  "id": "shop-add-second-item",
+  "start_url": "https://www.saucedemo.com/",
+  "goal": "Add the Sauce Labs Bike Light to the cart and open the cart page, so that the cart lists the Sauce Labs Bike Light.",
+  "notes": "Every product card has its own Add to cart button; use the one in the Sauce Labs Bike Light card. The cart icon in the top-right corner opens the cart.",
+  "setup": [
+    { "action": "fill", "selector": "#user-name", "value": "standard_user" },
+    { "action": "fill", "selector": "#password", "value": "secret_sauce" },
+    { "action": "click", "selector": "#login-button" },
+    { "action": "wait_for", "url": "**/inventory.html" }
+  ],
+  "checks": {
+    "cart_has_one_item": "The cart icon in the header shows the badge 1",
+    "on_cart_page": "The page heading says 'Your Cart'"
+  },
+  "outcomes": {
+    "bike_light_in_cart": { "when": "The page heading says 'Your Cart' and the only item listed is Sauce Labs Bike Light", "verdict": "pass" },
+    "other_item_in_cart": { "when": "The page heading says 'Your Cart' and it lists a product that is not the Sauce Labs Bike Light", "verdict": "needs_human",
+                            "note": "the wrong product was added: check which Add to cart button was clicked (are the buttons distinguishable in the element table?)" },
+    "empty_cart": { "when": "The page heading says 'Your Cart' and no product is listed", "verdict": "bug" }
+  },
+  "assert": [
+    { "url_matches": "**/cart.html" },
+    { "text_contains": "Sauce Labs Bike Light" }
+  ],
+  "budget": { "max_steps": 8, "max_seconds": 120 }
+}

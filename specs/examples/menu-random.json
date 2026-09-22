@@ -1,0 +1,14 @@
+{
+  "id": "menu-random",
+  "start_url": "https://the-internet.herokuapp.com/disappearing_elements",
+  "goal": "Read the navigation menu on this page and report whether every one of the five entries Home, About, Contact Us, Portfolio and Gallery is listed. Do not click anything.",
+  "notes": "The page is static: what is listed on load is the result. One of the entries is dropped at random on some loads.",
+  "checks": { "gallery_listed": "The menu lists a 'Gallery' entry" },
+  "outcomes": {
+    "all_entries": { "when": "The menu lists Home, About, Contact Us, Portfolio and Gallery", "verdict": "pass" },
+    "entry_missing": { "when": "The menu lists Home, About, Contact Us and Portfolio but has no Gallery entry", "verdict": "bug",
+                       "note": "this page drops an entry at random by design: across repeats the suite should report it flaky" }
+  },
+  "assert": [ { "element_present": { "role": "link", "name": "Gallery" } } ],
+  "budget": { "max_steps": 4, "max_seconds": 60 }
+}

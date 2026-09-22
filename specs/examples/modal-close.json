@@ -1,0 +1,14 @@
+{
+  "id": "modal-close",
+  "start_url": "https://the-internet.herokuapp.com/entry_ad",
+  "goal": "Close the modal window that appears on page load, so that the page's own content, including the 'click here' link that re-enables the ad, can be used.",
+  "checks": {
+    "modal_open": "A modal window is shown over the page",
+    "content_usable": "The 'Entry Ad' heading and a 'click here' link are visible and not covered"
+  },
+  "outcomes": {
+    "modal_closed": { "when": "No modal window covers the page and the 'Entry Ad' heading with its 'click here' link is visible", "verdict": "pass" }
+  },
+  "assert": [ { "element_present": { "role": "link", "name": "click here" } } ],
+  "budget": { "max_steps": 6, "max_seconds": 60 }
+}
