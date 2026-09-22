@@ -353,7 +353,14 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     def violated(checks: dict) -> list[str]:
         return [c for c in spec["never"] if checks.get(c, 0.0) >= th["never_true"]]
 
+    timing: dict = {}  # where the wall-clock went: launch, navigation, setup, steps, final
+
+    def lap(name: str, since: float) -> float:
+        timing[name] = int((time.perf_counter() - since) * 1000)
+        return time.perf_counter()
+
     with sync_playwright() as p:
+        t_lap = time.perf_counter()
         cdp_url = spec["browser"]["cdp_url"]
         viewport = {"width": spec["browser"]["viewport"][0], "height": spec["browser"]["viewport"][1]}
         created_context = True
@@ -382,10 +389,13 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
             page = context.new_page()
             trace["browser"] = {"attached": False}
         page.set_default_timeout(spec["browser"]["action_timeout_ms"])
+        t_lap = lap("launch_ms", t_lap)
         try:
             page.goto(spec["start_url"], wait_until="domcontentloaded")
             settle(page, spec)
+            t_lap = lap("navigation_ms", t_lap)
             trace["setup"] = run_setup(page, spec)
+            t_lap = lap("setup_ms", t_lap)
 
             for n in range(1, budget["max_steps"] + 1):
                 if time.perf_counter() - t_start > budget["max_seconds"]:
@@ -578,6 +588,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                 trace["steps"].append(step)
             else:
                 status = "budget_exhausted"
+            t_lap = lap("steps_ms", t_lap)
 
             if status == "budget_exhausted":
                 # One last look: did the final action happen to reach the goal?
@@ -603,6 +614,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     "checks": last.get("checks", {}),
                 }
             trace["final"]["screenshot"] = shot(page, "final.png")
+            lap("final_ms", t_lap)
         except Exception as e:  # noqa: BLE001
             status, error = "error", f"{type(e).__name__}: {str(e)[:500]}"
             try:
@@ -629,6 +641,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     trace["error"] = error
     trace["ended_at"] = now_iso()
     trace["duration_ms"] = int((time.perf_counter() - t_start) * 1000)
+    trace["timing"] = timing
     trace["actions_executed"] = sum(
         1 for s in trace["steps"]
         if s.get("executed", {}).get("action") not in (None, "STOP", "DONE", "AUTO_DONE", "BLOCKED")

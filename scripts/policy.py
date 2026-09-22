@@ -136,6 +136,18 @@ def build_state(spec: dict, obs: dict, step: int, history: list[dict]) -> dict:
     return state
 
 
+# Plain question wording with the premise named ("If the next operation is CLICK, ..."). The implicit
+# phrasing was measured too (docs/superpowers/measurements/2026-09-22-track1-ab-phrasing-implicit.json) and
+# tied, so the wording that matches jev-ultrafast's practice stays.
+QUESTIONS = {
+    "operation": "Given the goal, the actions so far and the current page, which single operation should be performed next?",
+    "CLICK": "If the next operation is CLICK, which element should be clicked to make progress toward the goal?",
+    "TYPE_TEXT": "If the next operation is TYPE_TEXT, which text field should receive the value?",
+    "type_value": "If the next operation is TYPE_TEXT, which of the available data values should be typed?",
+    "SELECT": "If the next operation is SELECT, which dropdown option should be chosen?",
+}
+
+
 def build_questions(spec: dict, obs: dict, last_operation: str | None) -> tuple[dict, dict]:
     """Return (questions, meta).
 
@@ -167,19 +179,23 @@ def build_questions(spec: dict, obs: dict, last_operation: str | None) -> tuple[
     ops["BLOCKED"] = OPERATION_DESCRIPTIONS["BLOCKED"]
 
     goal = spec["goal"]
+    rules = bool(spec.get("rules"))  # off by default: see rules.py for the measurement that decided it
 
-    def target_instructions(operation: str) -> dict:
-        return {"goal": goal, "operation": operation, "rules": [NEXT_ACTION, TARGET]}
+    def op_instructions():
+        return {"goal": goal, "rules": NEXT_ACTION} if rules else QUESTIONS["operation"]
 
-    questions = {"operation": choice({"goal": goal, "rules": NEXT_ACTION}, ops)}
+    def target_instructions(operation: str):
+        return {"goal": goal, "operation": operation, "rules": [NEXT_ACTION, TARGET]} if rules else QUESTIONS[operation]
+
+    def value_instructions():
+        return {"goal": goal, "operation": "TYPE_TEXT", "rules": [NEXT_ACTION, VALUE]} if rules else QUESTIONS["type_value"]
+
+    questions = {"operation": choice(op_instructions(), ops)}
     if "CLICK" in ops:
         questions["click_target"] = choice(target_instructions("CLICK"), {str(e["idx"]): target_criterion(e) for e in clickable})
     if "TYPE_TEXT" in ops:
         questions["type_target"] = choice(target_instructions("TYPE_TEXT"), {str(e["idx"]): target_criterion(e) for e in typable})
-        questions["type_value"] = choice(
-            {"goal": goal, "operation": "TYPE_TEXT", "rules": [NEXT_ACTION, VALUE]},
-            {d["key"]: d for d in data_values(spec)},
-        )
+        questions["type_value"] = choice(value_instructions(), {d["key"]: d for d in data_values(spec)})
     if "SELECT" in ops:
         # element_operations only reports SELECT when at least one option is enabled, so this is never empty
         select_options = {
@@ -190,7 +206,7 @@ def build_questions(spec: dict, obs: dict, last_operation: str | None) -> tuple[
         questions["select_target"] = choice(target_instructions("SELECT"), select_options)
 
     for name, statement in spec["checks"].items():
-        questions[name] = noul({"statement": statement, "rules": CHECK})
+        questions[name] = noul({"statement": statement, "rules": CHECK} if rules else statement)
     meta = {
         "operations": list(ops),
         "offered": {k: list(q["criteria"]) for k, q in questions.items() if q["type"] == "choice"},

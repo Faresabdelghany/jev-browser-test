@@ -1,6 +1,6 @@
-"""The standing rules Jev is given with every question, as structured `instructions`.
+"""Standing rules for Jev, attachable to every question as structured `instructions` (spec `"rules": true`).
 
-TypeSafe accepts `instructions` as an object, so each question carries the goal plus the rule text that
+TypeSafe accepts `instructions` as an object, so each question can carry the goal plus the rule text that
 applies to it: `operation` gets {"goal", "rules": NEXT_ACTION}; the target questions get
 {"goal", "operation", "rules": [NEXT_ACTION, TARGET]}; `type_value` gets {"goal", "operation": "TYPE_TEXT",
 "rules": [NEXT_ACTION, VALUE]}; every check Noul gets {"statement", "rules": CHECK}.
@@ -8,6 +8,14 @@ applies to it: `operation` gets {"goal", "rules": NEXT_ACTION}; the target quest
 Adapted from browser-use/jev-ultrafast's questions.py for a loop with prepared values (no text model:
 TYPE_TEXT means choosing one of `available_data_values`). The untrusted-page-text guard is in both
 NEXT_ACTION and CHECK: nothing on the page can change the goal or the rules.
+
+**Off by default.** Measured on the-internet.herokuapp.com (docs/superpowers/measurements/
+2026-09-22-track1-ab-*.json, 3 runs per variant): with the rules attached in any form tried (full, light,
+without the BLOCKED sentences, or just the two guard sentences) the `operation` decision lost confidence
+(smoke-login 0.95 -> 0.50-0.57; the bad-password spec hesitated between TYPE_TEXT and BLOCKED at ~0.4
+because the page text hints at the right password) and the CHECK rule pulled a borderline check from
+0.85 to 0.68. Without them the same runs pass at 0.95-0.99. Turn them on per spec for apps where Jev
+repeats no-op actions or where page text tries to steer it, and measure with scripts/bench.py.
 """
 
 NEXT_ACTION = (

@@ -32,6 +32,10 @@ DEFAULTS = {
     "never": [],
     "auto_done": True,
     "fail_fast": True,
+    # Attach the standing rules (scripts/rules.py) to every question. Measured on the demo site they lowered
+    # decision confidence in every wording tried (docs/superpowers/measurements/2026-09-22-track1-ab-*.json),
+    # so they are opt-in for apps where Jev repeats no-op actions or needs the untrusted-page-text guard.
+    "rules": False,
     "budget": {"max_steps": 25, "max_seconds": 240},
     "thresholds": {
         "check_true": 0.8,
@@ -209,6 +213,9 @@ def validate(spec: dict) -> list[str]:
     ss = o.get("screenshots", "key")
     if not (ss is True or ss is False or ss == "key"):
         errors.append("'observation.screenshots' must be true, false or \"key\"")
+    for k in ("auto_done", "fail_fast", "rules"):
+        if not isinstance(spec.get(k, False), bool):
+            errors.append(f"'{k}' must be true or false")
     return errors
 
 

@@ -1,0 +1,226 @@
+{
+  "label": "track1-ab-light-rules",
+  "timestamp": "2026-09-22T08:33:18+03:00",
+  "git_commit": "f693ebb",
+  "repeat": 3,
+  "run_args": [],
+  "env": {
+    "JEV_STATE": "structured",
+    "JEV_CRITERIA": "objects",
+    "JEV_RULES": "light",
+    "JEV_CHECK_RULE": "off"
+  },
+  "specs": {
+    "smoke-login": {
+      "spec": "specs/smoke-login.json",
+      "runs": [
+        {
+          "out_dir": "runs/bench/smoke-login/20260922-083318-01",
+          "exit_code": 0,
+          "wall_ms": 5690,
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 5545,
+          "jev_ms": 1984,
+          "browser_ms": 886,
+          "requests": 5,
+          "input_tokens": 9609,
+          "output_tokens": 991,
+          "model": "jev-1.13.0",
+          "steps": 5,
+          "actions_executed": 3,
+          "decision_confidence": 0.605,
+          "min_decision_confidence": 0.42,
+          "step_confidences": [
+            0.42,
+            0.58,
+            0.63,
+            0.96
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 1
+        },
+        {
+          "out_dir": "runs/bench/smoke-login/20260922-083318-02",
+          "exit_code": 1,
+          "wall_ms": 4682,
+          "status": "low_confidence",
+          "pass": false,
+          "error": null,
+          "duration_ms": 4531,
+          "jev_ms": 1500,
+          "browser_ms": 223,
+          "requests": 3,
+          "input_tokens": 5929,
+          "output_tokens": 630,
+          "model": "jev-1.13.0",
+          "steps": 3,
+          "actions_executed": 0,
+          "decision_confidence": 0.39,
+          "min_decision_confidence": 0.39,
+          "step_confidences": [
+            0.39,
+            0.39,
+            0.47
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 3
+        },
+        {
+          "out_dir": "runs/bench/smoke-login/20260922-083318-03",
+          "exit_code": 0,
+          "wall_ms": 5699,
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 5555,
+          "jev_ms": 2195,
+          "browser_ms": 847,
+          "requests": 5,
+          "input_tokens": 9644,
+          "output_tokens": 999,
+          "model": "jev-1.13.0",
+          "steps": 5,
+          "actions_executed": 3,
+          "decision_confidence": 0.57,
+          "min_decision_confidence": 0.4,
+          "step_confidences": [
+            0.52,
+            0.4,
+            0.62,
+            0.99
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 1
+        }
+      ],
+      "medians": {
+        "wall_ms": 5690,
+        "duration_ms": 5545,
+        "jev_ms": 1984,
+        "browser_ms": 847,
+        "requests": 5,
+        "input_tokens": 9609,
+        "output_tokens": 991,
+        "steps": 5,
+        "actions_executed": 3,
+        "decision_confidence": 0.57,
+        "min_decision_confidence": 0.4,
+        "stale_steps": 0,
+        "decision_confidence_all_steps": 0.52
+      },
+      "status_counts": {
+        "passed": 2,
+        "low_confidence": 1
+      },
+      "outcome_counts": {},
+      "stale_steps_total": 0,
+      "passes": 2
+    },
+    "smoke-login-badpw": {
+      "spec": "specs/smoke-login-badpw.json",
+      "runs": [
+        {
+          "out_dir": "runs/bench/smoke-login-badpw/20260922-083318-01",
+          "exit_code": 1,
+          "wall_ms": 4441,
+          "status": "low_confidence",
+          "pass": false,
+          "error": null,
+          "duration_ms": 4288,
+          "jev_ms": 1418,
+          "browser_ms": 220,
+          "requests": 3,
+          "input_tokens": 5893,
+          "output_tokens": 631,
+          "model": "jev-1.13.0",
+          "steps": 3,
+          "actions_executed": 0,
+          "decision_confidence": 0.32,
+          "min_decision_confidence": 0.29,
+          "step_confidences": [
+            0.32,
+            0.45,
+            0.29
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 3
+        },
+        {
+          "out_dir": "runs/bench/smoke-login-badpw/20260922-083318-02",
+          "exit_code": 1,
+          "wall_ms": 4375,
+          "status": "low_confidence",
+          "pass": false,
+          "error": null,
+          "duration_ms": 4189,
+          "jev_ms": 1400,
+          "browser_ms": 217,
+          "requests": 3,
+          "input_tokens": 5893,
+          "output_tokens": 630,
+          "model": "jev-1.13.0",
+          "steps": 3,
+          "actions_executed": 0,
+          "decision_confidence": 0.42,
+          "min_decision_confidence": 0.38,
+          "step_confidences": [
+            0.38,
+            0.45,
+            0.42
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 3
+        },
+        {
+          "out_dir": "runs/bench/smoke-login-badpw/20260922-083318-03",
+          "exit_code": 1,
+          "wall_ms": 4341,
+          "status": "low_confidence",
+          "pass": false,
+          "error": null,
+          "duration_ms": 4192,
+          "jev_ms": 1392,
+          "browser_ms": 218,
+          "requests": 3,
+          "input_tokens": 5893,
+          "output_tokens": 631,
+          "model": "jev-1.13.0",
+          "steps": 3,
+          "actions_executed": 0,
+          "decision_confidence": 0.43,
+          "min_decision_confidence": 0.32,
+          "step_confidences": [
+            0.32,
+            0.43,
+            0.43
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 3
+        }
+      ],
+      "medians": {
+        "wall_ms": 4375,
+        "duration_ms": 4192,
+        "jev_ms": 1400,
+        "browser_ms": 218,
+        "requests": 3,
+        "input_tokens": 5893,
+        "output_tokens": 631,
+        "steps": 3,
+        "actions_executed": 0,
+        "decision_confidence": 0.42,
+        "min_decision_confidence": 0.32,
+        "stale_steps": 0,
+        "decision_confidence_all_steps": 0.42
+      },
+      "status_counts": {
+        "low_confidence": 3
+      },
+      "outcome_counts": {},
+      "stale_steps_total": 0,
+      "passes": 0
+    }
+  }
+}

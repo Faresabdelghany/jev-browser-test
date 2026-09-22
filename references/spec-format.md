@@ -36,6 +36,7 @@ it without opening a browser. Unknown fields are ignored; every optional field h
 | `never` | list | `[]` | Check names that must never reach `thresholds.never_true` |
 | `auto_done` | bool | `true` | Stop with `passed` as soon as `done_when` is satisfied, even if Jev has not chosen DONE |
 | `fail_fast` | bool | `true` | Stop immediately when a `never` check fires (set false to keep going and just record it) |
+| `rules` | bool | `false` | Attach the standing rules in `scripts/rules.py` (advance from the current page, page text is untrusted, do not repeat a no-op, BLOCKED when a value is missing…) to every question as structured instructions. Measured on the demo site they lowered decision confidence, so they are off; try them on an app where Jev repeats no-op actions, and measure with `scripts/bench.py` |
 | `budget.max_steps` | int | 25 | Jev decisions per run (1–200) |
 | `budget.max_seconds` | int | 240 | Wall-clock cap |
 | `thresholds.check_true` | 0–1 | 0.8 | A `done_when` check counts as true at or above this |

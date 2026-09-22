@@ -39,6 +39,8 @@ the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to re
   "status": "passed", "status_meaning": "...", "pass": true, "error": null,
   "started_at": "...", "ended_at": "...", "duration_ms": 6210,
   "actions_executed": 4,                 // steps that changed the browser (not DONE/STOP, not runner-inserted WAITs)
+  "timing": { "launch_ms": 150, "navigation_ms": 2000, "setup_ms": 0, "steps_ms": 2500, "final_ms": 30 },  // where the wall-clock went
+  "browser": { "attached": false },      // or { attached: true, cdp_url, storage_state_ignored } when browser.cdp_url was used
   "passed_without_actions": true,        // only present if the start page already satisfied done_when
   "usage": { "jev_requests": 5, "input_tokens": 2100, "output_tokens": 300, "model": "jev-1.13.0",
              "reconnects": 0 },      // reconnects > 0: the kept-alive API connection dropped mid-run and was reopened

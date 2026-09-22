@@ -202,6 +202,9 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
       const tag = el.tagName.toLowerCase();
       if (tag === 'script' || tag === 'style' || tag === 'template' || tag === 'noscript') continue;
       if (el.matches(SEL)) continue;                    // already considered in pass 1
+      // A <label> whose control is already in the table adds nothing but a tempting no-op click
+      // (measured: Jev clicked "Username" before typing into it). Pass 2 keeps labels of hidden controls.
+      if (tag === 'label' && el.control && seen.has(el.control)) continue;
       const r = el.getBoundingClientRect();
       if (r.width < 2 || r.height < 2 || r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) continue;
       if (getComputedStyle(el).cursor !== 'pointer') continue;

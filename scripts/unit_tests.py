@@ -636,10 +636,22 @@ class FingerprintCompareTests(unittest.TestCase):
 
 
 class RulesTests(unittest.TestCase):
-    def test_questions_carry_structured_instructions(self) -> None:
+    def test_rules_off_by_default_plain_wording(self) -> None:
+        from policy import QUESTIONS
+
+        self.assertFalse(DEFAULTS["rules"])
+        questions, _ = build_questions(SPEC, observation(ELEMENTS), None)
+        self.assertEqual(questions["operation"]["instructions"], QUESTIONS["operation"])
+        self.assertEqual(questions["click_target"]["instructions"], QUESTIONS["CLICK"])
+        self.assertEqual(questions["type_value"]["instructions"], QUESTIONS["type_value"])
+        self.assertEqual(questions["ok"], {"type": "noul", "instructions": "The page says welcome"})
+        from spec import validate
+        self.assertTrue(any("'rules'" in p for p in validate(_merge(SPEC, {"rules": "yes"}))))
+
+    def test_questions_carry_structured_instructions_when_enabled(self) -> None:
         from rules import CHECK, NEXT_ACTION, TARGET, VALUE
 
-        questions, _ = build_questions(SPEC, observation(ELEMENTS), None)
+        questions, _ = build_questions(_merge(SPEC, {"rules": True}), observation(ELEMENTS), None)
         self.assertEqual(questions["operation"]["instructions"], {"goal": "g", "rules": NEXT_ACTION})
         self.assertEqual(questions["click_target"]["instructions"], {"goal": "g", "operation": "CLICK", "rules": [NEXT_ACTION, TARGET]})
         self.assertEqual(questions["type_target"]["instructions"], {"goal": "g", "operation": "TYPE_TEXT", "rules": [NEXT_ACTION, TARGET]})

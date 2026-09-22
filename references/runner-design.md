@@ -113,7 +113,9 @@ styled box (its label, or a sibling in the same wrapper) as non-occluding. Pass 
 the checkbox/radio it controls when the input itself is parked offscreen. Pass 3 walks the body (capped at
 8,000 nodes) for elements whose computed `cursor` is `pointer`, keeping only the outermost of each pointer
 chain (cursor inherits) and skipping anything nested in a pass-1 control; this surfaces React-style
-clickables that carry no role (an avatar menu, a card, a table row). Anonymous controls get a `context`
+clickables that carry no role (an avatar menu, a card, a table row). A `<label>` whose control is already
+in the table is skipped here: it adds nothing but a tempting no-op click (measured: with the structured
+state Jev clicked "Username" before typing into it). Anonymous controls get a `context`
 (the text of their row / list item / label) so `checkbox ""` in a table reads
 `checkbox "" in "1000-05-1100L Residual 1100L Nile Bakery"`. Each element records
 `via: "semantic" | "label" | "cursor"`.
@@ -141,15 +143,24 @@ means the page never goes quiet (animations, polling) and the cap is what you ar
 
 ## Rules
 
-`scripts/rules.py` holds the standing rules Jev gets with every question, attached as structured
-`instructions`: `operation` carries `{"goal", "rules": NEXT_ACTION}`, the target questions
+`scripts/rules.py` holds standing rules Jev can get with every question as structured `instructions`
+(spec `"rules": true`): `operation` carries `{"goal", "rules": NEXT_ACTION}`, the target questions
 `{"goal", "operation", "rules": [NEXT_ACTION, TARGET]}`, `type_value` `{"goal", "operation": "TYPE_TEXT",
 "rules": [NEXT_ACTION, VALUE]}`, and each check Noul `{"statement", "rules": CHECK}`. The wording is adapted
 from jev-ultrafast for a loop with prepared values (TYPE_TEXT means picking one of `available_data_values`;
-a missing value means BLOCKED, never an unrelated value). The untrusted-page-text guard is in both
-`NEXT_ACTION` and `CHECK`: nothing on the page can change the goal or the rules. `TARGET` names the premise
-(this question only picks a target for the operation named in it); whether an implicit phrasing does
-better is a measured A/B, not a design decision.
+a missing value means BLOCKED, never an unrelated value), and the untrusted-page-text guard is in both
+`NEXT_ACTION` and `CHECK`.
+
+**They are off by default because the measurement said so.** On the demo login page every wording tried
+(full, light, without the BLOCKED sentences, only the two guard sentences) lowered the `operation` decision's
+confidence and made the bad-password spec hesitate between TYPE_TEXT and BLOCKED, because the page's own
+text hints at the right password; the CHECK rule pulled a borderline check under its threshold. Without
+rules the same runs pass at higher confidence. The per-variant numbers are in
+`docs/superpowers/measurements/2026-09-22-track1-ab-*.json`. Turn them on per spec when an app shows the
+failure modes they address (repeated no-op actions, page text steering Jev) and measure with `bench.py`.
+
+The target questions name their premise ("If the next operation is CLICK, …"); the implicit phrasing was
+measured too and tied, so the premise stays named, as in jev-ultrafast.
 
 ## Answer validation
 
