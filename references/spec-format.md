@@ -108,14 +108,14 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `thresholds.max_stale` | int | 3 | Consecutive decisions invalidated because the page changed while Jev was deciding (nothing executed) → `unstable_page` |
 | `browser.headless` | bool | `true` | `--headed` on the CLI overrides |
 | `browser.viewport` | [w, h] | [1280, 800] | |
-| `browser.settle_ms` | int | 400 | **Cap** on the wait after every action: the runner observes as soon as two animation frames have passed and the DOM has been quiet for `quiet_ms`, or when this cap is reached. Raise for slow apps (specs that raised it for the old fixed pause just get a longer cap) |
+| `browser.settle_ms` | int | 400 | **Cap** on the wait after every action: the runner observes as soon as two animation frames have passed and the DOM has been quiet for `quiet_ms`, or when this cap is reached. Raise for slow apps (specs that raised it for the old fixed pause just get a longer cap). A WAIT Jev chooses pauses this long; chosen again on an unchanged page it pauses × 2, × 4 and then × 4 (block F) |
 | `browser.quiet_ms` | int | 100 | How long the DOM must go without a mutation before the page counts as settled. Must be ≤ `settle_ms` |
 | `browser.action_timeout_ms` | int | 8000 | Playwright timeout per click/fill |
 | `browser.storage_state` | path | null | Playwright storage state file (cookies/localStorage) for pre-authenticated sessions |
 | `browser.channel` | string | null | e.g. `"chrome"` to use an installed Chrome instead of bundled Chromium |
 | `browser.cdp_url` | URL | null | Attach to a browser that is already running instead of launching one (see below). `storage_state`, `headless` and `channel` are ignored when attached |
 | `observation.max_elements` | int | 200 | Cap on numbered elements per step (largest Choice Jev sees), 1–250. Elements beyond it are reported as `truncated_elements` and cannot be chosen |
-| `observation.max_text_chars` | int | 4000 | Visible text sent as state, viewport-first: what is on screen comes first, then the rest of the page, cut here (≥ 100) |
+| `observation.max_text_chars` | int | 2000 | Visible text sent as state, viewport-first: what is on screen comes first, then the rest of the page, cut here (≥ 100). Was 4000; 2000 saved ~450 input tokens on each step of a long article with the same decisions (block F). Raise it for a page whose deciding text sits below the first screen |
 | `observation.screenshots` | `true` \| `false` \| `"key"` | `"key"` | Which steps get a `steps/NNN.png`, taken after Jev's answer and before the action (so it shows the page Jev decided on). `"key"`: the terminal step and any step flagged `outcome_seen`, `pending_outcome`, `outcome_unconfirmed`, `never_violated`, `low_confidence`, `stale` or `repeat_count ≥ 2`, plus `NNN-failed.png` after a failed action and `final.png`. `true`: every step. `false`: nothing. CLI: `--screenshots all|key|none`. Capture, not encoding, is the cost, so `"key"` is the default; rerun with `--screenshots all` when a human needs the picture of an ordinary step |
 
 ## Attach to a running browser

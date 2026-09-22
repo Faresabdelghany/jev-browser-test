@@ -138,8 +138,9 @@ Then the results contract (`2026-09-22-track2-{before,after}.json`), which is wh
 | `smoke-login` | passed 5/5, 4.8 s, 4 requests, 5.1k tokens | `logged_in` (pass) 5/5 confirmed with 3/3 assertions, 6.0 s, 6 requests, 8.9k tokens |
 | `smoke-login-badpw` (wrong password on purpose) | `never_violated` 2/5, `low_confidence` 3/5, 6.4 s, confidence 0.41 | `bad_credentials` (pass) 5/5, seen the first step the message is on screen, 6.1 s, confidence 0.93 |
 
-The contract costs one confirmation step and one adjudication request per run, and the two extra Choices
-per step are where the extra tokens go; what it buys is a run that comes back as one declared outcome
+The contract costs one confirmation step and one adjudication request per run, and the extra `outcome`
+Choice per step is where the extra tokens go (the `blocked_reason` Choice rode on every step until block F
+below; it is now asked only where its answer is read); what it buys is a run that comes back as one declared outcome
 with the page's own line as evidence, and a negative test that is decided the moment its message appears
 instead of hovering under a threshold.
 
@@ -148,6 +149,14 @@ that commit): the same results in 5/5 runs of both specs, 6.4 s and 6.3 s, the s
 token counts, confidence 0.94 and 0.92; the suite of both specs × 5 repeats on 4 workers took 20.8 s, all
 pass (`2026-09-22-review-fixes-suite.json`). `docs/superpowers/measurements/README.md` has the row-by-row
 comparison.
+
+Block F (2026-09-22, `b3996fa` → `1890405`, five levers each measured from a clean export of its commit,
+`docs/superpowers/measurements/README.md` "Block F"): `blocked_reason` asked only where its answer is read,
+shorter reason texts, the adjudication's page lines sent once, a WAIT backoff on unchanged pages and a
+2,000-char text cap. `smoke-login` 8,932 → 7,753 input tokens per run (−13%), the wrong-password spec
+9,774 → 8,580 (−12%), a 5 s loader 12,901 → 8,059 with 10 → 8 requests (+1.0 s wall-clock: the last
+backed-off pause overshoots the loader), a long encyclopedia article 47,872 → 43,990 (−8%); the same
+outcomes, evidence lines and sighting steps in every run.
 
 ## Layout
 

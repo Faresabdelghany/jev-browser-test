@@ -108,6 +108,8 @@ failure), then a page-side promise that resolves after two animation frames **an
 wait for a visible `[role=option]` up to 200 ms. `browser.settle_ms` keeps its name but becomes the
 **cap** (default 600 → 400); `browser.quiet_ms` is new. Specs that raised `settle_ms` for slow apps keep
 working: they get a longer cap.
+*Amended 2026-09-22 (lever F4):* a WAIT chosen again on a page whose signature has not changed since the
+last WAIT pauses `settle_ms` × 2, × 4 and then × 4; measured on a 5 s loader, 10 → 8 requests for +1.0 s.
 *Accept:* `latency_ms.browser` median ≤ 250 ms on the demo site; 5/5 repeats of both smoke specs
 unchanged in outcome.
 
@@ -135,6 +137,8 @@ values are finite in [0, 1], they sum to 1 ± 0.02, and `confidence` is in [0, 1
 viewport first, then the rest, up to `observation.max_text_chars` (default 2000 → 4000). Today it is
 `body.innerText` from the top, so 2,000 chars of header and navigation can crowd out the error toast the
 checks are looking for.
+*Amended 2026-09-22 (lever F5):* the default is 2000 again now that the text is viewport-first: on a long
+article 4,000 cost ~450 input tokens more on every step and changed no decision, sighting or evidence line.
 
 ### 4.9 Attach to a running browser — `browser.cdp_url`
 `chromium.connect_over_cdp(url)`; use the first existing context or create one; open a new page; on exit
@@ -252,6 +256,7 @@ each over the same lines; the most confident sentence's line is quoted (the firs
 is kept in `trace.adjudication.sentences`. One-sentence statements send exactly the request above. Still one request
 per run. Motivation: the trial's compound statements (a filter, a list content and a footer text in one
 clause) got no evidence line in 2 of 3 runs while `present` stayed high.
+*Lever F3 (same day):* the lines are sent once, in `state.lines`; the criteria point at them by id.
 
 ### 5.5 `result.json` — written beside `trace.json`; the file Claude reads first
 ```jsonc

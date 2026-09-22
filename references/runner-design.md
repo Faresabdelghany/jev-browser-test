@@ -91,7 +91,9 @@ helper; only the stale one skips the `settle_ms` pause, because the page is alre
 event-based settle is what waits for it to stop.
 
 After a seen outcome one adjudication request (`policy.build_adjudication`) sends the terminal page's visible
-text as up to 200 numbered lines with the outcome's statement (`observe.LINES_JS`: one line per block, the
+text as up to 200 numbered lines, once, in `state.lines` (the Choice's criteria point at them by id, `"line 3 of
+state.lines"`: a full second copy in the criteria cost about 2k tokens on a long article, block F) with the
+outcome's statement (`observe.LINES_JS`: one line per block, the
 lines in the viewport first, the same visibility rules as the observation, masked like it); `evidence_line`
 selects the line that states it (or `none`) and `evidence_present` re-judges the statement. Code copies the
 selected line verbatim into `result.evidence.line`: Jev cannot quote text, so selection is how a quote is
@@ -210,7 +212,11 @@ navigated meanwhile, it is retried once on the new document. The result lands on
 `settle: {ended: quiet | options | options_timeout | cap | navigated, ms}`: a run full of `cap` endings
 means the page never goes quiet (animations, polling) and the cap is what you are paying; raise
 `quiet_ms` only if observations come back before the app has rendered. The WAIT operation sleeps
-`settle_ms` and then settles normally.
+`settle_ms` and then settles normally; chosen again on a page whose signature has not changed since the
+last WAIT, it sleeps twice the previous pause, `settle_ms` × 1, 2, 4 and then 4 (`run_test.WAIT_BACKOFF_MAX`;
+the step records `wait_streak` and `executed.wait_ms`), so a loader that runs for seconds costs fewer requests
+(a 5 s loader: 10 → 8) at the price of the last pause's overshoot (+1.0 s there; block F of the measurements
+README). Runner-inserted WAITs never back off.
 
 ## Rules
 

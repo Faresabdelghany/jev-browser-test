@@ -144,7 +144,7 @@ environment failure (or a spec file is missing / two files share an id).
   "spec_id": "search-add-to-cart",
   "status": "passed", "status_meaning": "...", "pass": true, "error": null,
   "outcome": "item_added", "verdict": "pass",  // as in result.json; "result" holds the whole result.json, "outcomes" the effective outcomes (declared + synthesized)
-  "adjudication": { "outcome": "item_added", "statement": "...", "line": "Cart: 1 items", "line_id": "3", "present": 0.95, "confidence": 0.9, "latency_ms": 290 },
+  "adjudication": { "outcome": "item_added", "statement": "...", "line": "Cart: 1 items", "line_id": "3", "present": 0.95, "confidence": 0.9, "latency_ms": 290, "usage": { "input_tokens": 720, "output_tokens": 60 } },
   //   a statement of several sentences (split on ". ", "; ", ", and ") adds "sentences": [{ "sentence", "line_id", "line", "confidence" }, …],
   //   one Choice per sentence in the same request; "line" / "line_id" / "confidence" are those of the most confident sentence that found a line
   "started_at": "...", "ended_at": "...", "duration_ms": 6210,
@@ -185,8 +185,10 @@ environment failure (or a spec file is missing / two files share an id).
       "retried": true,                                               // only when the request was re-sent
       "stale": "target [3] changed: disabled",                       // only when the page changed during the decision; nothing was executed
       "executed": { "action": "CLICK", "ok": true, "error": null, "element": 3 },
+      //   a WAIT's executed carries "wait_ms", its pause: a WAIT chosen again on an unchanged page pauses settle_ms x 1, 2, 4, then 4 ("wait_streak" on the step)
       "settle": { "ended": "quiet", "ms": 118 },                     // how the post-action wait ended: quiet | options | options_timeout | cap | navigated
-      "latency_ms": { "jev": 131, "browser": 640 }
+      "latency_ms": { "jev": 131, "browser": 640 },
+      "usage": { "input_tokens": 1450, "output_tokens": 210 }  // this step's request's tokens; a retry or the reason follow-up adds to it
     }
   ],
   "final": { "url": "...", "title": "...", "checks": { "cart_has_item": 0.97 }, "screenshot": "steps/final.png" }  // url and title masked like a step's

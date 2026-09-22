@@ -376,3 +376,42 @@ What the file shows, against the trial's untracked runs at `cf24586` (3 repeats,
   "Hello World!" on a three-line page. A spec author who wants that line quoted writes "The page says 'Hello World!'".
 - **Time and tokens.** 97 s for 30 runs on 2 workers; the long encyclopedia page is a quarter of all input tokens
   (47,872 a run, 5 requests) and block F's text-cap lever is measured on it.
+
+## Block F (2026-09-22): the token and time levers, `b3996fa` → `1890405`
+
+Five levers from the post-trial brief, on Fares's yes, each committed and then measured from a `git archive`
+export of its commit with `GIT_COMMIT` set, `bench.py --repeat 5`: the two smoke specs every time, `load-wait`
+for the WAIT backoff, `wiki-search` for the long-page levers. Baseline `2026-09-22-levers-baseline-bench.json`
+at `b3996fa` (the examples commit; the runner is block G's `20833f2`, and its smoke numbers are identical to
+the real-app session's). Per lever: `2026-09-22-lever-f2-bench.json` (`69a80df`), `2026-09-22-lever-f1-bench.json`
+(`4486d53`), `2026-09-22-lever-f3-bench.json` (`bd44433`), `2026-09-22-levers-f4-f5-bench.json` (`1890405`; F4
+and F5 measured together because they touch disjoint runs: F4 only runs with consecutive WAITs, so `load-wait`;
+F5 only pages with more than 2,000 chars of text, so `wiki-search`; the smoke specs show that both leave them
+alone). Landed in the order F2, F1, F3, F4, F5; all five kept.
+
+| lever | what changed | measured on | input tokens per run (medians) | wall-clock | decisions and evidence |
+|---|---|---|---|---|---|
+| F2 `69a80df` | shorter `blocked_reason` descriptions | smoke | 8,932 → 8,762 and 9,774 → 9,604 (−170 each) | 6.5 → 7.1 s and 6.7 → 7.0 s (browser launch was slow that round, 408 ms against ~155) | same lines 5/5, sighting step 4, confidence 0.95 / 0.91 (was 0.94 / 0.92) |
+| F1 `4486d53` | `blocked_reason` asked only in a follow-up on a terminal step and on the final look | smoke | 8,762 → 7,742 and 9,604 → 8,584 (−1,020 each, −11.6%); output tokens 1,587 → 1,207 and 1,741 → 1,353 | 6.6 s and 6.6 s | same lines 5/5, sighting 4, confidence 0.95 / 0.92. The first bench of this commit hit an API stall: single requests of 3–13 s in 4 of 5 wrong-password runs, identical tokens and results, no reconnect (`2026-09-22-lever-f1-bench-stalled.json`, kept as the record); the numbers here are the clean re-run |
+| F3 `bd44433` | adjudication lines sent once (criteria point at `state.lines` by id); per-request `usage` in the trace | smoke, wiki | smoke 7,742 → 7,753 and 8,584 → 8,580 (short lines: a pointer is as long as the line); wiki 47,872 → 45,794 (−2,078; the adjudication request is 8,763 of them now) | 6.6 / 6.3 s; wiki 5.7 → 5.9 s | the same line in 15/15 runs; adjudication confidence smoke 0.99 → 0.96–0.98, wiki 0.41–0.49 → 0.43–0.47; `present` unchanged |
+| F4 `3f16bb6` | consecutive WAITs on an unchanged page pause settle_ms × 1, 2, 4, 4 | load-wait | 12,901 → 8,059 with 10 → 8 requests (WAITs of 400, 800, 1,600, 1,600 ms replace six of 400; F1 + F2 account for ~1.6k of the drop, the two missing requests for ~2.3k) | **10.3 → 11.5 s (+1.0 s)**: the last 1,600 ms pause overshoots the loader's end | pass 5/5, confidence 0.94 → 0.96, evidence "Hello World!" 5/5 (baseline 1/5: F3's doing, below) |
+| F5 `1890405` | default `observation.max_text_chars` 4000 → 2000 | wiki, smoke | wiki 45,794 → 43,990 (−1,804: −418 to −487 on each of the four steps); smoke unchanged (pages under 300 chars) | wiki 5.9 → 5.7 s | same line 5/5, sighting step 3, per-step decision confidence 0.99 / 0.70 as before, adjudication confidence 0.44–0.52 |
+
+Overall, `b3996fa` → `1890405`: `smoke-login` 8,932 → 7,753 input tokens per run (−13%), the wrong-password
+spec 9,774 → 8,580 (−12%), the 5 s loader 12,901 → 8,059 (−38%) and 10 → 8 requests, the encyclopedia article
+47,872 → 43,990 (−8%); wall-clock inside the run-to-run spread everywhere except the loader (+1.0 s); every
+outcome, evidence line and sighting step the same in every run of every bench.
+
+- **F4 is a trade, stated plainly.** Fewer requests, and a `max_steps` budget that now covers a loader about
+  2.7× longer, against about one second of overshoot on a 5 s loader. A cap of × 2 would sit on the same curve
+  (one request fewer saved, half the overshoot) and was not measured. `browser.settle_ms` sets the base and
+  `run_test.WAIT_BACKOFF_MAX` the cap: if time on loader pages matters more than requests, lower the cap.
+- **F3 changed one pick, for the better.** The loader statement "The text 'Hello World!' is displayed below the
+  heading" got its line in 1 of 5 baseline runs (and 0 of 3 in the examples suite) and in 5 of 5 after F3, at the
+  same low confidence (0.41–0.50): with pointer criteria, "no line" seems a less attractive answer than it was
+  beside a full second copy of the page. Every other statement's pick is identical before and after.
+- **The encyclopedia adjudication is hesitant either way** (confidence 0.41–0.52, `present` 0.41–0.51): its
+  statement is one clause with a bare "and" (heading plus first paragraph). Two sentences (block G) would be the
+  spec author's remedy; not changed here.
+- The F5 commit landed with a unit test and one selftest scenario still written for the old default;
+  `e44e359` fixed both (the pipeline that ran the suites had masked their exit codes; the handoff says so).
