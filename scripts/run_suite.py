@@ -14,9 +14,18 @@ runs are independent and the pool only bounds how many browsers are open at once
     undetermined); any disagreement -> `flaky`, with the distribution. Flaky is computed, not diagnosed.
   * for the suite: `all_pass` (every spec unanimously ended in a pass outcome) and the elapsed time.
 
+A run that wrote no `trace.json` at all is an **environment failure**, not an outcome: the runner exited 2
+(a spec or environment problem: missing key, unreachable browser), could not be launched, or was killed
+before it observed anything. It is recorded (`status: "error"`, `environment_failure: true`, the stderr
+tail in `error`), listed per spec under `environment_failures`, and left out of the outcome distribution,
+the agreement rate and the medians, so one launch failure among passes does not read `flaky`. A spec whose
+every run failed that way ends `undetermined` with `reason` saying so. A run whose trace or result is
+unreadable (the runner was killed mid-write) is different: it ran, so it is an `undetermined` error run in
+the distribution.
+
 Exit code 0 iff every spec is unanimously `pass`; 1 otherwise; 2 when the suite itself could not run (a
-spec file missing, two spec files with the same id, or no run at all produced a result: the environment,
-not the flows, failed).
+spec file missing, two spec files with the same id, or every run of every spec was an environment failure:
+the environment, not the flows, failed).
 
 This is the hands-off entry point for Claude: launch it in the background, do nothing until it returns,
 read results.json, and open a trace only for a spec that is `undetermined` or `flaky`.
@@ -39,6 +48,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RUN_TEST = os.path.join(HERE, "run_test.py")
 FLAKY = "flaky"
 MEDIAN_FIELDS = ("wall_ms", "duration_ms", "jev_ms", "browser_ms", "requests", "input_tokens", "decision_confidence", "steps")
+ENVIRONMENT_REASON = "every run failed in the environment before observing a page (no trace written): see environment_failures"
 
 
 def spec_id_of(spec_path: str) -> str:
@@ -51,19 +61,25 @@ def spec_id_of(spec_path: str) -> str:
 
 def run_once(runner: str, python: str, spec_path: str, out_dir: str, run_args: list[str]) -> dict:
     """One runner subprocess. Returns the run record: exit code, wall-clock, the result.json headline fields
-    and the trace-derived measures (bench.measure_trace); a run without a result is recorded as an error."""
+    and the trace-derived measures (bench.measure_trace). No trace.json at all -> an environment failure
+    (`environment_failure: true`, status error, the stderr tail, no outcome); an unreadable trace or result
+    -> an undetermined error run."""
     cmd = [python, runner, spec_path, "--out", out_dir, *run_args]
     t0 = time.perf_counter()
     proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
     rec: dict = {"out_dir": out_dir, "exit_code": proc.returncode, "wall_ms": int((time.perf_counter() - t0) * 1000),
                  "outcome": None, "verdict": None, "status": None}
+    tail = (proc.stderr or proc.stdout or "").strip()[-500:]
     result_path = os.path.join(out_dir, "result.json")
     trace_path = os.path.join(out_dir, "trace.json")
+    if not os.path.exists(trace_path):
+        # nothing was observed: exit 2 (spec / environment problem), or the runner died before its first step
+        rec.update({"status": "error", "environment_failure": True, "error": tail})
+        return rec
     result = None
     try:
-        if os.path.exists(trace_path):
-            with open(trace_path, encoding="utf-8") as f:
-                rec.update(measure_trace(json.load(f)))
+        with open(trace_path, encoding="utf-8") as f:
+            rec.update(measure_trace(json.load(f)))
         if os.path.exists(result_path):
             with open(result_path, encoding="utf-8") as f:
                 result = json.load(f)
@@ -79,33 +95,40 @@ def run_once(runner: str, python: str, spec_path: str, out_dir: str, run_args: l
         rec["evidence_line"] = (result.get("evidence") or {}).get("line")
         rec["first_seen_at_step"] = result.get("first_seen_at_step")
     else:
-        # exit 2 (spec / environment) or a crash: no result was written; keep the last lines of stderr
+        # the runner ran but wrote no readable result (a crash after the first observation): an error run
         rec["status"] = rec.get("status") or "error"
         rec["outcome"] = UNDETERMINED
-        rec["error"] = rec.get("error") or (proc.stderr or proc.stdout or "").strip()[-500:]
+        rec["error"] = rec.get("error") or tail
     return rec
 
 
 def aggregate_spec(runs: list[dict]) -> dict:
-    """Pure: the outcome distribution, agreement and suite verdict of one spec's repeats."""
+    """Pure: the outcome distribution, agreement and suite verdict of one spec's repeats.
+
+    Environment failures (`environment_failure: true`: no trace was written) are listed under
+    `environment_failures` and left out of everything else: they say nothing about the flow, so on their own
+    they cannot make a spec `flaky`. A spec with nothing but environment failures ends `undetermined` with
+    `reason` set; otherwise `reason` is null."""
+    failures = [r for r in runs if r.get("environment_failure")]
+    observed = [r for r in runs if not r.get("environment_failure")]
     outcome_counts: dict = {}
     verdict_counts: dict = {}
-    for r in runs:
+    for r in observed:
         o = str(r.get("outcome") or UNDETERMINED)
         outcome_counts[o] = outcome_counts.get(o, 0) + 1
         v = str(r.get("verdict") or (UNDETERMINED if o == UNDETERMINED else "?"))
         verdict_counts[v] = verdict_counts.get(v, 0) + 1
     top = max(outcome_counts.values()) if outcome_counts else 0
-    agreement = round(top / len(runs), 3) if runs else 0.0
-    if not runs:
+    agreement = round(top / len(observed), 3) if observed else 0.0
+    if not observed:
         verdict = UNDETERMINED
     elif len(outcome_counts) == 1:
         only = next(iter(outcome_counts))
-        verdict = UNDETERMINED if only == UNDETERMINED else (runs[0].get("verdict") or UNDETERMINED)
+        verdict = UNDETERMINED if only == UNDETERMINED else (observed[0].get("verdict") or UNDETERMINED)
     else:
         verdict = FLAKY
     suggestions: dict = {}
-    for r in runs:
+    for r in observed:
         if r.get("outcome") == UNDETERMINED:
             s = str(r.get("suggested_verdict") or "none")
             suggestions[s] = suggestions.get(s, 0) + 1
@@ -115,44 +138,55 @@ def aggregate_spec(runs: list[dict]) -> dict:
         "outcome_counts": outcome_counts,
         "verdict_counts": verdict_counts,
         "suggested_verdicts": suggestions,
-        "medians": {k: _median([r.get(k) for r in runs]) for k in MEDIAN_FIELDS},
-        "passes": sum(1 for r in runs if r.get("verdict") == "pass"),
+        "medians": {k: _median([r.get(k) for r in observed]) for k in MEDIAN_FIELDS},
+        "passes": sum(1 for r in observed if r.get("verdict") == "pass"),
+        "environment_failures": [{"run": r.get("run"), "exit_code": r.get("exit_code"), "error": r.get("error")} for r in failures],
+        "reason": ENVIRONMENT_REASON if runs and not observed else None,
     }
 
 
 def suite_verdict(specs: dict) -> dict:
-    """Pure: the whole suite. all_pass iff every spec is unanimously pass."""
+    """Pure: the whole suite. all_pass iff every spec is unanimously pass; environment failures counted per spec."""
     verdicts = {sid: s["verdict"] for sid, s in specs.items()}
     all_pass = bool(specs) and all(v == "pass" for v in verdicts.values())
     flaky = sorted(sid for sid, v in verdicts.items() if v == FLAKY)
     undetermined = sorted(sid for sid, v in verdicts.items() if v == UNDETERMINED)
-    return {"all_pass": all_pass, "verdicts": verdicts, "flaky": flaky, "undetermined": undetermined}
+    environment = {sid: len(s["environment_failures"]) for sid, s in specs.items() if s.get("environment_failures")}
+    return {"all_pass": all_pass, "verdicts": verdicts, "flaky": flaky, "undetermined": undetermined,
+            "environment_failures": environment}
 
 
 def render_markdown(report: dict) -> str:
     """results.md: one table for the suite, then the runs of every spec."""
     s = report["suite"]
+    env_total = sum((s.get("environment_failures") or {}).values())
     lines = [f"# Suite {report.get('label') or ''} {report['timestamp']}".rstrip(),
              "",
              f"**{'ALL PASS' if s['all_pass'] else 'NOT ALL PASS'}** · {len(report['specs'])} spec(s) × {report['repeat']} repeat(s), "
              f"{report['workers']} worker(s), {report['elapsed_ms'] / 1000:.1f} s wall-clock"
-             + (f" · commit `{report['git_commit']}`" if report.get("git_commit") else ""),
+             + (f" · commit `{report['git_commit']}`" if report.get("git_commit") else "")
+             + (f" · **{env_total} environment failure(s)** (runs that wrote no trace; not counted as outcomes)" if env_total else ""),
              "",
              "| spec | verdict | agreement | outcomes | median wall | Jev ms | requests | tokens in | confidence |",
              "|---|---|---:|---|---:|---:|---:|---:|---:|"]
     for sid, sp in report["specs"].items():
         m = sp["medians"]
-        outcomes = ", ".join(f"{k} {v}/{len(sp['runs'])}" for k, v in sorted(sp["outcome_counts"].items(), key=lambda kv: -kv[1]))
+        failures = sp.get("environment_failures") or []
+        observed = len(sp["runs"]) - len(failures)
+        outcomes = ", ".join(f"{k} {v}/{observed}" for k, v in sorted(sp["outcome_counts"].items(), key=lambda kv: -kv[1]))
         verdict = sp["verdict"].upper()
         if sp["verdict"] == UNDETERMINED and sp["suggested_verdicts"]:
             verdict += " (suggested: " + ", ".join(f"{k} {v}" for k, v in sp["suggested_verdicts"].items()) + ")"
-        lines.append(f"| `{sid}` | **{verdict}** | {sp['agreement']:.0%} | {outcomes} | {m['wall_ms']} ms | {m['jev_ms']} | "
+        if failures:
+            verdict += f" (environment failures {len(failures)}/{len(sp['runs'])})"
+        lines.append(f"| `{sid}` | **{verdict}** | {sp['agreement']:.0%} | {outcomes or '-'} | {m['wall_ms']} ms | {m['jev_ms']} | "
                      f"{m['requests']} | {m['input_tokens']} | {m['decision_confidence']} |")
     for sid, sp in report["specs"].items():
         lines += ["", f"## `{sid}`", "", "| # | outcome | verdict | status | wall | exit | evidence | result |", "|---:|---|---|---|---:|---:|---|---|"]
         for i, r in enumerate(sp["runs"], 1):
             evidence = " ".join((r.get("evidence_line") or r.get("error") or "").split()).replace("|", "\\|")[:80]
-            lines.append(f"| {i} | {r.get('outcome')} | {r.get('verdict') or '-'} | {r.get('status')} | {r.get('wall_ms')} ms | "
+            outcome = "environment failure" if r.get("environment_failure") else r.get("outcome")
+            lines.append(f"| {i} | {outcome} | {r.get('verdict') or '-'} | {r.get('status')} | {r.get('wall_ms')} ms | "
                          f"{r.get('exit_code')} | {evidence} | `{r.get('result') or r.get('out_dir')}` |")
     if s["flaky"] or s["undetermined"]:
         lines += ["", "Open a trace only for: " + ", ".join(f"`{x}` (flaky)" for x in s["flaky"])
@@ -179,8 +213,12 @@ def run_suite(spec_paths: list[str], repeat: int, workers: int, out_root: str, r
             rec = run_once(runner, python, spec_path, out_dir, run_args)
         except Exception as e:  # noqa: BLE001 - one run's failure to launch or to be read must not lose the suite
             rec = {"out_dir": out_dir, "exit_code": None, "wall_ms": int((time.perf_counter() - t0) * 1000),
-                   "outcome": UNDETERMINED, "verdict": None, "status": "error", "error": f"{type(e).__name__}: {str(e)[:300]}"}
-        print(f"{sid} {i}/{repeat}: {rec.get('outcome')} ({rec.get('verdict') or rec.get('status')}) {rec['wall_ms']} ms", flush=True)
+                   "outcome": None, "verdict": None, "status": "error", "environment_failure": True,
+                   "error": f"{type(e).__name__}: {str(e)[:300]}"}
+        rec = {"run": i, **rec}
+        shown = f"environment failure (exit {rec.get('exit_code')})" if rec.get("environment_failure") else \
+            f"{rec.get('outcome')} ({rec.get('verdict') or rec.get('status')})"
+        print(f"{sid} {i}/{repeat}: {shown} {rec['wall_ms']} ms", flush=True)
         return sid, i, rec
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
@@ -243,8 +281,10 @@ def main(argv: list[str]) -> int:
     print()
     print(render_markdown(report))
     print(f"results: {os.path.join(out_root, 'results.json')}  {os.path.join(out_root, 'results.md')}")
-    if not any(r.get("result") for sp in report["specs"].values() for r in sp["runs"]):
-        print("no run produced a result: the environment, not the flows, failed (see the error column)", file=sys.stderr)
+    runs = [r for sp in report["specs"].values() for r in sp["runs"]]
+    if runs and all(r.get("environment_failure") for r in runs):
+        print("every run failed in the environment before observing a page (see the error column): the environment, "
+              "not the flows, failed", file=sys.stderr)
         return 2
     return 0 if report["suite"]["all_pass"] else 1
 

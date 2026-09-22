@@ -70,19 +70,29 @@ A suite run writes `results.json` and `results.md` into `runs/suite/<ts>/`:
                   "evidence_line": "You logged into a secure area!", "suggested_verdict": null,
                   "duration_ms": 6000, "jev_ms": 2000, "requests": 6, "input_tokens": 8900, "decision_confidence": 0.96, ... } ],
       "outcome_counts": { "logged_in": 5 }, "verdict_counts": { "pass": 5 }, "suggested_verdicts": {},
-      "agreement": 1.0,                       // share of runs that ended in the most common outcome
+      "agreement": 1.0,                       // share of the observed runs that ended in the most common outcome
       "verdict": "pass",                      // unanimous -> that outcome's verdict; undetermined everywhere -> "undetermined"; else "flaky"
+      "environment_failures": [],             // runs that wrote no trace: [{ "run": 2, "exit_code": 2, "error": "could not attach to the browser at ..." }]
+      "reason": null,                         // set (and verdict "undetermined") when every run was an environment failure
       "medians": { "wall_ms": 6100, "duration_ms": 6000, "jev_ms": 2000, "browser_ms": 1270, "requests": 6, "input_tokens": 8900, "decision_confidence": 0.96, "steps": 5 },
       "passes": 5
     }
   },
-  "suite": { "all_pass": true, "verdicts": { "smoke-login": "pass" }, "flaky": [], "undetermined": [] }
+  "suite": { "all_pass": true, "verdicts": { "smoke-login": "pass" }, "flaky": [], "undetermined": [], "environment_failures": {} }
 }
 ```
 
-`flaky` is computed from disagreement across repeats, never diagnosed from one run. A run that wrote no
-result (exit 2, a crash) is recorded as `undetermined` with `status: "error"` and the runner's last stderr
-lines in `error`. The exit code is 0 iff `suite.all_pass`.
+`flaky` is computed from disagreement across repeats, never diagnosed from one run. A run that wrote **no
+`trace.json` at all** is an **environment failure**, not an outcome: the runner exited 2 (spec or environment
+problem: a missing key, a browser that could not be launched or attached), could not be started, or was killed
+before its first observation. Its record has `status: "error"`, `environment_failure: true`, no outcome and
+the runner's last stderr lines in `error`; the spec lists it under `environment_failures` and leaves it out of
+`outcome_counts`, `agreement`, `medians` and `passes`, so one launch failure among passes does not make the
+spec `flaky` (the suite header of `results.md` counts them, and `suite.environment_failures` has the count per
+spec). A spec whose every run failed that way is `undetermined` with `reason` saying so. A run that wrote a
+trace or result the suite cannot read (killed mid-write) did run: it stays an `undetermined` error run in the
+distribution. The exit code is 0 iff `suite.all_pass`, 1 otherwise, 2 when every run of every spec was an
+environment failure (or a spec file is missing / two files share an id).
 
 ## Reading order
 

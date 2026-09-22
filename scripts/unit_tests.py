@@ -1109,7 +1109,9 @@ n = int(os.path.basename(out_dir))  # the repeat number
 if spec["id"] == "truncated" and n == 2:
     open(os.path.join(out_dir, "trace.json"), "w").write('{"spec_id": "truncated", "status": "pass')  # killed mid-write
     sys.exit(1)
-if spec["id"] == "truncated" or spec["id"] == "always-pass":
+if spec["id"] == "launch-flake" and n == 2:
+    print("could not attach to the browser at http://127.0.0.1:9222", file=sys.stderr); sys.exit(2)  # no trace: the environment
+if spec["id"] in ("truncated", "always-pass", "launch-flake"):
     outcome, verdict, status, code = "logged_in", "pass", "passed", 0
 elif spec["id"] == "flaky":
     outcome, verdict, status, code = ("logged_in", "pass", "passed", 0) if n % 2 else ("bad_pw", "bug", "outcome", 1)
@@ -1150,10 +1152,23 @@ class SuiteTests(unittest.TestCase):
         agg = aggregate_spec([u, p])
         self.assertEqual(agg["verdict"], "flaky")
         self.assertEqual(aggregate_spec([])["verdict"], "undetermined")
+        self.assertEqual((agg["environment_failures"], agg["reason"]), ([], None))
+        # an environment failure (no trace written) is listed, and excluded from the distribution, the agreement and the medians
+        e = {"run": 2, "environment_failure": True, "status": "error", "exit_code": 2, "error": "could not attach to the browser", "wall_ms": 900}
+        agg = aggregate_spec([p, e, p])
+        self.assertEqual((agg["verdict"], agg["agreement"], agg["outcome_counts"], agg["passes"]), ("pass", 1.0, {"logged_in": 2}, 2))
+        self.assertEqual(agg["environment_failures"], [{"run": 2, "exit_code": 2, "error": "could not attach to the browser"}])
+        self.assertEqual((agg["medians"]["wall_ms"], agg["reason"]), (5000, None))
+        agg = aggregate_spec([e, e])                       # nothing observed: undetermined, with the reason
+        self.assertEqual((agg["verdict"], agg["agreement"], agg["outcome_counts"], len(agg["environment_failures"])), ("undetermined", 0.0, {}, 2))
+        self.assertIn("environment", agg["reason"])
+        self.assertEqual(aggregate_spec([e, b, p])["verdict"], "flaky")   # a real disagreement still is
+        self.assertEqual(aggregate_spec([e, b, b])["verdict"], "bug")
         sv = suite_verdict({"a": {"verdict": "pass"}, "b": {"verdict": "pass"}})
-        self.assertEqual((sv["all_pass"], sv["flaky"], sv["undetermined"]), (True, [], []))
-        sv = suite_verdict({"a": {"verdict": "pass"}, "b": {"verdict": "flaky"}, "c": {"verdict": "undetermined"}, "d": {"verdict": "bug"}})
-        self.assertEqual((sv["all_pass"], sv["flaky"], sv["undetermined"]), (False, ["b"], ["c"]))
+        self.assertEqual((sv["all_pass"], sv["flaky"], sv["undetermined"], sv["environment_failures"]), (True, [], [], {}))
+        sv = suite_verdict({"a": {"verdict": "pass", "environment_failures": [{"run": 1}]}, "b": {"verdict": "flaky"},
+                            "c": {"verdict": "undetermined", "environment_failures": [{"run": 1}, {"run": 2}]}, "d": {"verdict": "bug"}})
+        self.assertEqual((sv["all_pass"], sv["flaky"], sv["undetermined"], sv["environment_failures"]), (False, ["b"], ["c"], {"a": 1, "c": 2}))
         self.assertFalse(suite_verdict({})["all_pass"])
 
     def test_run_suite_end_to_end_with_a_fake_runner(self) -> None:
@@ -1164,17 +1179,24 @@ class SuiteTests(unittest.TestCase):
         with open(runner, "w", encoding="utf-8") as f:
             f.write(FAKE_RUNNER)
         specs = {}
-        for sid in ("always-pass", "flaky", "blocked", "broken", "truncated"):
+        for sid in ("always-pass", "flaky", "blocked", "broken", "truncated", "launch-flake"):
             specs[sid] = os.path.join(tmp, f"{sid}.json")
             with open(specs[sid], "w", encoding="utf-8") as f:
                 json.dump({"id": sid, "start_url": "http://x/", "goal": "g"}, f)
         out = os.path.join(tmp, "suite")
-        report = run_suite([specs["always-pass"], specs["flaky"], specs["blocked"], specs["broken"], specs["truncated"]], repeat=4,
-                           workers=3, out_root=out, run_args=[], runner=runner, label="unit")
+        report = run_suite([specs["always-pass"], specs["flaky"], specs["blocked"], specs["broken"], specs["truncated"], specs["launch-flake"]],
+                           repeat=4, workers=3, out_root=out, run_args=[], runner=runner, label="unit")
         self.assertEqual(report["suite"]["verdicts"], {"always-pass": "pass", "flaky": "flaky", "blocked": "undetermined",
-                                                       "broken": "undetermined", "truncated": "flaky"})
+                                                       "broken": "undetermined", "truncated": "flaky", "launch-flake": "pass"})
         self.assertEqual((report["suite"]["all_pass"], report["suite"]["flaky"], report["suite"]["undetermined"]),
                          (False, ["flaky", "truncated"], ["blocked", "broken"]))
+        self.assertEqual(report["suite"]["environment_failures"], {"broken": 4, "launch-flake": 1})
+        # one launch failure among passes: listed, not an outcome, so the spec is not flaky
+        lf = report["specs"]["launch-flake"]
+        self.assertEqual((lf["verdict"], lf["agreement"], lf["outcome_counts"], lf["passes"]), ("pass", 1.0, {"logged_in": 3}, 3))
+        self.assertEqual(lf["environment_failures"], [{"run": 2, "exit_code": 2, "error": "could not attach to the browser at http://127.0.0.1:9222"}])
+        self.assertEqual((lf["runs"][1]["environment_failure"], lf["runs"][1]["outcome"], lf["runs"][1]["status"]), (True, None, "error"))
+        self.assertEqual([r["run"] for r in lf["runs"]], [1, 2, 3, 4])
         # a runner killed mid-write loses that run, not the suite
         cut = report["specs"]["truncated"]["runs"][1]
         self.assertEqual((cut["outcome"], cut["status"]), ("undetermined", "error"))
@@ -1187,14 +1209,22 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(report["specs"]["always-pass"]["runs"][0]["evidence_line"], "Welcome")
         self.assertEqual(report["specs"]["blocked"]["suggested_verdicts"], {"test_issue": 4})
         broken = report["specs"]["broken"]["runs"][0]
-        self.assertEqual((broken["exit_code"], broken["outcome"], broken["status"]), (2, "undetermined", "error"))
+        self.assertEqual((broken["exit_code"], broken["outcome"], broken["status"], broken["environment_failure"]), (2, None, "error", True))
         self.assertTrue(broken["error"].startswith("Spec problems:\n"))
+        # every run an environment failure: undetermined with the reason, nothing in the distribution
+        self.assertEqual((report["specs"]["broken"]["outcome_counts"], report["specs"]["broken"]["agreement"]), ({}, 0.0))
+        self.assertIn("environment_failures", report["specs"]["broken"]["reason"])
+        self.assertIsNone(report["specs"]["always-pass"]["reason"])
         self.assertTrue(os.path.exists(os.path.join(out, "results.json")))
         with open(os.path.join(out, "results.md"), encoding="utf-8") as f:
             md = f.read()
         self.assertIn("**NOT ALL PASS**", md)
+        self.assertIn("**5 environment failure(s)**", md)
         self.assertIn("| `flaky` | **FLAKY** | 50% | logged_in 2/4, bad_pw 2/4 |", md)
         self.assertIn("| `blocked` | **UNDETERMINED (suggested: test_issue 4)** | 100% |", md)
+        self.assertIn("| `launch-flake` | **PASS (environment failures 1/4)** | 100% | logged_in 3/3 |", md)
+        self.assertIn("| `broken` | **UNDETERMINED (environment failures 4/4)** | 0% | - |", md)
+        self.assertIn("| 2 | environment failure | - | error |", md)
         self.assertIn("Open a trace only for: `flaky` (flaky), `truncated` (flaky), `blocked` (undetermined), `broken` (undetermined)", md)
         # a multi-line stderr tail stays inside its table cell
         self.assertIn("| 2 | Spec problems: - done_when names unknown check 'x' - goal must not be empty |", md)
@@ -1206,9 +1236,12 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(suite_main(["run_suite.py", specs["always-pass"], specs["flaky"], "--repeat", "2", "--out",
                                          os.path.join(tmp, "suite3"), "--runner", runner]), 1)
             self.assertEqual(suite_main(["run_suite.py", os.path.join(tmp, "missing.json"), "--runner", runner]), 2)
-            # exit 2: the environment failed for every run (no result anywhere), and two files sharing an id
+            # exit 2: the environment failed for every run (no trace anywhere), and two files sharing an id
             self.assertEqual(suite_main(["run_suite.py", specs["broken"], "--repeat", "2", "--out", os.path.join(tmp, "suite4"),
                                          "--runner", runner]), 2)
+            # one environment failure among passes: the flows passed, exit 0 (the failure is listed, not hidden)
+            self.assertEqual(suite_main(["run_suite.py", specs["launch-flake"], "--repeat", "3", "--out", os.path.join(tmp, "suite7"),
+                                         "--runner", runner]), 0)
             twin = os.path.join(tmp, "twin", "always-pass.json")
             os.makedirs(os.path.dirname(twin))
             with open(twin, "w", encoding="utf-8") as f:
