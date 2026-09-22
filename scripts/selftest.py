@@ -511,7 +511,7 @@ class FakeJev:
 
     def __init__(self, mode: str = "normal", delay_ms: int = 0) -> None:
         # normal | hedge_value | early_low_done | early_confident_done | done_after_add
-        # | invalid_operation_once | invalid_operation_always | dead_click
+        # | invalid_operation_once | invalid_operation_always | dead_click | blocked_after_dead_click
         self.mode = mode
         self.delay_ms = delay_ms  # a slow "model", so a page mutation can land between observation and decision
         self.requests = 0
@@ -609,7 +609,9 @@ class FakeJev:
         typed_before = any(a["operation"] == "TYPE_TEXT" for a in recent)
         search_box_visible = any(e["label"] == "Search products" for e in state["elements"])
 
-        if self.mode == "dead_click" and self._find(clicks, "Apply filter"):
+        if self.mode == "blocked_after_dead_click" and any(a.get("page_changed") is False for a in recent):
+            op, target = "BLOCKED", None   # gave up right after the dead click: "something else" is in the way
+        elif self.mode in ("dead_click", "blocked_after_dead_click") and self._find(clicks, "Apply filter"):
             op, target = "CLICK", ("click_target", self._find(clicks, "Apply filter"))  # a button that does nothing
         elif self._find(clicks, '"Start"'):
             op, target = "CLICK", ("click_target", self._find(clicks, '"Start"'))       # the loading fixture
@@ -637,8 +639,8 @@ class FakeJev:
             qkey, label = target
             answers[qkey] = self._choice(label, questions[qkey]["criteria"])
         if "blocked_reason" in questions:
-            answers["blocked_reason"] = self._choice("missing_data_value" if op == "BLOCKED" else "nothing",
-                                                     questions["blocked_reason"]["criteria"])
+            why = "nothing" if op != "BLOCKED" else ("other" if self.mode == "blocked_after_dead_click" else "missing_data_value")
+            answers["blocked_reason"] = self._choice(why, questions["blocked_reason"]["criteria"])
         return {"answers": answers, "usage": {"input_tokens": 400, "output_tokens": 60}, "model": "fake-jev", "latency_ms": 1}
 
     def usage_summary(self) -> dict:
@@ -947,6 +949,21 @@ def main() -> int:
         failures.append(f"loading forever: the result should carry the last still_loading and suggest flaky: {reason}")
     if "stuck_reason" in trace["steps"][-1]:
         failures.append("loading forever: the final look must not be asked stuck_reason")
+
+    # 4e. Jev gives up right after a dead click: BLOCKED with blocked_reason `other` (no row of its own) on a step that
+    #     was asked stuck_reason because the click changed nothing -> the result suggests bug from that second answer
+    #     (measured live: a Finish button that does nothing ended `blocked` three times with no suggestion)
+    spec = base_spec(url)
+    out = os.path.join(tmp, "run-blocked-after-dead-click")
+    trace = run(spec, FakeJev("blocked_after_dead_click"), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    steps = trace["steps"]
+    reason = (trace["result"] or {}).get("reason") or {}
+    if trace["status"] != "blocked" or len(steps) != 2 or steps[0].get("page_changed") is not False or "stuck_reason" not in steps[1]:
+        failures.append(f"blocked after a dead click: expected a no-op click then BLOCKED asked stuck_reason, got {trace['status']} {[(s.get('page_changed'), 'stuck_reason' in s) for s in steps]}")
+    if reason != {"status": "blocked", "blocked_reason": "other", "stuck_reason": "control_had_no_effect", "suggested_verdict": "bug"}:
+        failures.append(f"blocked right after a no-op with blocked_reason other should suggest bug from stuck_reason: {reason}")
 
     # 5. a low-confidence DONE is a WAIT, not a verdict -> the flow continues and passes
     spec = base_spec(url)

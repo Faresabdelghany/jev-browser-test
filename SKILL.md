@@ -212,6 +212,7 @@ manufacture flakiness. Store `runs/` outside version control.
 | exit 2 with "Spec problems" | Read the list; usually a `done_when` naming an unknown check, a check written as a question, or a missing `${ENV}` |
 | `error` with `setup[i] failed` | The selector in a setup step did not match; fix it or move that step into the goal |
 | `blocked` right after a text field appears | Add the needed value to `data` (`reason.blocked_reason` says `missing_data_value`) |
+| `blocked` right after a click that changed nothing (`reason.stuck_reason: control_had_no_effect`, suggested BUG) | Jev gave up on a dead control: a button that does nothing is the classic product bug. Confirm on the screenshot that the click landed on the right control |
 | `assert_failed` | A pass outcome was confirmed but an assertion did not hold: `reason.failed_assertions` has the actual values. Decide whether the assertion or the app is wrong; never loosen it silently |
 | The outcome that came back does not match what the screenshot shows | The spec mislabelled it: fix that outcome's `when` or `verdict` (one line), rerun, and say so in the report |
 | Two outcomes hover at 0.4–0.5 while the page clearly shows one of them | Their `when` statements are both true of that page; reword them so they are distinguishable on sight (name a string unique to each) |

@@ -39,8 +39,10 @@ prevents progress" (`nothing | missing_data_value | control_not_on_page | site_r
 human_step_required | wrong_page | other`); `stuck_reason` is asked only after an action with
 `page_changed: false` (`control_had_no_effect | overlay_or_modal | still_loading |
 needs_scroll_or_other_control | other`). The suggestion comes from a fixed table: `stuck_reason` counts for
-`stuck` and for a `budget_exhausted` spent on a streak of WAITs, `blocked_reason` for `blocked`, `stuck`,
-`low_confidence` and `budget_exhausted` (a typed reason with a row wins over the status row there); for `done_unverified`, `assert_failed`, `unstable_page` and `error`
+`stuck`, for a `budget_exhausted` spent on a streak of WAITs, and for a `blocked` chosen right after an action
+that changed nothing when `blocked_reason` has no row of its own (`other`, `nothing`); `blocked_reason` for
+`blocked`, `stuck`, `low_confidence` and `budget_exhausted` (a typed reason with a row wins over the status
+row there); for `done_unverified`, `assert_failed`, `unstable_page` and `error`
 the status row alone decides, because on those endings the step's `blocked_reason` is about progress on the
 page, not about the verdict:
 
@@ -125,7 +127,7 @@ environment failure (or a spec file is missing / two files share an id).
 | `outcome` | A declared outcome with another verdict was seen; `result.outcome` names it, `result.verdict` is its pre-declared verdict | That verdict. The outcome name is always in the result, so a mislabelled verdict is visible and is a one-line spec fix |
 | `assert_failed` | A pass outcome was confirmed but an assertion did not hold on the final page (`result.reason.failed_assertions` has the actual values) | Claude judges: the app is wrong (BUG) or the assertion is (TEST_ISSUE). Never loosen an assertion to get green without saying so |
 | `done_unverified` | Jev said DONE confidently; the runner settled, re-observed, and no pass outcome is visible | Either the outcome wording is off (test issue) or the app did not do what it claims (bug). Look at `final.png`. Timing is already ruled out by the recheck |
-| `blocked` | Jev chose BLOCKED (`result.reason.blocked_reason` says why) | Usually a test issue: missing `data` value, missing precondition, wrong start page. Sometimes a real bug: the needed control is not rendered |
+| `blocked` | Jev chose BLOCKED (`result.reason.blocked_reason` says why; right after a click that changed nothing, `reason.stuck_reason` says why that was) | Usually a test issue: missing `data` value, missing precondition, wrong start page. Sometimes a real bug: the needed control is not rendered, or a control that does nothing (`stuck_reason: control_had_no_effect` → BUG) |
 | `never_violated` | (Runs before the results contract only.) A `never` check crossed its threshold; today this ends as `outcome` with `never_<check>` | Often a product bug. Confirm the error is real in the screenshot, and that the preceding action was reasonable |
 | `stuck` | Same action on an unchanged page `max_repeat` times. A WAIT is not an action: waiting on a page that keeps loading never ends `stuck`, only the budget bounds it | The action had no effect: dead button (bug), or Jev is confused by the page (test issue: add a note or a `setup` step) |
 | `low_confidence` | `max_low_confidence_steps` consecutive uncertain decisions, none of them executed | Jev could not choose between the offered options: look at `decision_confidence` and the probabilities in `--step N`. A split over `type_value` means the `data` key names do not match the field labels (rename them); a split over targets means the goal/notes do not say which of several similar controls to use |

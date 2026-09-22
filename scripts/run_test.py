@@ -499,12 +499,24 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
                 if s.get("stuck_reason"):
                     stuck = s["stuck_reason"].get("choice")
                     break
+        # Which typed answers speak for the ending, in order: for `stuck` and a budget spent waiting the no-op
+        # reason first; for `blocked` Jev's own blocked_reason first and then, when it has no row of its own
+        # (`other`, `nothing`) and BLOCKED came right after an action that changed nothing, that step's
+        # stuck_reason (measured on a dead Finish button: one click, page_changed false, then BLOCKED with
+        # blocked_reason other 0.62 and stuck_reason control_had_no_effect 0.97: the second answer is the verdict).
+        if status in ("stuck", "budget_exhausted"):
+            typed = [stuck, blocked]
+        elif status == "blocked":
+            typed = [blocked, stuck]
+        elif status in BLOCKED_REASON_STATUSES:
+            typed = [blocked]
+        else:
+            typed = []
         result["reason"] = {
             "status": status,
             "blocked_reason": blocked,
             "stuck_reason": stuck,
-            "suggested_verdict": suggested_verdict(status, [stuck if status in ("stuck", "budget_exhausted") else None,
-                                                            blocked if status in BLOCKED_REASON_STATUSES else None]),
+            "suggested_verdict": suggested_verdict(status, typed),
         }
         if status == "assert_failed":
             result["reason"]["outcome_seen"] = (final.get("outcome") or {}).get("name")

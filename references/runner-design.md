@@ -97,8 +97,9 @@ produced. A failed adjudication (transport, a non-JSON body, a malformed answer)
 `run_test.build_result` writes `result.json` (references/trace-format.md): outcome, verdict, note,
 probability, confidence, seen_at_step, confirmed, `path_confidence` (the weakest executed decision),
 evidence, assertions, story, and for `undetermined` a `reason` with the typed answers of the terminal step
-and `policy.suggested_verdict`'s table lookup (`stuck_reason` for `stuck`, `blocked_reason` for `blocked` /
-`stuck` / `low_confidence` / `budget_exhausted`, else the status row: for `done_unverified`, `assert_failed`,
+and `policy.suggested_verdict`'s table lookup (`stuck_reason` for `stuck`, for a `budget_exhausted` spent waiting
+and for a `blocked` right after a no-op action whose `blocked_reason` has no row; `blocked_reason` for `blocked`
+/ `stuck` / `low_confidence` / `budget_exhausted`, else the status row: for `done_unverified`, `assert_failed`,
 `unstable_page` and `error` the step's `blocked_reason` is about progress, not the verdict). `trace.outcome` /
 `trace.verdict` repeat the headline and `trace.result` the whole file, so a trace alone is enough.
 
