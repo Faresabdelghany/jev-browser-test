@@ -88,7 +88,7 @@ DEFAULTS = {
     # 200 elements: the Choice cap is 255 and the table-row "stuck" seen in real runs was truncation at 60.
     # 4000 chars of viewport-first text: the toast the checks look for must not be crowded out by the header.
     # screenshots "key": only terminal and flagged steps (plus final.png); true = every step; false = none.
-    "observation": {"max_elements": 200, "max_text_chars": 4000, "screenshots": "key"},
+    "observation": {"max_elements": 200, "max_text_chars": 2000, "screenshots": "key"},  # lever F5: was 4000
 }
 
 
