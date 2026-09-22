@@ -112,7 +112,7 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
             typed = ", ".join(f"{k}={v}" for k, v in (("blocked_reason", r.get("blocked_reason")), ("stuck_reason", r.get("stuck_reason"))) if v)
             head += f"  ({r.get('status')}" + (f"; {typed}" if typed else "") + f"; suggested verdict: {r.get('suggested_verdict') or 'judge yourself'})"
         elif result.get("seen_at_step"):
-            head += f"  seen at step {result['seen_at_step']}" + (" (confirmed)" if result.get("confirmed") else "")
+            head += f"  seen at step {result['seen_at_step']}" + (f" (confirmed by {result.get('confirmed_by') or 'recheck'})" if result.get("confirmed") else "")
         lines.append(head)
         if (result.get("evidence") or {}).get("line"):
             lines.append(f"  evidence: \"{result['evidence']['line']}\"")

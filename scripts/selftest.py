@@ -766,7 +766,7 @@ def outcome_spec(url: str) -> dict:
 
 
 RESULT_KEYS = ["spec_id", "outcome", "verdict", "note", "probability", "confidence", "seen_at_step", "first_seen_at_step",
-               "confirmed", "path_confidence", "reason", "evidence", "assertions", "outcomes_seen_earlier", "story", "status",
+               "confirmed", "confirmed_by", "path_confidence", "reason", "evidence", "assertions", "outcomes_seen_earlier", "story", "status",
                "duration_ms", "usage", "trace"]
 
 
@@ -1163,6 +1163,7 @@ def main() -> int:
         failures.append(f"budget: nothing is confirmed, final.checks holds the last look: {res['confirmed']} {res['seen_at_step']} {trace['final']}")
     spec = outcome_spec(url)
     spec["budget"]["max_steps"] = 5
+    spec["confirm"] = "recheck"  # with the default ("assert") the sighting on step 5 is confirmed there and no final look is needed
     out = os.path.join(tmp, "run-budget-confirmed")
     trace = run(spec, FakeJev(), out, screenshots=False)
     print(summarize(trace, out))
@@ -1174,6 +1175,13 @@ def main() -> int:
         failures.append(f"budget: the confirming final look should be the terminal step: {trace['steps'][-1].get('executed')}")
     if len(res["assertions"]) != 5 or not all(a["ok"] for a in res["assertions"]) or "Cart: 1 items" not in (res["evidence"]["line"] or ""):
         failures.append(f"budget: the confirmed pass runs the assertions and the adjudication: {res['assertions']} {res['evidence']}")
+    spec = outcome_spec(url)
+    spec["budget"]["max_steps"] = 5
+    out = os.path.join(tmp, "run-budget-assert-confirmed")
+    trace = run(spec, FakeJev(), out, screenshots=False)
+    res = trace["result"]
+    if trace["status"] != "passed" or (res["confirmed_by"], res["first_seen_at_step"], res["seen_at_step"]) != ("assertions", 5, 5) or trace["steps"][-1].get("final_look"):
+        failures.append(f"budget: with confirm 'assert' the last allowed step confirms itself, no final look: {trace['status']} {res['confirmed_by']} {res['seen_at_step']} {trace['steps'][-1].get('final_look')}")
     spec = outcome_spec(url + "?fail=1")
     spec["budget"]["max_steps"] = 4
     out = os.path.join(tmp, "run-budget-bug")
@@ -1205,8 +1213,12 @@ def main() -> int:
     res = trace["result"]
     if trace["status"] != "passed" or (res["outcome"], res["verdict"], res["confirmed"]) != ("item_added", "pass", True):
         failures.append(f"outcome pass: expected passed/item_added/confirmed, got {trace['status']} {res['outcome']} {res['verdict']} {res['confirmed']}")
-    if res["seen_at_step"] != len(trace["steps"]) or res["first_seen_at_step"] != len(trace["steps"]) - 1 or res["note"] != "the happy path" or not (res["probability"] or 0) >= 0.8:
-        failures.append(f"outcome pass: seen_at_step/first_seen_at_step/note/probability wrong: {res['seen_at_step']} {res['first_seen_at_step']} {res['note']} {res['probability']}")
+    if res["seen_at_step"] != len(trace["steps"]) or res["first_seen_at_step"] != len(trace["steps"]) or res["confirmed_by"] != "assertions" \
+            or res["note"] != "the happy path" or not (res["probability"] or 0) >= 0.8:
+        failures.append(f"outcome pass: with assertions the sighting step is the confirmation (confirmed_by assertions): "
+                        f"{res['seen_at_step']} {res['first_seen_at_step']} {res['confirmed_by']} {res['note']} {res['probability']}")
+    if trace["steps"][-1]["executed"] != {"action": "AUTO_DONE", "ok": True, "error": None, "confirmed": True} or any(s.get("pending_outcome") for s in trace["steps"]):
+        failures.append(f"outcome pass: no WAIT-and-recheck step when the assertions confirm the sighting: {[s.get('executed') for s in trace['steps']]}")
     if len(res["assertions"]) != 5 or not all(a["ok"] for a in res["assertions"]):
         failures.append(f"outcome pass: every assertion should hold: {res['assertions']}")
     if "Cart: 1 items" not in (res["evidence"]["line"] or "") or not (res["evidence"]["present"] or 0) >= 0.9 or res["evidence"]["checks"].get("cart_has_item") != 1.0:
@@ -1223,11 +1235,31 @@ def main() -> int:
     if "blocked_reason" in first or "stuck_reason" in first or any(s.get("reason_request") for s in trace["steps"]):
         failures.append(f"outcome pass: blocked_reason is asked only on a terminal step that needs it, stuck_reason only after a no-op action: {first.get('blocked_reason')} {first.get('stuck_reason')}")
     adj = trace.get("adjudication") or {}
-    if jev.requests != len(trace["steps"]) or adj.get("line_id") is None or not adj.get("merged") or not trace["steps"][-1].get("adjudication_merged"):
-        failures.append(f"outcome pass: the evidence questions ride in the confirmation request (no extra round trip): "
+    if jev.requests != len(trace["steps"]) + 1 or adj.get("line_id") is None or adj.get("merged") or "latency_ms" not in adj:
+        failures.append(f"outcome pass: confirmed by assertions, the evidence line is asked in its own request: "
                         f"{jev.requests} requests for {len(trace['steps'])} steps, {adj}")
-    if "EVIDENCE-ASKED" not in summarize(trace, out):
-        failures.append("outcome pass: the summary should flag the confirmation step that carried the evidence questions")
+    if os.path.getsize(os.path.join(out, "steps", "final.png")) != os.path.getsize(os.path.join(out, trace["steps"][-1]["screenshot"])):
+        failures.append("outcome pass: final.png should be a copy of the terminal step's picture (nothing happened after it)")
+    failures += result_shape_check(trace, out)
+
+    # 15b. the same spec with confirm: "recheck": the sighting is a WAIT, the next observation confirms, the evidence
+    #      questions ride in that confirmation request (no adjudication round trip), and the summary flags it
+    spec = outcome_spec(url)
+    spec["confirm"] = "recheck"
+    jev = FakeJev()
+    out = os.path.join(tmp, "run-outcome-recheck")
+    trace = run(spec, jev, out, screenshots="key")
+    print(summarize(trace, out))
+    print()
+    res = trace["result"]
+    adj = trace.get("adjudication") or {}
+    if trace["status"] != "passed" or res["confirmed_by"] != "recheck" or res["first_seen_at_step"] != len(trace["steps"]) - 1 or res["seen_at_step"] != len(trace["steps"]):
+        failures.append(f"recheck: expected a sighting then a confirming step: {trace['status']} {res['confirmed_by']} {res['first_seen_at_step']} {res['seen_at_step']}")
+    if jev.requests != len(trace["steps"]) or adj.get("line_id") is None or not adj.get("merged") or not trace["steps"][-1].get("adjudication_merged"):
+        failures.append(f"recheck: the evidence questions ride in the confirmation request (no extra round trip): "
+                        f"{jev.requests} requests for {len(trace['steps'])} steps, {adj}")
+    if "EVIDENCE-ASKED" not in summarize(trace, out) or "confirmed by recheck" not in summarize(trace, out):
+        failures.append("recheck: the summary should flag the confirmation step that carried the evidence questions")
     failures += result_shape_check(trace, out)
 
     # 16. the results contract, a bug outcome: terminal at first sighting, picture forced, no confirmation
@@ -1286,8 +1318,8 @@ def main() -> int:
     sentences = adj.get("sentences") or []
     if trace["status"] != "passed" or (res["outcome"], res["confirmed"]) != ("item_added", True):
         failures.append(f"sentences: expected the pass as before, got {trace['status']} {res['outcome']} {res['confirmed']}")
-    if jev.requests != len(trace["steps"]):
-        failures.append(f"sentences: the per-sentence Choices ride in the confirmation request: {jev.requests} requests for {len(trace['steps'])} steps")
+    if jev.requests != len(trace["steps"]) + 1:
+        failures.append(f"sentences: the per-sentence Choices ride in the one adjudication request: {jev.requests} requests for {len(trace['steps'])} steps")
     if (len(sentences) != 2 or sentences[0].get("sentence") != "The order can be placed now" or sentences[0].get("line_id") != "none"
             or sentences[0].get("line") is not None or "Cart: 1 items" not in (sentences[1].get("line") or "")):
         failures.append(f"sentences: expected the first sentence unmatched and the second quoting the header: {sentences}")

@@ -90,8 +90,12 @@ runner-inserted WAIT (pending confirmation, low confidence, stale decision) goes
 helper; only the stale one skips the `settle_ms` pause, because the page is already moving and the
 event-based settle is what waits for it to stop.
 
-After a seen outcome one adjudication request (`policy.build_adjudication`) sends the terminal page's visible
-text as up to 200 numbered lines, once, in `state.lines` (the Choice's criteria point at them by id, `"line 3 of
+The evidence questions (`policy.build_adjudication`) send the terminal page's visible text as up to 200 numbered
+lines, once, in `state.lines`. For a pass they ride in the **confirmation step's request** (`run_test.adjudication_request`
+builds them when a sighting is pending; the loop adds `state.lines` to that step's state and the questions to its
+request, and `settle_pass` reads the answers with `read_adjudication`: speculative fan-out, no extra round trip,
+`adjudication.merged: true`); a non-pass outcome seen at first sighting still gets its own request (`adjudicate`),
+because nothing announced it. Both paths send the lines (the Choice's criteria point at them by id, `"line 3 of
 state.lines"`: a full second copy in the criteria cost about 2k tokens on a long article, block F) with the
 outcome's statement (`observe.LINES_JS`: one line per block, the
 lines in the viewport first, the same visibility rules as the observation, masked like it); `evidence_line`
@@ -131,6 +135,35 @@ it again on a page that still says "Loading..." is right for as long as the page
 `result.reason.stuck_reason` then carries the last `still_loading`. The signature hashes URL, title,
 the element table and the first 500 chars of visible text, so a page that changes only far below the fold
 can look "unchanged"; that is intentional, since Jev could not see the change either.
+
+## Where the wall-clock goes, and the levers (2026-09-22)
+
+Measured on the demo login (5 repeats, medians, `docs/superpowers/measurements/`): of ~6.4 s, ~2.0 s is the site's
+own page load and ~0.16 s the browser launch; the rest was 6 Jev requests (the first ~760 ms for TCP + TLS, then
+~300 ms each) and ~1.3 s of browser work (three actions at ~145 ms, the 400 ms confirmation pause, screenshots).
+A probe of 40 identical requests showed the ~300 ms is the API's floor from here: HTTP/2 (httpx) against the
+stdlib HTTP/1.1 keep-alive changed nothing (302 vs 313 ms), and 8 questions cost the same as 2 (294 vs 313 ms),
+which is what the docs say (every question is evaluated in parallel over one ingestion of the state). So the
+levers are the *number* of round trips and the browser's waiting, not the wire:
+
+- **Pre-connect** (`JevClient.warm_up`, called by `run()` before the browser launches): the handshake overlaps
+  the launch and the navigation; `trace.timing.jev_connect_ms` records it; the first request is a warm one.
+- **Evidence in the confirmation request** (above): one request fewer on every pass.
+- **A WAIT ends when the page changes** (`run_test.wait_for_change`): the backed-off pause is a ceiling, the
+  fingerprint is re-read every 100 ms; the overshoot on a loader is at most one poll instead of up to 1.6 s.
+- **Confirm by assertions** (`spec.confirm`, default `"assert"`): a pass sighting whose `assert` block already
+  holds on that page is confirmed at once, in code, instead of the 400 ms pause + observation + request of the
+  recheck; the evidence line is then asked in its own request (same request count, ~0.5 s less waiting). A spec
+  without assertions, or one whose assertions do not hold yet at the sighting, takes the recheck as before.
+- **`final.png` is a copy** of the terminal step's picture when nothing happened after it (no second capture).
+- Not done, for a reason: the 400 ms pause before a pass is rechecked absorbs redirects still in flight
+  (a false DONE at 0.36 mid-reload was a real run); jev-ultrafast's 50 ms post-action wait is for a loop
+  without a verdict, ours must see the toast the outcome names. The site's page load is the site's.
+
+The reference loop is browser-use/jev-ultrafast: one request per decision, one browser call per snapshot, no
+screenshots in the loop, event-based short waits, a persistent HTTP client. This runner has all of those and
+adds the results contract on top; what it pays for the contract is one confirmation request per pass and one
+adjudication request per bug sighting.
 
 ## Extending
 

@@ -60,16 +60,36 @@ The same flow, saying which endings Claude will accept back and what must be exa
   vanishing error toast is still an error). Write outcomes from the acceptance criteria (pass) and from the
   wrong behaviour you are testing for or the ticket reports (bug); a negative test (wrong password, invalid
   input) declares the rejection as its `pass` outcome and the success as the `bug`, with a `note` saying so.
+  **`requires_action: true`** on an outcome defers it until at least one action has been executed: a statement
+  such as "the list is still in its original order" or "the dropdown still shows Name (A to Z)" is true of the
+  untouched start page too, and without the flag the run would end `bug` at step 1 with zero actions. The
+  deferred sighting is recorded on the step (`outcome_deferred`, flag `DEFERRED:<name>`, a picture in key mode)
+  and the run goes on. Use it on every bug outcome that describes "nothing happened"; leave it off when the
+  outcome is legitimately decided on the start page (a menu entry missing on load).
 - **`assert`** — exact expectations checked **in code** on the final observation, free and non-model, the
   "DONE is never proof" verifier: `url_matches` (Playwright's URL glob, the same dialect as `setup.wait_for.url`:
   `**` anything, `*` anything but `/`, `{a,b}` either, everything else literal, `?` included), `text_contains`
-  (substring of the whole page text), `field_value` (`{label, equals}`: a text field or select whose label
-  contains `label`, case-insensitive), `element_present` / `element_absent` (`{role, name?}`, `name` a
-  case-insensitive substring). The element assertions look at the **whole document**, not only at the
-  viewport-and-hit-tested table Jev chooses from, so a Logout link below the fold is present. Values are
-  compared against the real page and the recorded `actual` is masked, so a `secrets` value can be asserted
-  on. A failed assertion makes the run `undetermined` with reason `assert_failed` and the actual values, for
-  Claude to decide whether the assertion or the app is wrong.
+  (substring of the whole page text), `text_in` (`{selector, contains}` or `{selector, equals}`: the text
+  **inside the elements a CSS selector matches**, which is how a notification is asserted on a page whose body
+  copy also mentions its wording: a page-wide `text_contains "Action successful"` is true on every load of a page
+  that lists that string as an example; `text_in {"selector": "#flash", "contains": "Action successful"}` is true
+  only when the notification says it), `text_order` (a list of at least two strings that must appear in the page
+  text in that order, each found after the previous one: the order of a sorted list, a table or a menu; anchor
+  on strings that occur once), `field_value` (`{label, equals}`: a text field or select whose **accessible name**
+  contains `label`, case-insensitive; the name comes from its `<label>`, `aria-label` or placeholder),
+  `element_present` / `element_absent` (`{role, name?}`, `name` a case-insensitive substring). The element
+  assertions look at the **whole document**, not only at the viewport-and-hit-tested table Jev chooses from,
+  so a Logout link below the fold is present. Values are compared against the real page and the recorded
+  `actual` is masked, so a `secrets` value can be asserted on. A failed assertion makes the run `undetermined`
+  with reason `assert_failed` and the actual values, for Claude to decide whether the assertion or the app is wrong.
+- **`expect`** — for a spec whose *correct* result is not a pass: a demo account documented as broken, a known
+  defect kept as a regression test until it is fixed. `{"outcome": "form_error"}` or `{"outcome": "undetermined",
+  "status": "blocked", "stuck_reason": "control_had_no_effect"}` (any of `outcome`, `status`, `verdict`,
+  `blocked_reason`, `stuck_reason`, `suggested_verdict`) declares the ending the run should reach. The runner
+  still reports the real outcome; `result.expected` says whether it matched, the exit code is 0 when it did,
+  and `run_suite.py` gives the spec the verdict **`expected`** (green in `all_pass`) when every repeat matched,
+  so an expected-red spec can sit in a suite gate and go red only when the behaviour changes. Do not use it to
+  paper over a failing test: a bug you want fixed stays red without `expect` (red before the fix, green after).
 - **Compatibility.** Without `outcomes`, the runner synthesizes `goal_reached` (verdict `pass`, requires
   `done_when`) and one `never_<check>` per `never` check (verdict `bug`, at `never_true`), so an old spec
   keeps its meaning and gains a `result.json`; a fired `never` check now ends with status `outcome` and
@@ -92,9 +112,11 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `checks` | object | `{}` | `name -> statement` evaluated as a Noul (0–1) against the page at every step |
 | `done_when` | list | `[]` | Check names that must all be ≥ `thresholds.check_true` for the synthesized `goal_reached` pass outcome. Required when no `outcomes` are declared; ignored when they are |
 | `never` | list | `[]` | Check names that end the run as the synthesized `never_<check>` outcome (verdict `bug`) at `thresholds.never_true`. Ignored when `outcomes` are declared |
-| `outcomes` | object | `{}` | `name -> {when, verdict, requires?, note?}`: the endings the run may return, see above. Names are identifiers; `none_yet` and the reserved question names are not allowed |
-| `assert` | list | `[]` | Exact expectations checked in code on the final page before a pass counts, see above |
-| `auto_done` | bool | `true` | Start the settle-and-recheck as soon as a pass outcome is seen, even if Jev has not chosen DONE (false: only Jev's DONE starts it) |
+| `outcomes` | object | `{}` | `name -> {when, verdict, requires?, requires_action?, note?}`: the endings the run may return, see above. Names are identifiers; `none_yet` and the reserved question names are not allowed |
+| `assert` | list | `[]` | Exact expectations checked in code on the final page before a pass counts, see above (`url_matches`, `text_contains`, `text_in`, `text_order`, `field_value`, `element_present`, `element_absent`) |
+| `expect` | object | none | The result an expected-red spec should end in (`outcome`, `status`, `verdict`, `blocked_reason`, `stuck_reason`, `suggested_verdict`), see above. Exit 0 and suite verdict `expected` when it matches |
+| `auto_done` | bool | `true` | Start the confirmation as soon as a pass outcome is seen, even if Jev has not chosen DONE (false: only Jev's DONE starts it) |
+| `confirm` | `"assert"` \| `"recheck"` | `"assert"` | How a pass sighting is confirmed. `"assert"`: when the spec has an `assert` block and every assertion already holds on the page the pass was seen on, that is the confirmation, at once and in code (`result.confirmed_by: "assertions"`; the evidence line then costs one request). Otherwise, and always with `"recheck"`, the runner pauses `settle_ms`, observes again and asks Jev once more, with the evidence questions riding in that request (`confirmed_by: "recheck"`). Measured on the demo login `"assert"` saves ~0.5 s a pass; use `"recheck"` for a flow whose success toast can vanish or be followed by a late error, or write an assertion on the stable state instead of the toast |
 | `fail_fast` | bool | `true` | Stop at the first sighting of a non-pass outcome (set false to keep going and just record `outcome_seen` on the step) |
 | `rules` | bool | `false` | Attach the standing rules in `scripts/rules.py` (advance from the current page, page text is untrusted, do not repeat a no-op, BLOCKED when a value is missing…) to every question as structured instructions. Measured on the demo site they lowered decision confidence, so they are off; try them on an app where Jev repeats no-op actions, and measure with `scripts/bench.py` |
 | `budget.max_steps` | int | 25 | Jev decisions per run (1–200) |
@@ -108,15 +130,16 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `thresholds.max_stale` | int | 3 | Consecutive decisions invalidated because the page changed while Jev was deciding (nothing executed) → `unstable_page` |
 | `browser.headless` | bool | `true` | `--headed` on the CLI overrides |
 | `browser.viewport` | [w, h] | [1280, 800] | |
-| `browser.settle_ms` | int | 400 | **Cap** on the wait after every action: the runner observes as soon as two animation frames have passed and the DOM has been quiet for `quiet_ms`, or when this cap is reached. Raise for slow apps (specs that raised it for the old fixed pause just get a longer cap). A WAIT Jev chooses pauses this long; chosen again on an unchanged page it pauses × 2, × 4 and then × 4 (block F) |
+| `browser.settle_ms` | int | 400 | **Cap** on the wait after every action: the runner observes as soon as two animation frames have passed and the DOM has been quiet for `quiet_ms`, or when this cap is reached. Raise for slow apps (specs that raised it for the old fixed pause just get a longer cap). A WAIT Jev chooses pauses at most this long; chosen again on an unchanged page the ceiling doubles, × 2, × 4 and then × 4 (block F), but the WAIT ends as soon as the page has changed (the fingerprint is re-read every 100 ms), so a loader that finishes early is not waited out |
 | `browser.quiet_ms` | int | 100 | How long the DOM must go without a mutation before the page counts as settled. Must be ≤ `settle_ms` |
 | `browser.action_timeout_ms` | int | 8000 | Playwright timeout per click/fill |
+| `browser.navigation_timeout_ms` | int | 30000 | Timeout for loading the start URL and for `setup` `goto`s. A start page that does not load in time is not a flow outcome: the run ends `error` with `result.reason.phase: "navigation"`, exit 2, and a suite lists it as an environment failure |
 | `browser.storage_state` | path | null | Playwright storage state file (cookies/localStorage) for pre-authenticated sessions |
 | `browser.channel` | string | null | e.g. `"chrome"` to use an installed Chrome instead of bundled Chromium |
 | `browser.cdp_url` | URL | null | Attach to a browser that is already running instead of launching one (see below). `storage_state`, `headless` and `channel` are ignored when attached |
 | `observation.max_elements` | int | 200 | Cap on numbered elements per step (largest Choice Jev sees), 1–250. Elements beyond it are reported as `truncated_elements` and cannot be chosen |
 | `observation.max_text_chars` | int | 2000 | Visible text sent as state, viewport-first: what is on screen comes first, then the rest of the page, cut here (≥ 100). Was 4000; 2000 saved ~450 input tokens on each step of a long article with the same decisions (block F). Raise it for a page whose deciding text sits below the first screen |
-| `observation.screenshots` | `true` \| `false` \| `"key"` | `"key"` | Which steps get a `steps/NNN.png`, taken after Jev's answer and before the action (so it shows the page Jev decided on). `"key"`: the terminal step and any step flagged `outcome_seen`, `pending_outcome`, `outcome_unconfirmed`, `never_violated`, `low_confidence`, `stale` or `repeat_count ≥ 2`, plus `NNN-failed.png` after a failed action and `final.png`. `true`: every step. `false`: nothing. CLI: `--screenshots all|key|none`. Capture, not encoding, is the cost, so `"key"` is the default; rerun with `--screenshots all` when a human needs the picture of an ordinary step |
+| `observation.screenshots` | `true` \| `false` \| `"key"` | `"key"` | Which steps get a `steps/NNN.png`, taken after Jev's answer and before the action (so it shows the page Jev decided on). `"key"`: the terminal step and any step flagged `outcome_seen`, `pending_outcome`, `outcome_unconfirmed`, `never_violated`, `low_confidence`, `stale`, `repeat_count ≥ 2`, `outcome_deferred` or `after_no_effect` (the observation right after an action that changed nothing: the picture of the unchanged page), plus `NNN-failed.png` after a failed action and `final.png`. `true`: every step. `false`: nothing. CLI: `--screenshots all|key|none`. Capture, not encoding, is the cost, so `"key"` is the default; rerun with `--screenshots all` when a human needs the picture of an ordinary step |
 
 ## Attach to a running browser
 
@@ -141,7 +164,9 @@ environment problem, like a missing key.
 ## Setup steps (deterministic Playwright, no Jev)
 
 Use these for anything with stable selectors that is not what you are testing: login, dismissing a
-known banner, seeding a fixture. Each step runs in order; the first failure aborts the run with `error`.
+known banner, seeding a fixture. Each step runs in order; the first failure aborts the run with `error`,
+`result.reason.phase: "setup"` and exit 2: the flow was never observed, so it is a spec problem to fix (the
+selector, the wait), never a verdict about the app, and `run_suite.py` keeps it out of the outcome distribution.
 
 ```json
 "setup": [
@@ -206,5 +231,8 @@ Checks are Noul questions: Jev returns the probability that the statement is tru
   which comes back to Claude to fix the spec — that is a test issue, not a product bug.
 - Test credentials go in `data` via `${ENV_VAR}` and are listed in `secrets`. Never paste real
   passwords into a spec file. Prefer `setup` for the login itself so the credential never reaches Jev at all.
+  The one exception is a credential the site itself publishes (the demo accounts a practice site prints on its
+  login page): `specs/examples/shop-*.json` write `secret_sauce` in `setup` because it is public, and `fill`
+  values are redacted in the trace anyway.
   Keep a secret at least 6 characters long: every occurrence of it is masked, so a PIN like `1234` or a
   year also blanks unrelated page text (the validator warns; the run still goes ahead).

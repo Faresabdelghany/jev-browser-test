@@ -23,6 +23,7 @@ import argparse
 import copy
 import json
 import os
+import shutil
 import re
 import sys
 import time
@@ -50,7 +51,7 @@ SCREENSHOT_TIMEOUT_MS = 3000  # a capture is ~50-100 ms; a page whose web font n
 
 
 TERMINAL_STATUSES = {
-    "passed": "an outcome with verdict pass was seen, confirmed after a settle-and-recheck, and every assertion held",
+    "passed": "an outcome with verdict pass was seen and confirmed (by every assertion holding on that page, or after a settle-and-recheck when the spec has no assertions), and every assertion held",
     "outcome": "a declared outcome with a verdict other than pass was seen (result.outcome names it)",
     "assert_failed": "a pass outcome was confirmed but an assertion did not hold on the final page (result.assertions)",
     "done_unverified": "Jev chose DONE confidently, and after a settle-and-recheck no pass outcome is visible",
@@ -577,6 +578,7 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
         "seen_at_step": final.get("seen_at_step"),
         "first_seen_at_step": final.get("first_seen_at_step") if seen else None,
         "confirmed": final.get("confirmed", False) if seen else False,
+        "confirmed_by": final.get("confirmed_by") if seen and final.get("confirmed") else None,  # "assertions" | "recheck"
         "path_confidence": min(confs) if confs else None,
         "reason": None,
         "evidence": {
@@ -803,14 +805,17 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         o = outcomes[name]
         return o.get("when") or " and ".join(spec["checks"][r] for r in o["requires"])
 
-    def settle_pass(page, step: dict, obs: dict, seen: dict, action: str, jev, prefetched: dict | None = None) -> None:
+    def settle_pass(page, step: dict, obs: dict, seen: dict, action: str, jev, prefetched: dict | None = None,
+                    assertions: list[dict] | None = None) -> None:
         """A confirmed pass: run the assertions on this final observation and end passed / assert_failed. With
-        `prefetched` (the evidence questions rode in this step's request) the adjudication costs no request."""
+        `prefetched` (the evidence questions rode in this step's request) the adjudication costs no request; with
+        `assertions` (already evaluated on this page by the confirm-by-assertions path) they are not run again."""
         final["outcome"] = seen
         final["seen_at_step"] = step["n"]
         final.setdefault("first_seen_at_step", step["n"])
         final["confirmed"] = True
-        final["assertions"] = check_assertions(spec, page, obs, secret_values)
+        final.setdefault("confirmed_by", "recheck")
+        final["assertions"] = check_assertions(spec, page, obs, secret_values) if assertions is None else assertions
         ok = all(a["ok"] for a in final["assertions"])
         step["assertions"] = final["assertions"]
         finish(page, step, "passed" if ok else "assert_failed", {"action": action, "ok": True, "error": None, "confirmed": True})
@@ -1040,6 +1045,16 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     park(step, reason, wait_entry(n, entry_op, "checking the result before finishing"), sig)
 
                 if passes and spec["auto_done"]:
+                    if spec["confirm"] == "assert" and spec["assert"]:
+                        # Confirm in code when the spec lets us: every assertion already holds on the page the pass was
+                        # seen on, so the settle-and-recheck (a 400 ms pause, one observation, one request) is not needed
+                        # to know the page really shows the ending. The evidence line is asked in its own request.
+                        checked = check_assertions(spec, page, obs, secret_values)
+                        if all(a["ok"] for a in checked):
+                            final["confirmed_by"] = "assertions"
+                            settle_pass(page, step, obs, passes[0], "AUTO_DONE", jev, assertions=checked)
+                            break
+                        step["assertions_pending"] = [a for a in checked if not a["ok"]]  # not yet: the recheck decides
                     confirm_later(passes[0]["name"], "AUTO_DONE", f"confirming outcome {passes[0]['name']}", "WAIT")
                     continue
 
@@ -1221,7 +1236,13 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
             else:
                 last = trace["steps"][-1] if trace["steps"] else {}
                 trace["final"] = final_page(last.get("checks", {}))
-            trace["final"]["screenshot"] = shot(page, "final.png", trace["final"])
+            last = trace["steps"][-1] if trace["steps"] else {}
+            if last.get("screenshot") and (last.get("executed") or {}).get("action") in ("AUTO_DONE", "DONE", "STOP", "BLOCKED"):
+                # nothing happened after the terminal step's picture: final.png is that picture (a copy, not a capture)
+                shutil.copyfile(os.path.join(out_dir, last["screenshot"]), os.path.join(out_dir, "steps", "final.png"))
+                trace["final"]["screenshot"] = os.path.join("steps", "final.png")
+            else:
+                trace["final"]["screenshot"] = shot(page, "final.png", trace["final"])
             lap("final_ms", t_lap)
         except Exception as e:  # noqa: BLE001
             status, error = "error", f"{type(e).__name__}: {str(e)[:500]}"

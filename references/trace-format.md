@@ -14,6 +14,7 @@ evidence, the file Claude reads first. The trace is the *evidence* behind it; th
   "note": "the wrong password is deliberate: ...",             // the outcome's note, copied for Claude
   "probability": 0.91, "confidence": 0.88,                      // the outcome Choice at the step it was seen (null for a checks-only outcome's confidence)
   "seen_at_step": 5, "first_seen_at_step": 4, "confirmed": true, // first_seen: the sighting; seen_at: the confirming step for a pass (the same step for other verdicts)
+  "confirmed_by": "recheck",                                    // "assertions": every assertion held on the sighting page (spec.confirm "assert"); "recheck": a settle, a second observation and Jev again; null unless confirmed
   "path_confidence": 0.89,                                      // the weakest executed decision on the way: report the least certain judgment
   "reason": null,                                               // for undetermined: see below
   "evidence": { "line": "Your password is invalid!",            // the page line Jev selected in the adjudication request (verbatim), or null
@@ -24,8 +25,10 @@ evidence, the file Claude reads first. The trace is the *evidence* behind it; th
   "outcomes_seen_earlier": [],                                  // non-terminal sightings: non-pass ones (fail_fast: false) and pass sightings that vanished on their recheck ({.., "unconfirmed": true})
   "story": [ "1 TYPE_TEXT [0] textbox \"Username\" <- username", "2 TYPE_TEXT [1] textbox \"Password\" <- password", "3 CLICK [2] button \"Login\"" ],
   "status": "passed", "duration_ms": 6200,
-  "usage": { "jev_requests": 6, "input_tokens": 9774, "output_tokens": 1741, "model": "jev-1.13.0", "reconnects": 0 },
-  "trace": "runs/smoke-login-badpw/20260922-101500/trace.json"
+  "usage": { "jev_requests": 5, "input_tokens": 9774, "output_tokens": 1741, "model": "jev-1.13.0", "reconnects": 0 },
+  "trace": "runs/smoke-login-badpw/20260922-101500/trace.json",
+  "expected": { "expect": { "outcome": "bad_credentials" }, "actual": { "outcome": "bad_credentials" },   // only when the spec declares `expect`:
+                "matched": true, "mismatches": {} }                                                      // did the run end in the declared result?
 }
 ```
 
@@ -34,7 +37,10 @@ low_confidence | done_unverified | budget_exhausted | unstable_page | error`, or
 an assertion failed (`assert_failed`). Then `reason` is `{ "status", "blocked_reason", "stuck_reason",
 "suggested_verdict" }` plus `failed_assertions` (with `actual` values) and `outcome_seen` for
 `assert_failed`, `pending_outcome` for a `budget_exhausted` whose final look saw a pass for the first time
-(not rechecked, so not a pass: give the run one more step), and `error` for `error`. `blocked_reason` is Jev's answer on the terminal step (asked there, in one follow-up request, and on the
+(not rechecked, so not a pass: give the run one more step), and `error` for `error`; an `error` whose `phase` is
+`navigation` or `setup` never observed the page (the start URL did not load within `browser.navigation_timeout_ms`,
+or a setup step failed): it is not a verdict (suggested `flaky` for navigation, `test_issue` for setup), the runner
+exits 2 and a suite lists it as an environment/setup failure. `blocked_reason` is Jev's answer on the terminal step (asked there, in one follow-up request, and on the
 final look; not on ordinary steps) to "what most prevents progress" (`nothing | missing_data_value | control_not_on_page | site_refused_or_error |
 human_step_required | wrong_page | other`); `stuck_reason` is asked only after an action with
 `page_changed: false` (`control_had_no_effect | overlay_or_modal | still_loading |
@@ -54,8 +60,9 @@ page, not about the verdict:
 | `still_loading`, `unstable_page`, `error` | FLAKY |
 | `done_unverified`, `assert_failed`, `other`, `nothing`, `needs_scroll_or_other_control` | none: Claude judges from the trace |
 
-Exit codes: 0 ⇔ verdict `pass` (status `passed`); 1 for every other outcome and for `undetermined`; 2 for a
-spec or environment problem (no result is written).
+Exit codes: 0 ⇔ verdict `pass` (status `passed`), or for a spec with `expect` ⇔ `expected.matched`; 1 for
+every other outcome and for `undetermined`; 2 for a spec or environment problem (no result is written), and for a
+run that ended before its first observation (`reason.phase`; a result *is* written then).
 
 ## Suite results (`scripts/run_suite.py`)
 
@@ -79,9 +86,11 @@ per run that has a trace.
                   "evidence_line": "You logged into a secure area!", "suggested_verdict": null,
                   "duration_ms": 6000, "jev_ms": 2000, "requests": 6, "input_tokens": 8900, "decision_confidence": 0.96, ... } ],
       "outcome_counts": { "logged_in": 5 }, "verdict_counts": { "pass": 5 }, "suggested_verdicts": {},
-      "agreement": 1.0,                       // share of the observed runs that ended in the most common outcome
-      "verdict": "pass",                      // unanimous -> that outcome's verdict; undetermined everywhere -> "undetermined"; else "flaky"
-      "environment_failures": [],             // runs that wrote no trace: [{ "run": 2, "exit_code": 2, "error": "could not attach to the browser at ..." }]
+      "agreement": 1.0,                       // share of the observed runs that ended in the most common VERDICT (two pass endings agree)
+      "outcome_agreement": 1.0,               // the same over outcome names
+      "expected_matched": null,               // for a spec with `expect`: how many observed runs ended in the declared result
+      "verdict": "pass",                      // one verdict everywhere -> it; undetermined everywhere -> "undetermined"; a spec with `expect` -> "expected" when every run matched; else "flaky"
+      "environment_failures": [],             // runs that wrote no trace, or ended before their first observation (phase navigation / setup): [{ "run": 2, "exit_code": 2, "error": "..." }]
       "reason": null,                         // set (and verdict "undetermined") when every run was an environment failure
       "medians": { "wall_ms": 6100, "duration_ms": 6000, "jev_ms": 2000, "browser_ms": 1270, "requests": 6, "input_tokens": 8900, "decision_confidence": 0.96, "steps": 5 },
       "passes": 5
@@ -91,11 +100,13 @@ per run that has a trace.
 }
 ```
 
-`flaky` is computed from disagreement across repeats, never diagnosed from one run. A run that wrote **no
-`trace.json` at all** is an **environment failure**, not an outcome: the runner exited 2 (spec or environment
-problem: a missing key, a browser that could not be launched or attached), could not be started, or was killed
-before its first observation. Its record has `status: "error"`, `environment_failure: true`, no outcome and
-the runner's last stderr lines in `error`; the spec lists it under `environment_failures` and leaves it out of
+`flaky` is computed from disagreement of **verdicts** across repeats, never diagnosed from one run: two
+runs that ended in two different `pass` outcomes agree, a declared outcome and an `undetermined` do not. A run
+that wrote **no `trace.json` at all**, or whose result says `reason.phase` (`navigation`: the start URL never
+loaded; `setup`: a scripted step failed), is an **environment/setup failure**, not an outcome: the runner exited
+2, could not be started, or was killed before its first observation. Its record has `status: "error"`,
+`environment_failure: true` (and `phase` when known), no outcome and the error in `error`; the spec lists it
+under `environment_failures` and leaves it out of
 `outcome_counts`, `agreement`, `medians` and `passes`, so one launch failure among passes does not make the
 spec `flaky` (the suite header of `results.md` counts them, and `suite.environment_failures` has the count per
 spec). A spec whose every run failed that way is `undetermined` with `reason` saying so. A run that wrote a
@@ -112,8 +123,10 @@ environment failure (or a spec file is missing / two files share an id).
 2. For any flagged or suspicious step: `--step N` dumps it in full (probabilities, checks, the element table
    Jev was offered) and `steps/NNN.png` shows the page Jev decided on (taken after its answer, before the
    action). With the default `screenshots: "key"` only the terminal step and flagged steps (`outcome_seen`,
-   `pending_outcome`, `outcome_unconfirmed`, `never_violated`, `low_confidence`, `stale`, `repeat_count ≥ 2`)
-   have one; a failed action also leaves `NNN-failed.png`.
+   `pending_outcome`, `outcome_unconfirmed`, `never_violated`, `low_confidence`, `stale`, `repeat_count ≥ 2`,
+   `outcome_deferred`, `after_no_effect`) have one; a failed action also leaves `NNN-failed.png`. The step after
+   an action flagged `NO-EFFECT` (`page_changed: false` on a click, a typed value, a select) always has a
+   picture: it shows the page the action failed to change.
    The step *before* a divergence usually has no picture: its element table and probabilities are still in
    the trace, and `--screenshots all` restores a picture per step for a rerun.
 3. `steps/final.png` shows where the run ended (always written unless screenshots are off).
@@ -133,7 +146,7 @@ environment failure (or a spec file is missing / two files share an id).
 | `low_confidence` | `max_low_confidence_steps` consecutive uncertain decisions, none of them executed | Jev could not choose between the offered options: look at `decision_confidence` and the probabilities in `--step N`. A split over `type_value` means the `data` key names do not match the field labels (rename them); a split over targets means the goal/notes do not say which of several similar controls to use |
 | `budget_exhausted` | Ran out of steps or seconds. The final look is one more step (`final_look: true`): a sighting or DONE on the last step is confirmed by it (then the status is `passed`), a pass first seen there is recorded as `reason.pending_outcome`. When the budget went on a streak of WAITs, `reason.stuck_reason` carries the last reason Jev gave for the no-op (`still_loading`) | Wandering (test issue, tighten the goal) or a very long flow (raise the budget); with `pending_outcome`, one more step would very likely have passed; with `stuck_reason: still_loading` the page never finished loading (flaky: rerun, then raise the budget or suspect the app) |
 | `unstable_page` | `thresholds.max_stale` consecutive decisions were stale: the page changed between the observation and Jev's answer every time, so nothing was executed | Environment: the page never holds still (animation, polling, a slow render). Raise `browser.quiet_ms` / `settle_ms`, or add a `setup` `wait_for` for the thing that keeps changing. Each stale step's `stale` says what moved |
-| `error` | Runner, browser or API failure (`trace.error`). `invalid operation answer: <reason>` means Jev's `operation` answer failed validation twice in a row for one step (the step carries `invalid_answer` and `retried`) | Environment issue; rerun before concluding anything |
+| `error` | Runner, browser or API failure (`trace.error`). `invalid operation answer: <reason>` means Jev's `operation` answer failed validation twice in a row for one step (the step carries `invalid_answer` and `retried`). With `trace.failed_before_observation` (`result.reason.phase`) the start URL never loaded or a setup step failed: no step exists, exit 2 | Environment issue; rerun before concluding anything. A `phase: setup` is the spec's selector or wait, never the app |
 
 `trace.pass` is `true` only for `passed`.
 
@@ -144,12 +157,17 @@ environment failure (or a spec file is missing / two files share an id).
   "spec_id": "search-add-to-cart",
   "status": "passed", "status_meaning": "...", "pass": true, "error": null,
   "outcome": "item_added", "verdict": "pass",  // as in result.json; "result" holds the whole result.json, "outcomes" the effective outcomes (declared + synthesized)
-  "adjudication": { "outcome": "item_added", "statement": "...", "line": "Cart: 1 items", "line_id": "3", "present": 0.95, "confidence": 0.9, "latency_ms": 290, "usage": { "input_tokens": 720, "output_tokens": 60 } },
+  "adjudication": { "outcome": "item_added", "statement": "...", "line": "Cart: 1 items", "line_id": "3", "present": 0.95, "confidence": 0.9, "merged": true },
+  //   "merged": the evidence questions rode in the confirming step's request (a pass: no extra round trip; the step has "adjudication_merged": true);
+  //   a bug outcome seen at first sighting gets its own request instead: "latency_ms": 290, "usage": { "input_tokens": 720, "output_tokens": 60 }
   //   a statement of several sentences (split on ". ", "; ", ", and ") adds "sentences": [{ "sentence", "line_id", "line", "confidence" }, …],
   //   one Choice per sentence in the same request; "line" / "line_id" / "confidence" are those of the most confident sentence that found a line
   "started_at": "...", "ended_at": "...", "duration_ms": 6210,
   "actions_executed": 4,                 // steps that changed the browser (not DONE/STOP, not runner-inserted WAITs)
-  "timing": { "launch_ms": 150, "navigation_ms": 2000, "setup_ms": 0, "steps_ms": 2500, "final_ms": 30 },  // where the wall-clock went
+  "timing": { "launch_ms": 150, "navigation_ms": 2000, "setup_ms": 0, "steps_ms": 2500, "final_ms": 30,   // where the wall-clock went
+              "jev_connect_ms": 460 },       // the TCP + TLS handshake to the API, paid in the background while the browser launched
+  "failed_before_observation": "navigation", // only when the start URL never loaded ("navigation") or a setup step failed ("setup"): no steps, exit 2
+  "expected": { "expect": {...}, "matched": true, ... },  // only for a spec with `expect` (the same record as result.expected)
   "browser": { "attached": false },      // or { attached: true, cdp_url, storage_state_ignored } when browser.cdp_url was used
   "passed_without_actions": true,        // only present if the start page already satisfied done_when
   "usage": { "jev_requests": 5, "input_tokens": 2100, "output_tokens": 300, "model": "jev-1.13.0",
@@ -177,6 +195,10 @@ environment failure (or a spec file is missing / two files share an id).
       "pending_outcome": "item_added",                               // a pass was seen here; executed is a WAIT "confirming outcome ..." and the next step decides
       "outcome_unconfirmed": "item_added",                           // the recheck did not see it again: a transient sighting, the run went on
       "final_look": true,                                            // the one step after the budget ran out: asked only the checks, the outcome and blocked_reason
+      "outcome_deferred": ["not_reordered"],                         // an outcome with requires_action was true of the page before any action: recorded, not a verdict
+      "no_effect": true,                                             // this step's executed CLICK/TYPE_TEXT/SELECT/PRESS_ENTER changed nothing (page_changed false): flag NO-EFFECT
+      "after_no_effect": true,                                       // this observation is the page the previous action failed to change (a key-mode picture)
+      "adjudication_merged": true,                                   // the confirming step: the evidence questions rode in this request (state.lines added)
       "assertions": [ ... ],                                         // on the confirming step: the assert block's results
       "low_confidence": false, "decision_confidence": 0.94, "repeat_count": 1,
       "page_changed": true,                                          // set once the next observation exists: did this step's action change the page signature?
@@ -185,7 +207,8 @@ environment failure (or a spec file is missing / two files share an id).
       "retried": true,                                               // only when the request was re-sent
       "stale": "target [3] changed: disabled",                       // only when the page changed during the decision; nothing was executed
       "executed": { "action": "CLICK", "ok": true, "error": null, "element": 3 },
-      //   a WAIT's executed carries "wait_ms", its pause: a WAIT chosen again on an unchanged page pauses settle_ms x 1, 2, 4, then 4 ("wait_streak" on the step)
+      //   a WAIT's executed carries "wait_ms", its ceiling (a WAIT chosen again on an unchanged page: settle_ms x 1, 2, 4, then 4; "wait_streak" on the step),
+      //   and "wait": { "ended": "changed" | "timeout" | "navigated", "ms": 412 }: the WAIT ended as soon as the page's fingerprint changed, else at the ceiling
       "settle": { "ended": "quiet", "ms": 118 },                     // how the post-action wait ended: quiet | options | options_timeout | cap | navigated
       "latency_ms": { "jev": 131, "browser": 640 },
       "usage": { "input_tokens": 1450, "output_tokens": 210 }  // this step's request's tokens; a retry or the reason follow-up adds to it
@@ -211,7 +234,8 @@ Notes that matter when judging:
   and the next step is the verdict: a pass seen again is confirmed (`executed.confirmed == true`, then the
   assertions run), a DONE without a pass ends `done_unverified`, an auto sighting that vanished is recorded
   as `outcome_unconfirmed` and the run goes on. This absorbs reloads and redirects still in flight when Jev
-  declared victory, and costs one extra request per pass.
+  declared victory; the confirming request also carries the evidence questions (`adjudication_merged`), so a
+  pass costs one extra request in all, not two.
 - A non-pass outcome is terminal at its first sighting (`outcome_seen`, status `outcome`), with the picture
   forced; the outcome Choice's full distribution is on the step, so a near miss is visible too.
 - Every Choice answer is validated before it is used: the choice must be one of the keys the question

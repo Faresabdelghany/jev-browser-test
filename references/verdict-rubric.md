@@ -18,6 +18,14 @@ buried).
 - **`undetermined` with a suggestion** (`reason.suggested_verdict` set): start from the suggestion and
   confirm it with the rubric below; the typed reason (`reason.blocked_reason`, `reason.stuck_reason`) and
   `reason.status` tell you where to look in the trace.
+- **`expected` present** (the spec declares `expect`): the verdict is "as declared" when `expected.matched`
+  is true (report the real outcome and say it is the documented behaviour; exit 0, suite verdict `expected`),
+  and a **change in behaviour** when it is false: `expected.mismatches` names what differs, and that difference
+  is the finding (a fixed bug, a new one, a drifted page).
+- **`reason.phase` set** (`navigation` or `setup`): the page was never observed. Not a verdict at all: a start
+  URL that did not load in `navigation_timeout_ms` is the environment (suggested `flaky`: rerun, raise the
+  timeout, stop running the suite on several workers against a slow host), a failed setup step is the spec's
+  selector or wait (`test_issue`). Say so in one line and do not read the (empty) step table for meaning.
 - **`undetermined` without a suggestion** (`done_unverified`, `assert_failed`, an `other` reason): the
   judgment below applies in full. For `assert_failed`, `reason.failed_assertions` carries the actual values:
   decide whether the assertion or the app is wrong, and never loosen an assertion to get green without
@@ -28,8 +36,9 @@ job honest: a wrong verdict is visible as a wrong label, not hidden in a thresho
 
 ## The five verdicts
 
-**PASS** — `status == passed`: a pass outcome was seen, confirmed after the recheck, every assertion held,
-and a glance at `evidence.line` and `final.png` agrees. If `passed_without_actions` is set, do not report a
+**PASS** — `status == passed`: a pass outcome was seen and confirmed (`confirmed_by`: `assertions`, every
+assertion held on the very page the pass was seen on; or `recheck`, a settle, a second observation and Jev
+again), every assertion held, and a glance at `evidence.line` and `final.png` agrees. If `passed_without_actions` is set, do not report a
 pass yet: the start page already showed the pass outcome, so the outcome or checks are too weak to prove
 the flow works. Tighten them and rerun.
 
@@ -61,11 +70,35 @@ nothing was executed; each step's `stale` names what moved), timeouts, `executed
 network-heavy steps, or a result that differs across reruns. Rerun once (twice for a suspected flake).
 Report as flaky only after a rerun disagrees with the first result, and include both traces. Never
 diagnose flakiness from a single run.
+Two different things read `flaky` in a suite, and the report must say which: **the environment** (a load
+timeout, a stale page, an error run among passes) and **an application that varies by design** (every
+disagreeing run ended in a *confident declared outcome* with a *different evidence line*: a notification
+that is random, an A/B page). The second is not noise to retry away: if the spec asserts one ending of a
+legitimate variation, the spec is wrong (TEST_ISSUE: assert what the page guarantees, `text_in` on the
+element and an either/or pass outcome); if the product's contract forbids the variation, it is a BUG with a
+measured rate. Keep environment failures out of that judgment: the suite already lists them apart.
 
 **NEEDS_HUMAN** — the evidence is genuinely ambiguous: confidence is low and both a bug and a test issue
 are plausible; the failure depends on domain knowledge the spec did not capture; the flow involves money,
 deletion or sending messages and the runner stopped before a side effect. Say precisely what a human should
 look at (step number, screenshot, the specific question).
+
+## Triage-only mode: what to run, and what not to
+
+When you are handed a run folder (`result.json`, `trace.json`, screenshots) the answer is in it. In order:
+
+1. Read `result.json`, then the step table, then the pictures. Do not launch a browser first.
+2. "Is it flaky?" is answered from the trace's **flake signatures** before any rerun: `stale` steps,
+   `executed.ok == false`, `retried`, `usage.reconnects > 0`, a `settle` that ended on `cap` at the decisive step,
+   `reason.phase`, an `error` status. None present and a confident declared outcome or a typed reason with a
+   suggestion → the run is deterministic evidence; say so and do not rerun. Rerun (once) only when a signature is
+   present, when the user explicitly asks for a rerun, or after a spec fix you made.
+3. The cheapest way to separate TEST_ISSUE from BUG is a **control run**: the same spec with a known-good account
+   or the sibling spec that is known to pass (`shop-checkout.json` beside `shop-checkout-error-account.json`). One
+   run, ~10 Jev calls, and it settles whether the flow or the app is at fault. Prefer it to fetching the app's
+   source code, which is not asked for and rarely changes the verdict.
+4. Bound the work: one triage is one reading, at most one rerun and one control. A triage that takes longer than
+   the run it judges has gone wrong.
 
 ## How to look at a run (in this order)
 
@@ -105,6 +138,7 @@ Keep it short; the trace is the appendix. Use this shape (plain prose is fine fo
 **Verdict:** BUG | PASS | TEST_ISSUE | FLAKY | NEEDS_HUMAN
 **Flow:** <spec id> — <goal in one line>
 **Result:** outcome <name> (<verdict> | undetermined, <reason.status>), <n> actions, <duration>s, <jev requests> Jev calls
+**Expected result:** matched | NOT matched (<expected.mismatches>)                                       ← specs with `expect` only
 
 **What happened:** <2–4 sentences: the story of the run (result.story), ending with where it diverged>
 **Evidence:** "<evidence.line>" at step <n> (probability <p>, path confidence <c>), screenshot steps/<nnn>.png

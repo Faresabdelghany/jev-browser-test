@@ -67,6 +67,11 @@ DEFAULTS = {
     "assert": [],
     "auto_done": True,
     "fail_fast": True,
+    # How a pass sighting is confirmed. "assert": when the spec has an `assert` block and every assertion already holds
+    # on the page the pass was seen on, that is the confirmation (in code, at once; the evidence line then costs one
+    # request); otherwise, and always with "recheck", the runner pauses settle_ms, observes again and asks Jev once
+    # more (the evidence questions ride in that request). Measured on the demo login: "assert" saves ~0.5 s a pass.
+    "confirm": "assert",
     # Attach the standing rules (scripts/rules.py) to every question. Measured on the demo site they lowered
     # decision confidence in every wording tried (docs/superpowers/measurements/2026-09-22-track1-ab-*.json),
     # so they are opt-in for apps where Jev repeats no-op actions or needs the untrusted-page-text guard.
@@ -328,6 +333,8 @@ def validate(spec: dict) -> list[str]:
     for k in ("auto_done", "fail_fast", "rules"):
         if not isinstance(spec.get(k, False), bool):
             errors.append(f"'{k}' must be true or false")
+    if spec.get("confirm", "assert") not in ("assert", "recheck"):
+        errors.append("'confirm' must be \"assert\" (a pass whose assertions all hold is confirmed at once) or \"recheck\" (settle, observe again, ask Jev)")
     expect = spec.get("expect")
     if expect is not None:
         if not isinstance(expect, dict) or not expect:
