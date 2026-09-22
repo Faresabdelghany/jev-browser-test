@@ -12,3 +12,6 @@ __pycache__/
 
 # run artifacts: traces contain page text and screenshots of your app
 runs/
+
+# specs for a real application (URLs, flows, account handles): local only, never in the public repo
+specs/local/
