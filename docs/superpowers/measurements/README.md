@@ -329,3 +329,51 @@ whose trace to open. Block G's per-sentence adjudication plays no part: both sta
 The spec is untracked (`specs/local/`, trial handoff deviation 1), so like the trial's numbers this file
 cites a spec that is not in the repo (its `spec` path points into the export). If block D promotes the trial
 specs, their committed twins are the ones to cite from then on.
+
+## The examples suite (2026-09-22): the ten public-site specs at `b3996fa`
+
+`run_suite.py specs/examples/*.json --repeat 3 --workers 2` from a `git archive b3996fa` export in the scratchpad
+with `GIT_COMMIT=b3996fa` set: the first committed run of the real-application trial's specs, promoted to
+`specs/examples/` in that commit (block D of the post-trial brief, on Fares's yes), plus `menu-random`, written
+this session. Files: `2026-09-22-examples-suite.json` / `.md`. 30 runs, 96.9 s wall-clock on 2 workers,
+205 Jev requests and 552,765 input tokens in all, no environment failure. README.md's "Examples" section names the
+sites and flows.
+
+| spec | verdict | agreement | outcomes | evidence line | requests / input tokens / wall (medians) | confidence |
+|---|---|---:|---|---|---:|---:|
+| `shop-checkout` | **pass** | 100% | `order_complete` 3/3 | "Checkout: Complete!" 3/3 | 11 / 28,911 / 7,572 ms | 0.98 |
+| `shop-add-second-item` | **pass** | 100% | `bike_light_in_cart` 3/3 | "Sauce Labs Bike Light" 3/3 | 5 / 13,143 / 4,609 ms | 0.875 |
+| `shop-checkout-problem-account` | **bug** | 100% | `form_error` 3/3 | "Error: Last Name is required" 3/3 | 9 / 24,641 / 6,355 ms | 0.87 |
+| `shop-checkout-error-account` | **undetermined (suggested bug 3/3)** | 100% | `undetermined` 3/3 | none 3/3 | 9 / 26,151 / 6,520 ms | 0.94 |
+| `wiki-search` | **pass** | 100% | `article_shown` 3/3 | "Playwright (software)" 3/3 | 5 / 47,872 / 5,614 ms | 0.85 |
+| `todo-add-filter` | **pass** | 100% | `active_filtered` 3/3 | "1 item left" 3/3 | 9 / 19,349 / 5,925 ms | 0.915 |
+| `load-wait` | **pass** | 100% | `loaded` 3/3 | none 3/3 | 10 / 12,901 / 12,709 ms | 0.94 |
+| `notify-random` | **flaky** | 67% | `action_unsuccessful` 2/3, `action_successful` 1/3 | "Action unsuccesful, please try again" 2/3; "Action successful" 1/3 | 3 / 3,205 / 4,619 ms | 0.99 |
+| `modal-close` | **pass** | 100% | `modal_closed` 3/3 | none 1/3; "If closed, it will not appear on subsequent page loads." 2/3 | 5 / 5,523 / 5,950 ms | 0.575 |
+| `menu-random` | **bug** | 100% | `entry_missing` 3/3 | none 3/3 | 2 / 2,117 / 3,801 ms | none (no action decided) |
+
+What the file shows, against the trial's untracked runs at `cf24586` (3 repeats, handoff
+`2026-09-22-handoff-after-real-app.md`):
+
+- **The nine trial specs end as they did**: the same verdict for each, and request and token medians identical
+  to the trial's for eight of them (the sites are deterministic: 11 / 28,911, 5 / 13,143, 9 / 24,641, 9 / 26,151,
+  5 / 47,872, 10 / 12,901, 5 / 5,523). `todo-add-filter` sends 19,349 input tokens against 19,078: its outcome
+  statement is now two sentences and block G's second evidence Choice costs about 270 tokens on that page.
+  `notify-random` is **flaky** here (bug 2, pass 1) where the trial's 3 runs had all passed: the page is random
+  by design, and this is what the suite says about it (the 5-run measurement above says the same, 3 / 2).
+- **`shop-checkout-error-account`** ends `undetermined` 3/3 with `suggested_verdict: bug` 3/3 (BLOCKED right after
+  the dead Finish button, `stuck_reason: control_had_no_effect`): the trial's third fix, seen from a clean export.
+- **`menu-random`** (new) ends **bug 3/3**: the entry the page drops at random was missing on all three loads (and
+  on 3 of 4 observer peeks without Jev), so the page's randomness is skewed and the suite reads a unanimous bug,
+  not flaky. As an example it shows an outcome decided on the start page with nothing to click: one step, two
+  requests (the step and the adjudication), `decision_confidence` none (no operation was executed), no evidence
+  line (the statement is an absence).
+- **Evidence lines.** One-sentence statements that name one visible string get their line 3/3 (the product
+  name, the form error, the completion heading, the article title, either notification text); the two-sentence
+  todo statement is quoted 3/3 ("1 item left", block G; the trial's one-clause statement got a line 1/3);
+  absences get none (`menu-random` 3/3; `modal-close` 2/3, and the third quotes a line of the uncovered page that
+  is not a statement of the absence); the loader's "The text 'Hello World!' is displayed below the heading" gets
+  no line 3/3 (trial 1/3) although `present` is high: Jev declines to equate the sentence with the bare line
+  "Hello World!" on a three-line page. A spec author who wants that line quoted writes "The page says 'Hello World!'".
+- **Time and tokens.** 97 s for 30 runs on 2 workers; the long encyclopedia page is a quarter of all input tokens
+  (47,872 a run, 5 requests) and block F's text-cap lever is measured on it.
