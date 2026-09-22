@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from jev_client import choice, noul
 from observe import element_label
+from rules import CHECK, NEXT_ACTION, TARGET, VALUE
 
 CLICK_ROLES = {
     "link", "button", "submit", "reset", "image", "tab", "menuitem", "menuitemcheckbox", "menuitemradio",
@@ -165,24 +166,18 @@ def build_questions(spec: dict, obs: dict, last_operation: str | None) -> tuple[
     ops["DONE"] = OPERATION_DESCRIPTIONS["DONE"]
     ops["BLOCKED"] = OPERATION_DESCRIPTIONS["BLOCKED"]
 
-    questions = {
-        "operation": choice(
-            "Given the goal, the actions so far and the current page, which single operation should be performed next?",
-            ops,
-        )
-    }
+    goal = spec["goal"]
+
+    def target_instructions(operation: str) -> dict:
+        return {"goal": goal, "operation": operation, "rules": [NEXT_ACTION, TARGET]}
+
+    questions = {"operation": choice({"goal": goal, "rules": NEXT_ACTION}, ops)}
     if "CLICK" in ops:
-        questions["click_target"] = choice(
-            "If the next operation is CLICK, which element should be clicked to make progress toward the goal?",
-            {str(e["idx"]): target_criterion(e) for e in clickable},
-        )
+        questions["click_target"] = choice(target_instructions("CLICK"), {str(e["idx"]): target_criterion(e) for e in clickable})
     if "TYPE_TEXT" in ops:
-        questions["type_target"] = choice(
-            "If the next operation is TYPE_TEXT, which text field should receive the value?",
-            {str(e["idx"]): target_criterion(e) for e in typable},
-        )
+        questions["type_target"] = choice(target_instructions("TYPE_TEXT"), {str(e["idx"]): target_criterion(e) for e in typable})
         questions["type_value"] = choice(
-            "If the next operation is TYPE_TEXT, which of the available data values should be typed?",
+            {"goal": goal, "operation": "TYPE_TEXT", "rules": [NEXT_ACTION, VALUE]},
             {d["key"]: d for d in data_values(spec)},
         )
     if "SELECT" in ops:
@@ -192,13 +187,10 @@ def build_questions(spec: dict, obs: dict, last_operation: str | None) -> tuple[
                                      "current_value": e.get("value") or ""}
             for e in selects for o in e["options"] if not o.get("disabled")
         }
-        questions["select_target"] = choice(
-            "If the next operation is SELECT, which dropdown option should be chosen?",
-            select_options,
-        )
+        questions["select_target"] = choice(target_instructions("SELECT"), select_options)
 
     for name, statement in spec["checks"].items():
-        questions[name] = noul(statement)
+        questions[name] = noul({"statement": statement, "rules": CHECK})
     meta = {
         "operations": list(ops),
         "offered": {k: list(q["criteria"]) for k, q in questions.items() if q["type"] == "choice"},

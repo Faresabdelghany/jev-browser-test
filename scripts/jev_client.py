@@ -46,18 +46,25 @@ class JevError(RuntimeError):
     """Raised when the API cannot be reached or returns an error."""
 
 
-def choice(instructions: str, criteria: dict[str, str]) -> dict:
-    """Build a Choice question: pick one label from `criteria` (label -> description)."""
+def choice(instructions: str | dict | list, criteria: dict) -> dict:
+    """Build a Choice question: pick one label from `criteria` (label -> description, a string or an object).
+
+    `instructions` may be structured, e.g. {"goal": ..., "rules": ...}: TypeSafe reads objects and arrays
+    as well as strings, and an object keeps the question and the guidance it refers to apart.
+    """
     return {"type": "choice", "instructions": instructions, "criteria": criteria}
 
 
-def score(instructions: str, criteria: list[str]) -> dict:
-    """Build a Score question: position on an ordered rubric (index 0..n-1)."""
+def score(instructions: str | dict | list, criteria: list) -> dict:
+    """Build a Score question: position on an ordered rubric (index 0..n-1). Structured `instructions` allowed."""
     return {"type": "score", "instructions": instructions, "criteria": criteria}
 
 
-def noul(instructions: str) -> dict:
-    """Build a Noul question: probability (0-1) that the statement is true of the state."""
+def noul(instructions: str | dict | list) -> dict:
+    """Build a Noul question: probability (0-1) that the statement is true of the state.
+
+    `instructions` may be an object such as {"statement": ..., "rules": ...}.
+    """
     return {"type": "noul", "instructions": instructions}
 
 

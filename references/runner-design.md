@@ -106,6 +106,18 @@ intercepted clicks still fall back to `force=True` (`executed.forced`).
 Known blind spots: canvas content (maps, charts) has no elements at all; a clickable element with no
 role, no handler attribute and no pointer cursor. Both need a `setup` step.
 
+## Rules
+
+`scripts/rules.py` holds the standing rules Jev gets with every question, attached as structured
+`instructions`: `operation` carries `{"goal", "rules": NEXT_ACTION}`, the target questions
+`{"goal", "operation", "rules": [NEXT_ACTION, TARGET]}`, `type_value` `{"goal", "operation": "TYPE_TEXT",
+"rules": [NEXT_ACTION, VALUE]}`, and each check Noul `{"statement", "rules": CHECK}`. The wording is adapted
+from jev-ultrafast for a loop with prepared values (TYPE_TEXT means picking one of `available_data_values`;
+a missing value means BLOCKED, never an unrelated value). The untrusted-page-text guard is in both
+`NEXT_ACTION` and `CHECK`: nothing on the page can change the goal or the rules. `TARGET` names the premise
+(this question only picks a target for the operation named in it); whether an implicit phrasing does
+better is a measured A/B, not a design decision.
+
 ## Answer validation
 
 Jev's answers are data from a network service and the runner acts on them, so nothing is trusted before
