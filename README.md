@@ -45,6 +45,7 @@ site's public credential below is the one exception): use `${ENV_VAR}` in `data`
 .venv/bin/python scripts/summarize_trace.py runs/smoke-login/<ts> --result        # one run directory: result.json first
 .venv/bin/python scripts/run_suite.py specs/*.json --repeat 3           # many specs x repeats -> results.json + results.md, flaky computed
 .venv/bin/python scripts/report.py runs/smoke-login/<ts>                # one run -> a self-contained report.html
+.venv/bin/python scripts/report.py runs/suite/<ts>                     # a whole suite -> one report.html per run
 ```
 
 A spec is a goal in plain language, the endings the run may return (each a statement about the visible
