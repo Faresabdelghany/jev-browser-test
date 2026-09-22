@@ -92,8 +92,9 @@ account one request more (F1's follow-up) with the same suggested bug.
   for half the overshoot; not measured. Decide if time on loader pages matters more than requests.
 - **F3 changed one adjudication pick**: the loader's "The text 'Hello World!' is displayed below the heading" now
   quotes "Hello World!" 5/5 (was 1/5) at the same low confidence (0.41–0.50). With pointer criteria "no line"
-  seems a less attractive answer. Good here; worth watching on absence statements (the modal and menu specs
-  still get none, as they should).
+  seems a less attractive answer. Good here; worth watching on absence statements: the menu spec still gets
+  none, the modal spec quotes a line of the uncovered page 3/3 (2/3 before), which is not a statement of the
+  absence. `present` is the evidence for an absence either way.
 - **Hesitant adjudications on one-clause "and" statements**: the encyclopedia (0.41–0.52) and the checkout
   (quotes the heading, not the thank-you sentence). The author's remedy is block G's: two sentences. Not changed in
   the committed examples; it would change their measured numbers.

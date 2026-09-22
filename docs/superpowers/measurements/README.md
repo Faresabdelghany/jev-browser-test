@@ -370,8 +370,8 @@ What the file shows, against the trial's untracked runs at `cf24586` (3 repeats,
 - **Evidence lines.** One-sentence statements that name one visible string get their line 3/3 (the product
   name, the form error, the completion heading, the article title, either notification text); the two-sentence
   todo statement is quoted 3/3 ("1 item left", block G; the trial's one-clause statement got a line 1/3);
-  absences get none (`menu-random` 3/3; `modal-close` 2/3, and the third quotes a line of the uncovered page that
-  is not a statement of the absence); the loader's "The text 'Hello World!' is displayed below the heading" gets
+  absences: `menu-random` gets none 3/3, `modal-close` none in 1 of 3 and, in 2 of 3, a line of the uncovered
+  page ("If closed, it will not appear on subsequent page loads.") that is not a statement of the absence; the loader's "The text 'Hello World!' is displayed below the heading" gets
   no line 3/3 (trial 1/3) although `present` is high: Jev declines to equate the sentence with the bare line
   "Hello World!" on a three-line page. A spec author who wants that line quoted writes "The page says 'Hello World!'".
 - **Time and tokens.** 97 s for 30 runs on 2 workers; the long encyclopedia page is a quarter of all input tokens
@@ -443,8 +443,9 @@ at `b3996fa` above. Files: `2026-09-22-examples-suite-after-levers.json` / `.md`
 - **Every spec spends fewer tokens** than at `b3996fa`, from −2% on the random-menu page to −38% on the loader
   (10 → 8 requests, F4). The blocked shop account costs **one request more** (9 → 10): F1's follow-up on the
   terminal step, which returns the same `blocked_reason` and the same suggested bug 3/3.
-- **Evidence lines**: the loader statement now gets "Hello World!" 3/3 (0/3 before; F3, see block F); every
-  other pick is as before, including the two-sentence todo statement's "1 item left" 3/3 and none for the two
-  absence statements.
+- **Evidence lines**: the loader statement now gets "Hello World!" 3/3 (0/3 before; F3, see block F); the modal
+  statement, an absence, quotes the uncovered page's own sentence 3/3 (2/3 before), a line that is not a statement
+  of the absence; every other pick is as before, including the two-sentence todo statement's "1 item left" 3/3 and
+  none for the menu statement.
 - **Time**: the suite's wall is the same within a second; with two workers its per-spec medians are noisier than
   the bench's, so the loader's +1.0 s (F4) is read from the bench, not from here.
