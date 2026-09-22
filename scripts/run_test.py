@@ -421,6 +421,7 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
         "probability": seen.get("probability") if seen else None,
         "confidence": seen.get("confidence") if seen else None,
         "seen_at_step": final.get("seen_at_step"),
+        "first_seen_at_step": final.get("first_seen_at_step") if seen else None,
         "confirmed": final.get("confirmed", False) if seen else False,
         "path_confidence": min(confs) if confs else None,
         "reason": None,
@@ -503,6 +504,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     status: str | None = None
     error: str | None = None
     final: dict = {"outcome": None, "seen_at_step": None, "confirmed": False, "assertions": [], "adjudication": None, "typed": {}}
+    # first_seen_at_step is added when a pass sighting starts its confirmation (the confirming step becomes seen_at_step)
 
     def record(entry: dict, step: dict, sig: str) -> None:
         """Append a history entry and remember which observation it was decided on, so the next
@@ -570,6 +572,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         """A confirmed pass: run the assertions on this final observation and end passed / assert_failed."""
         final["outcome"] = seen
         final["seen_at_step"] = step["n"]
+        final.setdefault("first_seen_at_step", step["n"])
         final["confirmed"] = True
         final["assertions"] = check_assertions(spec, page, obs)
         ok = all(a["ok"] for a in final["assertions"])
@@ -582,7 +585,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     def end_with_outcome(page, step: dict, seen: dict, jev) -> None:
         """A non-pass outcome is terminal at first confident sighting (fail_fast): the picture is forced."""
         final["outcome"] = seen
-        final["seen_at_step"] = step["n"]
+        final["seen_at_step"] = final["first_seen_at_step"] = step["n"]
         step["outcome_seen"] = seen["name"]
         finish(page, step, "outcome", dict(STOP))
         final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]))
@@ -745,6 +748,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     pending = {"name": name, "action": action}
                     step["executed"] = {"action": "WAIT", "ok": True, "error": None, "reason": reason}
                     step["pending_outcome"] = name
+                    if name:
+                        final["first_seen_at_step"] = n  # the sighting; seen_at_step will be the confirming step
                     capture(page, step)
                     record(wait_entry(n, entry_op, "checking the result before finishing"), step, sig)
                     t_b = time.perf_counter()

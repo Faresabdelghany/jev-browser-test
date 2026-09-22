@@ -600,8 +600,8 @@ def outcome_spec(url: str) -> dict:
     return spec
 
 
-RESULT_KEYS = ["spec_id", "outcome", "verdict", "note", "probability", "confidence", "seen_at_step", "confirmed",
-               "path_confidence", "reason", "evidence", "assertions", "outcomes_seen_earlier", "story", "status",
+RESULT_KEYS = ["spec_id", "outcome", "verdict", "note", "probability", "confidence", "seen_at_step", "first_seen_at_step",
+               "confirmed", "path_confidence", "reason", "evidence", "assertions", "outcomes_seen_earlier", "story", "status",
                "duration_ms", "usage", "trace"]
 
 
@@ -912,8 +912,8 @@ def main() -> int:
     res = trace["result"]
     if trace["status"] != "passed" or (res["outcome"], res["verdict"], res["confirmed"]) != ("item_added", "pass", True):
         failures.append(f"outcome pass: expected passed/item_added/confirmed, got {trace['status']} {res['outcome']} {res['verdict']} {res['confirmed']}")
-    if res["seen_at_step"] != len(trace["steps"]) or res["note"] != "the happy path" or not (res["probability"] or 0) >= 0.8:
-        failures.append(f"outcome pass: seen_at_step/note/probability wrong: {res['seen_at_step']} {res['note']} {res['probability']}")
+    if res["seen_at_step"] != len(trace["steps"]) or res["first_seen_at_step"] != len(trace["steps"]) - 1 or res["note"] != "the happy path" or not (res["probability"] or 0) >= 0.8:
+        failures.append(f"outcome pass: seen_at_step/first_seen_at_step/note/probability wrong: {res['seen_at_step']} {res['first_seen_at_step']} {res['note']} {res['probability']}")
     if len(res["assertions"]) != 5 or not all(a["ok"] for a in res["assertions"]):
         failures.append(f"outcome pass: every assertion should hold: {res['assertions']}")
     if "Cart: 1 items" not in (res["evidence"]["line"] or "") or not (res["evidence"]["present"] or 0) >= 0.9 or res["evidence"]["checks"].get("cart_has_item") != 1.0:
@@ -943,6 +943,8 @@ def main() -> int:
     last = trace["steps"][-1]
     if trace["status"] != "outcome" or (res["outcome"], res["verdict"], res["confirmed"]) != ("app_error", "bug", False):
         failures.append(f"outcome bug: expected outcome/app_error/bug, got {trace['status']} {res['outcome']} {res['verdict']}")
+    if res["seen_at_step"] != res["first_seen_at_step"] != len(trace["steps"]):
+        failures.append(f"outcome bug: a first-sighting outcome is seen and terminal on the same step: {res['seen_at_step']} {res['first_seen_at_step']}")
     if last.get("outcome_seen") != "app_error" or not last.get("screenshot") or last["executed"]["action"] != "STOP":
         failures.append(f"outcome bug: the sighting step should be terminal with a picture: {last.get('outcome_seen')} {last.get('screenshot')} {last.get('executed')}")
     if res["evidence"]["line"] != "Something went wrong. Please try again later." or res["evidence"]["screenshot"] != last["screenshot"]:
