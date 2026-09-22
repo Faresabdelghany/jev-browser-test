@@ -11,6 +11,7 @@ shapes the runner must refuse to act on.
 """
 from __future__ import annotations
 
+import base64
 import http.client
 import http.server
 import json
@@ -990,6 +991,148 @@ class BenchTests(unittest.TestCase):
         self.assertEqual(agg["status_counts"], {"passed": 1, "blocked": 1})
         self.assertEqual(agg["outcome_counts"], {"logged_in": 1, "undetermined": 1})
         self.assertEqual((agg["passes"], agg["stale_steps_total"]), (1, 2))
+
+
+FAKE_RUNNER = '''
+import json, os, sys, time
+# argv: spec --out out_dir [...]; the spec file's "id" decides the canned result
+spec_path, out_dir = sys.argv[1], sys.argv[sys.argv.index("--out") + 1]
+spec = json.load(open(spec_path))
+os.makedirs(os.path.join(out_dir, "steps"), exist_ok=True)
+n = int(os.path.basename(out_dir))  # the repeat number
+if spec["id"] == "always-pass":
+    outcome, verdict, status, code = "logged_in", "pass", "passed", 0
+elif spec["id"] == "flaky":
+    outcome, verdict, status, code = ("logged_in", "pass", "passed", 0) if n % 2 else ("bad_pw", "bug", "outcome", 1)
+elif spec["id"] == "blocked":
+    outcome, verdict, status, code = "undetermined", None, "blocked", 1
+else:
+    print("boom", file=sys.stderr); sys.exit(2)
+time.sleep(0.05)
+trace = {"spec_id": spec["id"], "status": status, "pass": code == 0, "duration_ms": 50, "actions_executed": 1,
+         "usage": {"jev_requests": 3, "input_tokens": 1000, "output_tokens": 100},
+         "steps": [{"n": 1, "latency_ms": {"jev": 300, "browser": 100}, "decision_confidence": 0.9, "executed": {"action": "CLICK", "ok": True}}]}
+result = {"spec_id": spec["id"], "outcome": outcome, "verdict": verdict, "status": status, "first_seen_at_step": 1,
+          "evidence": {"line": "Welcome" if verdict == "pass" else None},
+          "reason": None if verdict else {"status": status, "blocked_reason": "missing_data_value", "suggested_verdict": "test_issue"}}
+json.dump(trace, open(os.path.join(out_dir, "trace.json"), "w"))
+json.dump(result, open(os.path.join(out_dir, "result.json"), "w"))
+sys.exit(code)
+'''
+
+
+class SuiteTests(unittest.TestCase):
+    def test_aggregate_spec_and_suite_verdict(self) -> None:
+        from run_suite import aggregate_spec, suite_verdict
+        p = {"outcome": "logged_in", "verdict": "pass", "wall_ms": 5000, "jev_ms": 1500, "requests": 5, "input_tokens": 8000, "decision_confidence": 0.9}
+        b = {"outcome": "bad_pw", "verdict": "bug", "wall_ms": 6000, "jev_ms": 1700, "requests": 5, "input_tokens": 9000, "decision_confidence": 0.8}
+        u = {"outcome": "undetermined", "verdict": None, "status": "blocked", "suggested_verdict": "test_issue", "wall_ms": 4000}
+        agg = aggregate_spec([p, p, p])
+        self.assertEqual((agg["verdict"], agg["agreement"], agg["outcome_counts"], agg["passes"]), ("pass", 1.0, {"logged_in": 3}, 3))
+        self.assertEqual(agg["medians"]["wall_ms"], 5000)
+        agg = aggregate_spec([p, b, p, p, b])
+        self.assertEqual((agg["verdict"], agg["agreement"]), ("flaky", 0.6))
+        self.assertEqual(agg["outcome_counts"], {"logged_in": 3, "bad_pw": 2})
+        self.assertEqual(agg["verdict_counts"], {"pass": 3, "bug": 2})
+        agg = aggregate_spec([b, b])
+        self.assertEqual((agg["verdict"], agg["agreement"]), ("bug", 1.0))
+        agg = aggregate_spec([u, u])
+        self.assertEqual((agg["verdict"], agg["suggested_verdicts"]), ("undetermined", {"test_issue": 2}))
+        agg = aggregate_spec([u, p])
+        self.assertEqual(agg["verdict"], "flaky")
+        self.assertEqual(aggregate_spec([])["verdict"], "undetermined")
+        sv = suite_verdict({"a": {"verdict": "pass"}, "b": {"verdict": "pass"}})
+        self.assertEqual((sv["all_pass"], sv["flaky"], sv["undetermined"]), (True, [], []))
+        sv = suite_verdict({"a": {"verdict": "pass"}, "b": {"verdict": "flaky"}, "c": {"verdict": "undetermined"}, "d": {"verdict": "bug"}})
+        self.assertEqual((sv["all_pass"], sv["flaky"], sv["undetermined"]), (False, ["b"], ["c"]))
+        self.assertFalse(suite_verdict({})["all_pass"])
+
+    def test_run_suite_end_to_end_with_a_fake_runner(self) -> None:
+        import tempfile
+        from run_suite import main as suite_main, run_suite
+        tmp = tempfile.mkdtemp(prefix="jev-suite-")
+        runner = os.path.join(tmp, "fake_runner.py")
+        with open(runner, "w", encoding="utf-8") as f:
+            f.write(FAKE_RUNNER)
+        specs = {}
+        for sid in ("always-pass", "flaky", "blocked", "broken"):
+            specs[sid] = os.path.join(tmp, f"{sid}.json")
+            with open(specs[sid], "w", encoding="utf-8") as f:
+                json.dump({"id": sid, "start_url": "http://x/", "goal": "g"}, f)
+        out = os.path.join(tmp, "suite")
+        report = run_suite([specs["always-pass"], specs["flaky"], specs["blocked"], specs["broken"]], repeat=4, workers=3,
+                           out_root=out, run_args=[], runner=runner, label="unit")
+        self.assertEqual(report["suite"]["verdicts"], {"always-pass": "pass", "flaky": "flaky", "blocked": "undetermined", "broken": "undetermined"})
+        self.assertEqual((report["suite"]["all_pass"], report["suite"]["flaky"], report["suite"]["undetermined"]),
+                         (False, ["flaky"], ["blocked", "broken"]))
+        fl = report["specs"]["flaky"]
+        self.assertEqual((fl["outcome_counts"], fl["agreement"]), ({"logged_in": 2, "bad_pw": 2}, 0.5))
+        self.assertEqual([r["exit_code"] for r in fl["runs"]], [0, 1, 0, 1])
+        self.assertEqual([os.path.basename(r["out_dir"]) for r in fl["runs"]], ["01", "02", "03", "04"])  # ordered by repeat, not by finish time
+        self.assertEqual(report["specs"]["always-pass"]["medians"]["requests"], 3)
+        self.assertEqual(report["specs"]["always-pass"]["runs"][0]["evidence_line"], "Welcome")
+        self.assertEqual(report["specs"]["blocked"]["suggested_verdicts"], {"test_issue": 4})
+        broken = report["specs"]["broken"]["runs"][0]
+        self.assertEqual((broken["exit_code"], broken["outcome"], broken["status"], broken["error"]), (2, "undetermined", "error", "boom"))
+        self.assertTrue(os.path.exists(os.path.join(out, "results.json")))
+        with open(os.path.join(out, "results.md"), encoding="utf-8") as f:
+            md = f.read()
+        self.assertIn("**NOT ALL PASS**", md)
+        self.assertIn("| `flaky` | **FLAKY** | 50% | logged_in 2/4, bad_pw 2/4 |", md)
+        self.assertIn("| `blocked` | **UNDETERMINED (suggested: test_issue 4)** | 100% |", md)
+        self.assertIn("Open a trace only for: `flaky` (flaky), `blocked` (undetermined), `broken` (undetermined)", md)
+        # the CLI: exit 0 iff every spec is unanimously pass
+        with mock.patch("sys.stdout"):
+            self.assertEqual(suite_main(["run_suite.py", specs["always-pass"], "--repeat", "2", "--workers", "2", "--out",
+                                         os.path.join(tmp, "suite2"), "--runner", runner]), 0)
+            self.assertEqual(suite_main(["run_suite.py", specs["always-pass"], specs["flaky"], "--repeat", "2", "--out",
+                                         os.path.join(tmp, "suite3"), "--runner", runner]), 1)
+            self.assertEqual(suite_main(["run_suite.py", os.path.join(tmp, "missing.json"), "--runner", runner]), 2)
+
+
+class ReportTests(unittest.TestCase):
+    def test_render_report_is_self_contained(self) -> None:
+        from report import render_report
+        trace = {
+            "spec_id": "smoke", "status": "outcome", "actions_executed": 1, "duration_ms": 4200,
+            "usage": {"model": "jev-1", "jev_requests": 3, "input_tokens": 900, "output_tokens": 90},
+            "spec": {"goal": "Log <in>", "start_url": "http://x/login", "done_when": ["ok"], "never": ["err"], "thresholds": {"check_true": 0.8, "never_true": 0.8}},
+            "final": {"url": "http://x/login", "title": "T", "screenshot": "steps/final.png"},
+            "steps": [
+                {"n": 1, "url": "http://x/login", "operation": {"choice": "TYPE_TEXT", "confidence": 0.9, "top_probabilities": {"TYPE_TEXT": 0.9, "CLICK": 0.1}},
+                 "target": {"label": '[0] textbox "User"', "confidence": 0.95, "top_probabilities": {"0": 0.95}}, "type_value": {"choice": "username", "confidence": 0.9, "top_probabilities": {"username": 0.9}},
+                 "checks": {"ok": 0.1, "err": 0.05}, "outcome": {"choice": "none_yet", "confidence": 0.9, "probabilities": {"none_yet": 0.9, "bad": 0.1}},
+                 "blocked_reason": {"choice": "nothing"}, "executed": {"action": "TYPE_TEXT", "ok": True}, "settle": {"ended": "quiet", "ms": 60},
+                 "latency_ms": {"jev": 300, "browser": 100}, "page_changed": True, "elements": [{"idx": 0, "role": "textbox", "name": "User", "value": "tom"}]},
+                {"n": 2, "url": "http://x/login", "operation": {"choice": "CLICK", "confidence": 0.4, "top_probabilities": {"CLICK": 0.4}}, "checks": {"ok": 0.1, "err": 0.9},
+                 "never_violated": ["err"], "outcome_seen": "bad", "outcome": {"choice": "bad", "confidence": 0.8, "probabilities": {"bad": 0.85, "none_yet": 0.15}},
+                 "executed": {"action": "STOP", "ok": True}, "screenshot": "steps/002.png", "latency_ms": {"jev": 310}},
+            ],
+        }
+        result = {"outcome": "bad", "verdict": "bug", "note": "n & m", "seen_at_step": 2, "first_seen_at_step": 2, "confirmed": False,
+                  "probability": 0.85, "path_confidence": 0.9, "evidence": {"line": "Your password is <invalid>!", "present": 0.9},
+                  "assertions": [{"url_matches": "**/secure", "ok": False, "actual": "http://x/login"}], "story": ["1 TYPE_TEXT [0] textbox \"User\" <- username"], "reason": None}
+        images = {"steps/002.png": b"\x89PNG-fake", "steps/final.png": b"\x89PNG-final"}
+        page = render_report(trace, result, images, "runs/smoke/1")
+        self.assertIn("<!doctype html>", page)
+        self.assertNotIn("<script", page)
+        self.assertNotIn("http://cdn", page)
+        self.assertIn("Log &lt;in&gt;", page)                       # escaped
+        self.assertIn("Your password is &lt;invalid&gt;!", page)
+        self.assertIn("n &amp; m", page)
+        self.assertIn('class="badge bug"', page)
+        self.assertIn("data:image/png;base64," + base64.b64encode(b"\x89PNG-fake").decode(), page)
+        self.assertIn(base64.b64encode(b"\x89PNG-final").decode(), page)
+        self.assertEqual(page.count("<img"), 2)                       # step 1 has no picture
+        self.assertIn("NEVER:err", page)
+        self.assertIn("OUTCOME:bad", page)
+        self.assertIn("✗ url_matches", page)
+        self.assertIn("1 elements offered", page)
+        self.assertIn("&larr; username", page)
+        self.assertIn("page_changed true", page)
+        self.assertIn("runs/smoke/1/trace.json", page)
+        # without a result (an old trace) the page still renders
+        self.assertIn("<h2>Steps</h2>", render_report({"spec_id": "old", "status": "passed", "steps": []}, None, {}))
 
 
 if __name__ == "__main__":

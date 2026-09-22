@@ -1,0 +1,228 @@
+"""Run several specs, each N times, on a pool of runner subprocesses, and write one verdict per spec.
+
+    python scripts/run_suite.py specs/*.json [--repeat 3] [--workers 4] [--out runs/suite/<ts>]
+                                [--run-arg=--screenshots=none ...] [--label name]
+
+Every (spec, repeat) is its own `run_test.py` subprocess with its own browser and Jev connection, so the
+runs are independent and the pool only bounds how many browsers are open at once. The suite writes
+`results.json` and `results.md` into the output directory:
+
+  * per spec: every run's outcome / verdict / status / exit code / wall-clock and result path, the outcome
+    distribution across the repeats, the agreement rate (share of runs that ended in the most common
+    outcome), medians (wall, Jev ms, browser ms, requests, input tokens, decision confidence), and a
+    **suite verdict**: unanimous -> that outcome's verdict (or `undetermined` when every run was
+    undetermined); any disagreement -> `flaky`, with the distribution. Flaky is computed, not diagnosed.
+  * for the suite: `all_pass` (every spec unanimously ended in a pass outcome) and the elapsed time.
+
+Exit code 0 iff every spec is unanimously `pass`; 1 otherwise; 2 when no spec could be started.
+
+This is the hands-off entry point for Claude: launch it in the background, do nothing until it returns,
+read results.json, and open a trace only for a spec that is `undetermined` or `flaky`.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+
+from bench import _git_commit, _median, measure_trace
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+RUN_TEST = os.path.join(HERE, "run_test.py")
+UNDETERMINED = "undetermined"
+FLAKY = "flaky"
+MEDIAN_FIELDS = ("wall_ms", "duration_ms", "jev_ms", "browser_ms", "requests", "input_tokens", "decision_confidence", "steps")
+
+
+def spec_id_of(spec_path: str) -> str:
+    try:
+        with open(spec_path, encoding="utf-8") as f:
+            return json.load(f).get("id") or os.path.splitext(os.path.basename(spec_path))[0]
+    except (OSError, ValueError):
+        return os.path.splitext(os.path.basename(spec_path))[0]
+
+
+def run_once(runner: str, python: str, spec_path: str, out_dir: str, run_args: list[str]) -> dict:
+    """One runner subprocess. Returns the run record: exit code, wall-clock, the result.json headline fields
+    and the trace-derived measures (bench.measure_trace); a run without a result is recorded as an error."""
+    cmd = [python, runner, spec_path, "--out", out_dir, *run_args]
+    t0 = time.perf_counter()
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    rec: dict = {"out_dir": out_dir, "exit_code": proc.returncode, "wall_ms": int((time.perf_counter() - t0) * 1000),
+                 "outcome": None, "verdict": None, "status": None}
+    result_path = os.path.join(out_dir, "result.json")
+    trace_path = os.path.join(out_dir, "trace.json")
+    if os.path.exists(trace_path):
+        with open(trace_path, encoding="utf-8") as f:
+            rec.update(measure_trace(json.load(f)))
+    if os.path.exists(result_path):
+        with open(result_path, encoding="utf-8") as f:
+            result = json.load(f)
+        rec["result"] = result_path
+        rec["outcome"] = result.get("outcome")
+        rec["verdict"] = result.get("verdict")
+        rec["status"] = result.get("status")
+        rec["suggested_verdict"] = (result.get("reason") or {}).get("suggested_verdict")
+        rec["evidence_line"] = (result.get("evidence") or {}).get("line")
+        rec["first_seen_at_step"] = result.get("first_seen_at_step")
+    else:
+        # exit 2 (spec / environment) or a crash: no result was written; keep the last lines of stderr
+        rec["status"] = rec.get("status") or "error"
+        rec["outcome"] = UNDETERMINED
+        rec["error"] = (proc.stderr or proc.stdout or "").strip()[-500:]
+    return rec
+
+
+def aggregate_spec(runs: list[dict]) -> dict:
+    """Pure: the outcome distribution, agreement and suite verdict of one spec's repeats."""
+    outcome_counts: dict = {}
+    verdict_counts: dict = {}
+    for r in runs:
+        o = str(r.get("outcome") or UNDETERMINED)
+        outcome_counts[o] = outcome_counts.get(o, 0) + 1
+        v = str(r.get("verdict") or (UNDETERMINED if o == UNDETERMINED else "?"))
+        verdict_counts[v] = verdict_counts.get(v, 0) + 1
+    top = max(outcome_counts.values()) if outcome_counts else 0
+    agreement = round(top / len(runs), 3) if runs else 0.0
+    if not runs:
+        verdict = UNDETERMINED
+    elif len(outcome_counts) == 1:
+        only = next(iter(outcome_counts))
+        verdict = UNDETERMINED if only == UNDETERMINED else (runs[0].get("verdict") or UNDETERMINED)
+    else:
+        verdict = FLAKY
+    suggestions: dict = {}
+    for r in runs:
+        if r.get("outcome") == UNDETERMINED:
+            s = str(r.get("suggested_verdict") or "none")
+            suggestions[s] = suggestions.get(s, 0) + 1
+    return {
+        "verdict": verdict,
+        "agreement": agreement,
+        "outcome_counts": outcome_counts,
+        "verdict_counts": verdict_counts,
+        "suggested_verdicts": suggestions,
+        "medians": {k: _median([r.get(k) for r in runs]) for k in MEDIAN_FIELDS},
+        "passes": sum(1 for r in runs if r.get("verdict") == "pass"),
+    }
+
+
+def suite_verdict(specs: dict) -> dict:
+    """Pure: the whole suite. all_pass iff every spec is unanimously pass."""
+    verdicts = {sid: s["verdict"] for sid, s in specs.items()}
+    all_pass = bool(specs) and all(v == "pass" for v in verdicts.values())
+    flaky = sorted(sid for sid, v in verdicts.items() if v == FLAKY)
+    undetermined = sorted(sid for sid, v in verdicts.items() if v == UNDETERMINED)
+    return {"all_pass": all_pass, "verdicts": verdicts, "flaky": flaky, "undetermined": undetermined}
+
+
+def render_markdown(report: dict) -> str:
+    """results.md: one table for the suite, then the runs of every spec."""
+    s = report["suite"]
+    lines = [f"# Suite {report.get('label') or ''} {report['timestamp']}".rstrip(),
+             "",
+             f"**{'ALL PASS' if s['all_pass'] else 'NOT ALL PASS'}** · {len(report['specs'])} spec(s) × {report['repeat']} repeat(s), "
+             f"{report['workers']} worker(s), {report['elapsed_ms'] / 1000:.1f} s wall-clock"
+             + (f" · commit `{report['git_commit']}`" if report.get("git_commit") else ""),
+             "",
+             "| spec | verdict | agreement | outcomes | median wall | Jev ms | requests | tokens in | confidence |",
+             "|---|---|---:|---|---:|---:|---:|---:|---:|"]
+    for sid, sp in report["specs"].items():
+        m = sp["medians"]
+        outcomes = ", ".join(f"{k} {v}/{len(sp['runs'])}" for k, v in sorted(sp["outcome_counts"].items(), key=lambda kv: -kv[1]))
+        verdict = sp["verdict"].upper()
+        if sp["verdict"] == UNDETERMINED and sp["suggested_verdicts"]:
+            verdict += " (suggested: " + ", ".join(f"{k} {v}" for k, v in sp["suggested_verdicts"].items()) + ")"
+        lines.append(f"| `{sid}` | **{verdict}** | {sp['agreement']:.0%} | {outcomes} | {m['wall_ms']} ms | {m['jev_ms']} | "
+                     f"{m['requests']} | {m['input_tokens']} | {m['decision_confidence']} |")
+    for sid, sp in report["specs"].items():
+        lines += ["", f"## `{sid}`", "", "| # | outcome | verdict | status | wall | exit | evidence | result |", "|---:|---|---|---|---:|---:|---|---|"]
+        for i, r in enumerate(sp["runs"], 1):
+            evidence = (r.get("evidence_line") or r.get("error") or "").replace("|", "\\|")[:80]
+            lines.append(f"| {i} | {r.get('outcome')} | {r.get('verdict') or '-'} | {r.get('status')} | {r.get('wall_ms')} ms | "
+                         f"{r.get('exit_code')} | {evidence} | `{r.get('result') or r.get('out_dir')}` |")
+    if s["flaky"] or s["undetermined"]:
+        lines += ["", "Open a trace only for: " + ", ".join(f"`{x}` (flaky)" for x in s["flaky"])
+                  + (", " if s["flaky"] and s["undetermined"] else "") + ", ".join(f"`{x}` (undetermined)" for x in s["undetermined"])]
+    return "\n".join(lines) + "\n"
+
+
+def run_suite(spec_paths: list[str], repeat: int, workers: int, out_root: str, run_args: list[str],
+              python: str = sys.executable, runner: str = RUN_TEST, label: str = "") -> dict:
+    """Run the pool, aggregate, write results.json + results.md, return the report."""
+    os.makedirs(out_root, exist_ok=True)
+    jobs = []
+    for spec_path in spec_paths:
+        sid = spec_id_of(spec_path)
+        for i in range(1, repeat + 1):
+            jobs.append((spec_path, sid, i, os.path.join(out_root, sid, f"{i:02d}")))
+    t0 = time.perf_counter()
+    records: dict[str, list] = {sid: [None] * repeat for _, sid, _, _ in jobs}
+
+    def work(job):
+        spec_path, sid, i, out_dir = job
+        rec = run_once(runner, python, spec_path, out_dir, run_args)
+        print(f"{sid} {i}/{repeat}: {rec.get('outcome')} ({rec.get('verdict') or rec.get('status')}) {rec['wall_ms']} ms", flush=True)
+        return sid, i, rec
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        for sid, i, rec in pool.map(work, jobs):
+            records[sid][i - 1] = rec
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    specs = {}
+    for spec_path in spec_paths:
+        sid = spec_id_of(spec_path)
+        runs = [r for r in records[sid] if r is not None]
+        specs[sid] = {"spec": spec_path, "runs": runs, **aggregate_spec(runs)}
+    report = {
+        "label": label,
+        "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "git_commit": _git_commit(),
+        "repeat": repeat,
+        "workers": workers,
+        "run_args": run_args,
+        "elapsed_ms": elapsed_ms,
+        "out_dir": out_root,
+        "specs": specs,
+        "suite": suite_verdict(specs),
+    }
+    with open(os.path.join(out_root, "results.json"), "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    with open(os.path.join(out_root, "results.md"), "w", encoding="utf-8") as f:
+        f.write(render_markdown(report))
+    return report
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("specs", nargs="+", help="spec files to run")
+    ap.add_argument("--repeat", type=int, default=1, help="runs per spec (default 1; use 3-5 to measure agreement)")
+    ap.add_argument("--workers", type=int, default=4, help="runner subprocesses at once (default 4)")
+    ap.add_argument("--out", help="output directory (default runs/suite/<timestamp>)")
+    ap.add_argument("--label", default="", help="free-text label stored in results.json")
+    ap.add_argument("--run-arg", action="append", default=[], help="extra argument passed through to run_test.py (repeatable)")
+    ap.add_argument("--python", default=sys.executable)
+    ap.add_argument("--runner", default=RUN_TEST, help=argparse.SUPPRESS)  # the offline tests substitute a fake runner
+    args = ap.parse_args(argv[1:])
+    if args.repeat < 1 or args.workers < 1:
+        print("--repeat and --workers must be >= 1", file=sys.stderr)
+        return 2
+    missing = [p for p in args.specs if not os.path.exists(p)]
+    if missing:
+        print("spec file(s) not found: " + ", ".join(missing), file=sys.stderr)
+        return 2
+    out_root = args.out or os.path.join("runs", "suite", datetime.now().strftime("%Y%m%d-%H%M%S"))
+    report = run_suite(args.specs, args.repeat, args.workers, out_root, args.run_arg, args.python, args.runner, args.label)
+    print()
+    print(render_markdown(report))
+    print(f"results: {os.path.join(out_root, 'results.json')}  {os.path.join(out_root, 'results.md')}")
+    return 0 if report["suite"]["all_pass"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
