@@ -1,0 +1,51 @@
+{
+  "spec_id": "shop-checkout-error-account",
+  "outcome": "undetermined",
+  "verdict": null,
+  "note": null,
+  "probability": null,
+  "confidence": null,
+  "seen_at_step": null,
+  "first_seen_at_step": null,
+  "confirmed": false,
+  "path_confidence": 0.62,
+  "reason": {
+    "status": "blocked",
+    "blocked_reason": "other",
+    "stuck_reason": "control_had_no_effect",
+    "suggested_verdict": "bug"
+  },
+  "evidence": {
+    "line": null,
+    "present": null,
+    "screenshot": "steps/final.png",
+    "checks": {
+      "cart_has_one_item": 0.27,
+      "on_checkout_form": 0.1,
+      "overview_lists_tshirt": 0.25,
+      "field_error": 0.1
+    }
+  },
+  "assertions": [],
+  "outcomes_seen_earlier": [],
+  "story": [
+    "1 CLICK [14] button \"Add to cart\" in \"Sauce Labs Bolt T-Shirt Get your testing superhero on with the Sauce L\"",
+    "2 CLICK [0] button \"Cart, empty\"",
+    "3 CLICK [3] button \"Checkout\"",
+    "4 TYPE_TEXT [2] textbox \"First Name\" <- first_name",
+    "5 TYPE_TEXT [3] textbox \"Last Name\" <- last_name",
+    "6 TYPE_TEXT [4] textbox \"Zip/Postal Code\" <- zip_postal_code",
+    "7 CLICK [6] submit \"Continue\"",
+    "8 CLICK [3] button \"Finish\""
+  ],
+  "status": "blocked",
+  "duration_ms": 6973,
+  "usage": {
+    "jev_requests": 9,
+    "input_tokens": 26151,
+    "output_tokens": 3727,
+    "model": "jev-1.13.0",
+    "reconnects": 0
+  },
+  "trace": "trace.json"
+}

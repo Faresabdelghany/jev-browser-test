@@ -449,3 +449,52 @@ at `b3996fa` above. Files: `2026-09-22-examples-suite-after-levers.json` / `.md`
   none for the menu statement.
 - **Time**: the suite's wall is the same within a second; with two workers its per-spec medians are noisier than
   the bench's, so the loader's +1.0 s (F4) is read from the bench, not from here.
+
+## Speed levers after the skill eval (2026-09-22): `2956a93` → `a09f89f` → `7b93b47`
+
+Three benches of the same three specs, 5 repeats each, medians, each from a clean export of its commit
+(`2026-09-22-speed-before-bench.json`, `2026-09-22-speed-levers-1-bench.json`, `2026-09-22-speed-levers-2-bench.json`).
+The site's page load (`navigation_ms`, ~2.0 s) and the browser launch (~0.17 s) are the demo host's and Playwright's;
+the last row takes them out to show the runner's own time.
+
+| `smoke-login` (3 actions, passed 5/5 in all three) | `2956a93` before | `a09f89f` levers 1 | `7b93b47` levers 2 |
+|---|---:|---:|---:|
+| wall-clock per run | 6,384 ms | 6,195 ms | **4,958 ms (−22%)** |
+| Jev, all requests | 2,000 ms | 1,658 ms | 1,196 ms |
+| first Jev request | 756 ms | 331 ms | 288 ms |
+| warm Jev request (pooled) | 303 ms | 317 ms | 294 ms |
+| browser work | 1,297 ms | 1,301 ms | 764 ms |
+| requests / input tokens | 6 / 7,753 | 5 / 7,456 | 5 / 6,418 (−17%) |
+| duration minus site load and launch | 4,066 ms | 3,704 ms | **2,629 ms (−35%)** |
+
+| `smoke-login-badpw` (bad_credentials 5/5) | before | levers 1 | levers 2 |
+|---|---:|---:|---:|
+| wall-clock per run | 6,536 ms | 6,339 ms | **4,980 ms (−24%)** |
+| Jev, all requests / first | 2,082 / 747 ms | 1,637 / 331 ms | 1,185 / 292 ms |
+| browser work | 1,274 ms | 1,274 ms | 760 ms |
+| requests / input tokens | 6 / 8,580 | 5 / 8,294 | 5 / 6,873 (−20%) |
+| duration minus site load and launch | 4,208 ms | 3,340 ms | **2,656 ms (−37%)** |
+
+| `load-wait` (a 5 s loader, "Hello World!" 5/5) | before | levers 1 | levers 2 |
+|---|---:|---:|---:|
+| wall-clock per run | 11,325 ms | 9,434 ms | **8,850 ms (−22%)** |
+| Jev, all requests / first | 2,657 / 760 ms | 2,147 / 287 ms | 1,857 / 306 ms |
+| browser work | 5,562 ms | 4,508 ms | 3,974 ms |
+| requests / input tokens | 8 / 8,059 | 7 / 7,774 | 7 / 6,949 (−14%) |
+| duration minus site load and launch | 9,025 ms | 7,052 ms | **6,483 ms (−28%)** |
+
+- **Levers 1 (`a09f89f`)**: the client's connection is opened in a background thread while the browser launches
+  (`JevClient.warm_up`: the first request 756 → 331 ms), the evidence questions ride in the confirmation request
+  (6 → 5 requests on a pass), a WAIT ends as soon as the page's fingerprint changes instead of sleeping its whole
+  backed-off pause (the loader's browser time 5,562 → 4,508 ms). Wall-clock moved little on the login specs because
+  the site's load happened to be slower in that bench (+115 and +619 ms); the last row shows the runner's own gain.
+- **Levers 2 (`7b93b47`)**: a pass whose `assert` block already holds on the sighting page is confirmed at once in
+  code (`confirm: "assert"`, default) instead of a 400 ms pause, a second observation and another request; the
+  evidence line is then asked in its own request, so the request count stays at 5 and the browser work halves
+  (1,301 → 764 ms). `final.png` is a copy of the terminal picture. Tokens fall because the confirmation step's
+  observation is no longer sent.
+- **What did not help, measured**: a probe of 40 identical requests (`scratchpad/probe_latency.py`, not committed)
+  put HTTP/2 via httpx at 302 ms against the stdlib HTTP/1.1 keep-alive's 313 ms, and 8 questions at 294 ms
+  against 2 questions' 313 ms: the ~300 ms is the API's floor from this machine, and the number of questions per
+  request is free, as the docs say. The stdlib client stays; the levers are round trips and waiting.
+- Decisions and evidence lines are the same in all fifteen runs of each spec; confidence 0.95–0.96 / 0.92 / 0.96.

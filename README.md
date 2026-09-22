@@ -22,19 +22,37 @@ in `spec.data`; Jev only chooses *which* one to type, so there is no text model 
 
 ## Install
 
-Copy the folder to `~/.claude/skills/jev-browser-test` (Claude Code picks it up as a skill), then:
+This repository *is* the skill: `SKILL.md` at its root, `scripts/`, `references/`, `specs/`. Install it the way
+you install any Claude Code skill:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -r scripts/requirements.txt
-.venv/bin/playwright install chromium
-.venv/bin/python scripts/selftest.py          # offline: no key, no network, must end SELFTEST OK
+# personal skill, every project on this machine
+git clone https://github.com/Faresabdelghany/jev-browser-test ~/.claude/skills/jev-browser-test
+
+# project skill, committed with the repository you are testing
+git clone https://github.com/Faresabdelghany/jev-browser-test .claude/skills/jev-browser-test
+
+# plugin, from inside Claude Code (single-skill plugin: .claude-plugin/ at the root)
+/plugin marketplace add Faresabdelghany/jev-browser-test
+/plugin install jev-browser-test@jev-browser-test
+```
+
+Claude.ai and Claude Desktop take the same folder zipped as a `.skill` file (`python -m scripts.package_skill`
+from the skill-creator, or zip the folder without `.venv/` and `runs/`). Then, once per machine, give the skill
+its own Python with Playwright:
+
+```bash
+cd ~/.claude/skills/jev-browser-test        # wherever it landed
+python3 -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
+.venv/bin/python -m playwright install chromium
+.venv/bin/python scripts/selftest.py          # offline: no key, no network, ~45 s, must end SELFTEST OK
 export TYPESAFE_API_KEY=...                   # from https://console.typesafe.ai/keys
 ```
 
-The runner reads the key from the environment, or from a `.env` file in the directory you start it
-from (already-exported variables win; `.env` is git-ignored). Never put real keys or passwords in a spec (the demo
-site's public credential below is the one exception): use `${ENV_VAR}` in `data` and list the key under
+`SKILL.md` tells Claude to use that interpreter (`${CLAUDE_SKILL_DIR}/.venv/bin/python`) and pre-approves it for
+the skill's scripts. The runner reads the key from the environment, or from a `.env` file in the directory it is
+started from (already-exported variables win; `.env` is git-ignored). Never put real keys or passwords in a spec
+(the demo site's public credential below is the one exception): use `${ENV_VAR}` in `data` and list the key under
 `secrets`; better, do the login itself in `setup` so the credential never reaches Jev at all.
 
 ## Use
@@ -48,6 +66,8 @@ site's public credential below is the one exception): use `${ENV_VAR}` in `data`
 .venv/bin/python scripts/report.py runs/suite/<ts>                     # a whole suite -> one report.html per run
 ```
 
+Specs and runs live in the project you are testing (`specs/`, `runs/`); the scripts stay in the skill, so from a
+project the commands read `~/.claude/skills/jev-browser-test/.venv/bin/python ~/.claude/skills/jev-browser-test/scripts/run_test.py specs/<id>.json`.
 A spec is a goal in plain language, the endings the run may return (each a statement about the visible
 page with a pre-declared verdict), and exact expectations checked in code at the end:
 
@@ -67,8 +87,10 @@ page with a pre-declared verdict), and exact expectations checked in code at the
 
 The run writes `result.json`: `outcome` (one of the declared names, or `undetermined` with a typed reason
 and a suggested verdict), `verdict`, the page line that states it (selected by Jev, copied verbatim), the
-assertions, and the story of the actions. Exit code 0 = an outcome with verdict `pass`, 1 = anything
-else, 2 = spec/environment problem. `SKILL.md` tells Claude how to write specs and how to act on a result
+assertions, how the pass was confirmed (`confirmed_by`: the assertions holding on the sighting page, or a
+settle-and-recheck), and the story of the actions. Exit code 0 = an outcome with verdict `pass` (or, for a spec
+with `expect`, the declared result), 1 = anything else, 2 = never a verdict: a spec or environment problem, a
+start URL that did not load, a setup step that failed. `SKILL.md` tells Claude how to write specs and how to act on a result
 (PASS / BUG / TEST_ISSUE / FLAKY / NEEDS_HUMAN); `references/` has the spec format, trace and result
 format, rubric and runner design.
 
@@ -110,6 +132,23 @@ message that read 0.73–0.84 as a lone check (and ended runs `low_confidence` a
 chosen as `bad_credentials` the first step it is on screen.
 
 ## Measured (the-internet.herokuapp.com login, Chromium, `jev-1.13.0`, Sept 2026)
+
+The current runner (`7b93b47`, five repeats each from a clean export, medians; `docs/superpowers/measurements/`
+"Speed levers"):
+
+| spec | wall-clock | of which site load + launch | Jev requests | first / warm request | browser work | input tokens |
+|---|---:|---:|---:|---:|---:|---:|
+| `smoke-login` (3 actions, pass 5/5) | **5.0 s** (was 6.4) | 2.2 s | 5 (was 6) | 288 / 294 ms | 0.76 s (was 1.30) | 6.4k (was 7.8k) |
+| `smoke-login-badpw` (wrong password, `bad_credentials` 5/5) | **5.0 s** (was 6.5) | 2.2 s | 5 (was 6) | 292 / 301 ms | 0.76 s (was 1.27) | 6.9k (was 8.6k) |
+| `load-wait` (a 5 s loader, pass 5/5) | **8.9 s** (was 11.3) | 2.2 s | 7 (was 8) | 306 / 292 ms | 3.97 s (was 5.56) | 6.9k (was 8.1k) |
+
+Taking the site's own load and the browser launch out, the runner's time on the login fell from 4.1 to 2.6 s
+(−35%): the TypeSafe connection is opened while the browser launches (the first request used to cost ~760 ms),
+a pass whose assertions already hold is confirmed in code instead of paused, re-observed and re-asked, the
+evidence questions ride in the confirmation request when one is needed, and a WAIT ends the moment the page
+changes. A probe showed the ~300 ms per request is the API's floor from here (HTTP/2 and the number of questions
+per request change nothing), so the levers left are round trips and waiting, not the wire. The history of how the
+runner got here follows.
 
 Two rounds, each five repeats before and after with `scripts/bench.py`, medians. First the
 jev-ultrafast-style loop work (`docs/superpowers/measurements/2026-09-21-track1-{baseline,after}.json`):
@@ -161,7 +200,8 @@ outcomes, evidence lines and sighting steps in every run.
 ## Layout
 
 ```
-SKILL.md                    instructions Claude Code loads
+SKILL.md                    instructions Claude Code loads (the skill: this folder)
+.claude-plugin/             plugin.json + marketplace.json: the same folder installable as a single-skill plugin
 scripts/run_test.py         the loop
 scripts/observe.py          page → numbered element table + freshness fingerprint (semantic, label-proxy and cursor:pointer passes)
 scripts/policy.py           state + questions for Jev, answer validation and parsing

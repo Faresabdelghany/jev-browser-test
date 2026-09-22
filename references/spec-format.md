@@ -105,7 +105,8 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `id` | string | required | Folder-safe name; runs land in `runs/<id>/<timestamp>/` |
 | `start_url` | string | required | Where the browser opens. Supports `${ENV_VAR}` |
 | `goal` | string | required | What a tester would be told to do. One flow, plain language, names the visible outcome |
-| `notes` | string | `""` | Hints Jev sees every step ("dismiss the cookie banner first", "the product grid loads lazily") |
+| `notes` | string | `""` | Hints Jev sees every step ("dismiss the cookie banner first", "the product grid loads lazily"). Keep them about the page and the flow: a sentence about the test itself ("this spec is expected to be red") is read by Jev as a hint about the page and measurably lowers its confidence in the right decision |
+| `comment` | string | none | Free text for humans (why the spec exists, what it documents). Never sent to Jev, kept in the trace's copy of the spec |
 | `data` | object | `{}` | Every string Jev may type, by name. Jev picks the name, never writes text. Values support `${ENV_VAR}` |
 | `secrets` | list | `[]` | Names in `data` whose values must never appear in the trace or in the state sent to Jev. Shown as `<secret>` in `available_data_values`, and masked again in every observation (a secret typed into a plain text field or a contenteditable reads back as `<secret>`, not as the value). Masking replaces **every occurrence**, so a value shorter than 6 characters after `${ENV}` substitution (`1`, `2024`, `admin`) also rewrites unrelated page text Jev decides on; `spec.py` and the runner print a warning on stderr for it (exit code unchanged): use a longer test credential, or leave a non-confidential value out of `secrets` |
 | `setup` | list | `[]` | Deterministic Playwright steps run **before** Jev takes over (see below) |

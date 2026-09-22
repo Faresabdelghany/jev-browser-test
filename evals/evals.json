@@ -1,0 +1,68 @@
+{
+  "skill_name": "jev-browser-test",
+  "evals": [
+    {
+      "id": 0,
+      "name": "ticket-sort-bug",
+      "prompt": "We got this bug report from QA: \"On the Swag Labs demo shop, sorting products by Price (low to high) does not reorder the list for some accounts.\" Can you reproduce it with Jev on https://www.saucedemo.com using the demo account problem_user / secret_sauce (the site prints these on its login page)? After picking \"Price (low to high)\" the cheapest item, Sauce Labs Onesie at $7.99, should be first in the list. Tell me whether the bug is real, with evidence I can paste into the ticket, and leave a regression test we can rerun once it is fixed.",
+      "expected_output": "Verdict BUG: with problem_user the list stays in its default order after choosing Price (low to high) (Sauce Labs Backpack, $29.99, is still first, not the $7.99 Onesie). A spec file with a declared bug outcome and a pass outcome, run at least once, result.json/trace as evidence, report in the rubric's template, spec left as the regression test.",
+      "files": [],
+      "expectations": [
+        "Verdict is BUG: the report says the reported sort defect is real for problem_user",
+        "Evidence names the actual first item after sorting (Sauce Labs Backpack, $29.99) and the expected one (Sauce Labs Onesie, $7.99)",
+        "A screenshot of the list after choosing Price (low to high) is saved in outputs and referenced by the report",
+        "The flow really ran in a browser as problem_user: a run artifact (trace, log or result file) shows the login and the sort action",
+        "A rerunnable regression test is left in outputs as a goal-level spec: it names the goal in plain language and declares the endings it accepts (a pass and a bug outcome with the page's own wording), with no CSS or XPath selector outside a scripted login setup",
+        "The regression test's passing condition is the correct order (Onesie / $7.99 first), so it fails today and passes once fixed, and the report gives the exact command to rerun it",
+        "The report quotes at least one line of the page's own text as evidence (an evidence line copied verbatim, such as the dropdown's text or the first product's name), not only a paraphrase",
+        "Login is done deterministically (scripted setup), not delegated to the AI decision step, and the demo password appears nowhere but the setup step",
+        "The answer was reached with at most 6 browser runs in total (single runs plus every repeat of a suite), and the report states how many runs were made",
+        "The TypeSafe API key value does not appear in any output file"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "triage-dead-finish-button",
+      "prompt": "A teammate ran one of our Jev browser tests overnight and it came back red. The run folder is at evals/files/triage-dead-finish-button/run (result.json, trace.json and the screenshots). It is the saucedemo.com checkout flow with the error_user account. Before I open a ticket: is this a product bug, a problem with the test, or just flaky? Give me the verdict and the evidence I can paste into the ticket.",
+      "expected_output": "Verdict BUG (the Finish button on Checkout: Overview does nothing): read from result.json's reason (blocked, stuck_reason control_had_no_effect, suggested_verdict bug), step 8 CLICK on button Finish at target confidence 0.99, screenshot steps/009.png or final.png. Flakiness ruled out from the trace's signals; at most one rerun and one control run; no source-code archaeology; the spec's notes say the account is expected to be broken, so the ticket is an expected-red note, not a product report.",
+      "files": [
+        "evals/files/triage-dead-finish-button/run/result.json",
+        "evals/files/triage-dead-finish-button/run/trace.json",
+        "evals/files/triage-dead-finish-button/run/steps/009.png",
+        "evals/files/triage-dead-finish-button/run/steps/final.png"
+      ],
+      "expectations": [
+        "Verdict is BUG (product defect): the Finish button on Checkout: Overview does nothing",
+        "Evidence cites the divergence: the step-8 click on button 'Finish' (target confidence 0.99) followed by BLOCKED at step 9 with no page change",
+        "Evidence cites the run's own reason fields: status blocked, stuck_reason control_had_no_effect, suggested verdict bug",
+        "The report references a screenshot from the run folder (steps/009.png or steps/final.png) as evidence",
+        "The report states expected vs actual: the 'Checkout: Complete!' / 'Thank you for your order!' page was expected, the run stayed on checkout-step-two.html",
+        "The result was read before anything was rerun, and at most one rerun and one control run were made (the report says how many browser runs it made, if any)",
+        "The report answers 'is it flaky?' from the trace's own signals (no stale steps, no failed actions, no retries or reconnects, a deterministic typed reason) rather than from repetition alone",
+        "The report explicitly rules out a test problem: the earlier steps (add to cart, cart, form filled, Continue) succeeded with high confidence, so the test's actions were reasonable",
+        "The report notes that the spec's own notes already describe error_user as an account whose Finish button is expected not to work (a known, expected failure) and says how that affects the ticket",
+        "The report does not fetch or cite the application's source code; the verdict rests on the run folder"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "flaky-notification",
+      "prompt": "One of our smoke checks goes red at random and the team is arguing about whether the page or the check is at fault. The page is https://the-internet.herokuapp.com/notification_message_rendered: you click the \"Click here\" link and a notification at the top should say \"Action successful\". Can you run it a handful of times with Jev and tell me, with numbers, whether the page is flaky or the check is badly written? And what should we do about it?",
+      "expected_output": "The page is random by design (the site lists both messages as examples), so the check is wrong to demand 'Action successful': computed from 3-10 repeats (run_suite.py --repeat N), both messages quoted with the page's own spelling, an agreement rate, environment failures kept apart, and a concrete fix (text_in on #flash accepting either message, or an either/or pass outcome).",
+      "files": [],
+      "expectations": [
+        "The report concludes the page is random by design (the page itself lists both messages as examples), so a check demanding 'Action successful' cannot be a deterministic smoke check",
+        "Both outcomes were observed in the runs and the report names them with the page's own message text ('Action successful' and 'Action unsuccesful, please try again')",
+        "The report gives the numbers: how many runs and how many of each outcome (or an agreement / pass rate)",
+        "The conclusion rests on between 3 and 10 browser runs of the check, not on a single run and not on dozens; the report states the count",
+        "The report separates the page's designed randomness from any environment failure (a load timeout, a stalled request) instead of folding them into one 'flaky'",
+        "The report recommends a concrete change to the check (accept either message with an element-scoped assertion / assert only that a notification appears / quarantine it) rather than rerun-until-green, and warns that a page-wide text check would always pass because the body copy contains both messages",
+        "Per-run artifacts are saved in outputs (suite results or per-run logs) and their counts match the numbers in the report",
+        "The runs were made in a real browser against the live page, not reasoned from the page description alone"
+      ]
+    }
+  ],
+  "iteration_notes": {
+    "2": "Assertions reworked after iteration 1: the two verdict-label checks that alone separated the arms are kept but joined by checks on what the skill promises (a goal-level selector-free spec, a verbatim evidence line, bounded runs, flake signals from the trace, no source archaeology). Prompts unchanged so iteration-1 outputs can be re-graded as the baseline."
+  }
+}

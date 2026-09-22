@@ -1,0 +1,24 @@
+{
+  "name": "jev-browser-test",
+  "owner": {
+    "name": "Fares Abdelghany"
+  },
+  "metadata": {
+    "description": "The jev-browser-test skill as a single-skill plugin: SKILL.md at the repository root."
+  },
+  "plugins": [
+    {
+      "name": "jev-browser-test",
+      "source": "./",
+      "description": "Goal-driven end-to-end browser testing: Claude writes the spec and judges the result, TypeSafe's Jev picks every click from a numbered element table (one ~0.3 s request per decision), Playwright executes. Specs with declared outcomes, a verdict with the page's own line as evidence, suites with a computed flaky verdict.",
+      "version": "0.2.0",
+      "category": "testing",
+      "keywords": [
+        "browser-testing",
+        "playwright",
+        "typesafe",
+        "jev"
+      ]
+    }
+  ]
+}

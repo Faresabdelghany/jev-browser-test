@@ -1,0 +1,18 @@
+{
+  "name": "jev-browser-test",
+  "description": "Goal-driven end-to-end browser testing: Claude writes the spec and judges the result, TypeSafe's Jev picks every click from a numbered element table (one ~0.3 s request per decision), Playwright executes. Specs with declared outcomes, a verdict with the page's own line as evidence, suites with a computed flaky verdict.",
+  "version": "0.2.0",
+  "author": {
+    "name": "Fares Abdelghany"
+  },
+  "homepage": "https://github.com/Faresabdelghany/jev-browser-test",
+  "repository": "https://github.com/Faresabdelghany/jev-browser-test",
+  "keywords": [
+    "browser-testing",
+    "e2e",
+    "playwright",
+    "typesafe",
+    "jev",
+    "qa"
+  ]
+}
