@@ -249,6 +249,38 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
   }
   candidates.sort((a, b) => (a.y - b.y) || (a.x - b.x));
   const kept = candidates.slice(0, maxElements);
+
+  // Pass 4: identical labels. A product grid has one "Add to cart" per card, a list one "Edit" per entry,
+  // and when the cards are plain <div>s no row/list-item context is attached above, so Jev sees the same
+  // label N times and can only guess from the order (measured on a six-card grid: 0.47 / 0.21 / 0.18 over
+  // three of the six, refused three times, low_confidence). For each group of elements sharing role + name
+  // without a context, climb the ancestors level by level, strictly below the group's lowest common
+  // ancestor (the grid itself, or the card when the group is one product's image and title buttons), and
+  // keep the HIGHEST level whose texts are non-empty and tell every member apart: a price bar is distinct
+  // but says nothing, the card with its title does. A group that nothing distinguishes gets no context.
+  const groups = new Map();
+  for (const c of kept) {
+    if (!c.name || c.context) continue;
+    const k = c.role + '\u0000' + c.name;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(c);
+  }
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    let lca = group[0].el.parentElement;
+    for (const c of group) while (lca && !lca.contains(c.el)) lca = lca.parentElement;
+    let best = null;
+    let anc = group.map(c => c.el.parentElement);
+    for (let level = 0; level < 8; level++) {
+      if (anc.some(a => !a || a === lca || a === document.body)) break;   // at the common container nothing tells them apart
+      if (new Set(anc).size === anc.length) {
+        const texts = anc.map((a, i) => { const t = clean(a.innerText).slice(0, 70); return t === group[i].name ? '' : t; });
+        if (texts.every(t => t) && new Set(texts).size === texts.length) best = texts;
+      }
+      anc = anc.map(a => a.parentElement);
+    }
+    if (best) group.forEach((c, i) => { c.context = best[i]; });
+  }
   const nodes = {};
   kept.forEach((c, i) => {
     if (!wholeDocument) { c.el.setAttribute('data-jev-idx', String(i)); nodes[String(i)] = nodeTuple(c.el); }

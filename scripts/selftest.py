@@ -130,6 +130,16 @@ CONTROLS_PAGE = """<!doctype html><html><head><title>Controls</title><style>
   <select aria-label="Grouped"><option>open-1</option><optgroup label="Closed" disabled><option>closed-1</option></optgroup></select>
 </form>
 <details><summary>Show error</summary>Payment failed: card declined</details>
+<!-- a product grid of plain divs: three identical "Add to cart" buttons, two cards at the same price, and per card
+     an image link and a title link with the same name (the same product twice: no context must be invented) -->
+<div class="grid" style="display:flex;gap:16px;margin-top:12px">
+  <div class="card"><div class="img"><a href="#w" aria-label="Widget 12-pack"><img alt="" width="12" height="12"></a></div>
+    <div class="body"><div class="title"><a href="#w">Widget 12-pack</a></div><div class="desc">Twelve widgets</div><div class="pricebar">$29.99 <button>Add to cart</button></div></div></div>
+  <div class="card"><div class="img"><a href="#g" aria-label="Gadget 6-pack"><img alt="" width="12" height="12"></a></div>
+    <div class="body"><div class="title"><a href="#g">Gadget 6-pack</a></div><div class="desc">Six gadgets</div><div class="pricebar">$9.99 <button>Add to cart</button></div></div></div>
+  <div class="card"><div class="img"><a href="#z" aria-label="Gizmo 3-pack"><img alt="" width="12" height="12"></a></div>
+    <div class="body"><div class="title"><a href="#z">Gizmo 3-pack</a></div><div class="desc">Three gizmos</div><div class="pricebar">$9.99 <button>Add to cart</button></div></div></div>
+</div>
 <div style="height:2200px"></div>
 <!-- below the fold: the assertion oracle must see these, the table Jev chooses from must not -->
 <a href="#logout">Logout</a>
@@ -370,6 +380,26 @@ def observer_check(url: str) -> list[str]:
             failures.append(f"options inside a disabled optgroup should be disabled: {grouped}")
         if "Show error" not in obs["visible_text"] or "Payment failed" in obs["visible_text"]:
             failures.append("visible_text should hold a closed details' summary but not its hidden content")
+        # Identical labels: the three "Add to cart" buttons sit in plain <div> cards (no row / list-item), two cards
+        # share a price, so the distinguishing level is the card with its title; a label that is unique on the page
+        # ("Continue") gets no context, and the row checkboxes keep the row context pass 1 gave them.
+        adds = [e for e in obs["elements"] if e["role"] == "button" and e["name"] == "Add to cart"]
+        contexts = [e.get("context") or "" for e in adds]
+        if len(adds) != 3 or len(set(contexts)) != 3 or not all(t in c for t, c in zip(("Widget 12-pack", "Gadget 6-pack", "Gizmo 3-pack"), contexts)):
+            failures.append(f"identical buttons should be told apart by their card: {contexts}")
+        if any(("$9.99" in c and "pack" not in c) for c in contexts):
+            failures.append(f"the shared price bar must not be taken as the distinguishing context: {contexts}")
+        if by_name.get("Continue", {}).get("context"):
+            failures.append(f"a unique label needs no context: {by_name.get('Continue')}")
+        # The image link and the title link of one card share a name: their common container is the card, and nothing
+        # below it tells them apart, so neither gets a context (the first cut of this pass climbed past the card and
+        # labelled one product's button with another product's text).
+        pairs = [e for e in obs["elements"] if e["role"] == "link" and e["name"] in ("Widget 12-pack", "Gadget 6-pack", "Gizmo 3-pack")]
+        if len(pairs) != 6 or any(e.get("context") for e in pairs):
+            failures.append(f"same-product duplicates must not be given a context: {[(e['name'], e.get('context')) for e in pairs]}")
+        from observe import element_label
+        if element_label(adds[1]) != 'button "Add to cart" in "Gadget 6-pack Six gadgets $9.99 Add to cart"':
+            failures.append(f"trace labels should carry the distinguishing context: {element_label(adds[1])}")
         if obs["fingerprint"]["text_head"] != obs["visible_text"][:500]:
             failures.append("the fingerprint's text head is not the first 500 chars of visible_text")
 

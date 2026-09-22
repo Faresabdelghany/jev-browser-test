@@ -166,8 +166,14 @@ clickables that carry no role (an avatar menu, a card, a table row). A `<label>`
 in the table is skipped here: it adds nothing but a tempting no-op click (measured: with the structured
 state Jev clicked "Username" before typing into it). Anonymous controls get a `context`
 (the text of their row / list item / label) so `checkbox ""` in a table reads
-`checkbox "" in "SKU-1005 Gadget 6-pack Acme Ltd"`. Each element records
-`via: "semantic" | "label" | "cursor"`.
+`checkbox "" in "SKU-1005 Gadget 6-pack Acme Ltd"`. Pass 4 does the same for **identical labels**: a group of
+elements sharing role and name with no context (one "Add to cart" per product card, one "Edit" per entry,
+when the containers are plain `div`s) climbs its ancestors level by level and takes the first level whose
+texts tell every member apart, so the table reads `button "Add to cart" in "Sauce Labs Bolt T-Shirt …"`
+instead of six times `button "Add to cart"` (measured on such a grid: target probabilities 0.47 / 0.21 /
+0.18, three refused decisions, `low_confidence`, and a story a human could not read either). A shared price
+bar is not enough, the card with its title is; a group that nothing distinguishes gets no context. Each
+element records `via: "semantic" | "label" | "cursor"`.
 
 Executing a click on a control that something sits on top of dispatches the click on the control itself
 (`executed.dispatched`), because a forced pointer click lands on the styled box and is swallowed; other
