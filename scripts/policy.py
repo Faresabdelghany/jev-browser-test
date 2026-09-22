@@ -41,12 +41,12 @@ PROBABILITY_SUM_TOLERANCE = 0.02
 # `stuck_reason` only when the last action had page_changed: false. Fan-out is cheap; consuming only the
 # applicable answer is the documented pattern.
 BLOCKED_REASONS = {
-    "nothing": "Nothing prevents progress: a useful next operation is available on this page",
-    "missing_data_value": "A field the goal needs has no matching value among available_data_values",
-    "control_not_on_page": "The control the goal needs (button, link, field, option) is not on this page",
-    "site_refused_or_error": "The site refused the action or shows an error (validation error, error page, 'something went wrong')",
-    "human_step_required": "A step only a human can do is required: CAPTCHA, 2FA code, e-mail or SMS link, payment approval",
-    "wrong_page": "This is not the page where the goal can be pursued (wrong section, logged out, 404)",
+    "nothing": "Nothing: a useful next operation is available on this page",
+    "missing_data_value": "A field the goal needs has no value in available_data_values",
+    "control_not_on_page": "The control the goal needs is not on this page",
+    "site_refused_or_error": "The site refused the action or shows an error",
+    "human_step_required": "A human-only step: CAPTCHA, 2FA code, e-mail or SMS link, payment approval",
+    "wrong_page": "Not the page for the goal (wrong section, logged out, 404)",
     "other": "Something else prevents progress",
 }
 STUCK_REASONS = {
