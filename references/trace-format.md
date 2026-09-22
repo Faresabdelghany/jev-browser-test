@@ -51,6 +51,35 @@ over the status when both have a row:
 Exit codes: 0 ⇔ verdict `pass` (status `passed`); 1 for every other outcome and for `undetermined`; 2 for a
 spec or environment problem (no result is written).
 
+## Suite results (`scripts/run_suite.py`)
+
+A suite run writes `results.json` and `results.md` into `runs/suite/<ts>/`:
+
+```jsonc
+{
+  "label": "", "timestamp": "...", "git_commit": "185a10f", "repeat": 5, "workers": 4, "elapsed_ms": 18400,
+  "specs": {
+    "smoke-login": {
+      "spec": "specs/smoke-login.json",
+      "runs": [ { "out_dir": "runs/suite/<ts>/smoke-login/01", "result": ".../result.json", "exit_code": 0, "wall_ms": 6100,
+                  "outcome": "logged_in", "verdict": "pass", "status": "passed", "first_seen_at_step": 4,
+                  "evidence_line": "You logged into a secure area!", "suggested_verdict": null,
+                  "duration_ms": 6000, "jev_ms": 2000, "requests": 6, "input_tokens": 8900, "decision_confidence": 0.96, ... } ],
+      "outcome_counts": { "logged_in": 5 }, "verdict_counts": { "pass": 5 }, "suggested_verdicts": {},
+      "agreement": 1.0,                       // share of runs that ended in the most common outcome
+      "verdict": "pass",                      // unanimous -> that outcome's verdict; undetermined everywhere -> "undetermined"; else "flaky"
+      "medians": { "wall_ms": 6100, "duration_ms": 6000, "jev_ms": 2000, "browser_ms": 1270, "requests": 6, "input_tokens": 8900, "decision_confidence": 0.96, "steps": 5 },
+      "passes": 5
+    }
+  },
+  "suite": { "all_pass": true, "verdicts": { "smoke-login": "pass" }, "flaky": [], "undetermined": [] }
+}
+```
+
+`flaky` is computed from disagreement across repeats, never diagnosed from one run. A run that wrote no
+result (exit 2, a crash) is recorded as `undetermined` with `status: "error"` and the runner's last stderr
+lines in `error`. The exit code is 0 iff `suite.all_pass`.
+
 ## Reading order
 
 0. `python scripts/summarize_trace.py runs/<id>/<ts>/trace.json --result` — the result above. For a declared

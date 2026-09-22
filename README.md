@@ -41,8 +41,10 @@ never reaches Jev at all.
 
 ```bash
 .venv/bin/python scripts/spec.py specs/smoke-login.json                 # validate, no browser
-.venv/bin/python scripts/run_test.py specs/smoke-login.json --headed    # run
-.venv/bin/python scripts/summarize_trace.py runs/smoke-login/*/trace.json
+.venv/bin/python scripts/run_test.py specs/smoke-login.json --headed    # run one spec -> runs/<id>/<ts>/result.json
+.venv/bin/python scripts/summarize_trace.py runs/smoke-login/*/trace.json --result
+.venv/bin/python scripts/run_suite.py specs/*.json --repeat 3           # many specs x repeats -> results.json + results.md, flaky computed
+.venv/bin/python scripts/report.py runs/smoke-login/<ts>                # one run -> a self-contained report.html
 ```
 
 A spec is a goal in plain language, the endings the run may return (each a statement about the visible
@@ -125,7 +127,9 @@ scripts/policy.py           state + questions for Jev, answer validation and par
 scripts/rules.py            optional standing rules attached to every question ("rules": true)
 scripts/jev_client.py       stdlib HTTP client for POST /v1/systemone, one connection per run
 scripts/spec.py             defaults, ${ENV} substitution, validation
-scripts/summarize_trace.py  one line per step, --step N for a full dump
+scripts/summarize_trace.py  one line per step, --step N for a full dump, --result for result.json
+scripts/run_suite.py        specs x repeats on a worker pool -> results.json / results.md with agreement and a flaky verdict
+scripts/report.py           one run -> a single static report.html (steps, probabilities, checks, screenshots inline)
 scripts/bench.py            run a spec N times; medians of wall, Jev, browser, tokens, confidence
 scripts/selftest.py         offline: fake Jev, local pages, one case per terminal status and guard
 scripts/unit_tests.py       stdlib unittest for the pure parts (client, validation, criteria, bench)

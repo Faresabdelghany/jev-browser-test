@@ -177,11 +177,29 @@ ticket, the spec is the acceptance test: write it from the criteria before the c
 If the user hands you an existing `trace.json` or `runs/` folder, skip to steps 3–4. Do not rerun anything
 unless the rubric says to (suspected flake, or after a spec fix you made).
 
-## Suites
+## Suites: anything longer than one spec
 
-For several flows, write one spec per flow in `specs/`, and a tiny shell loop or Makefile target that runs
-them and collects exit codes. Keep specs independent (each has its own `setup`); shared state between specs
-is the fastest way to manufacture flakiness. Store `runs/` outside version control.
+For several flows, or to know whether one flow is stable, write one spec per flow in `specs/` and let the
+suite runner do the waiting:
+
+```bash
+python scripts/run_suite.py specs/*.json --repeat 3 --workers 4      # -> runs/suite/<ts>/results.json + results.md
+```
+
+Launch it with the Bash tool's `run_in_background` and **do nothing until the completion notification**:
+no polling, no reading partial output, no thinking about the flow while it runs. Then read
+`results.json` (or `results.md`). Per spec it gives the outcome distribution across the repeats, the
+agreement rate, medians, and a suite verdict: unanimous → that outcome's verdict; any disagreement →
+**`flaky`**, computed, never diagnosed from one run. Exit 0 iff every spec is unanimously `pass`. Open a
+trace only for a spec that is `undetermined` or `flaky`; a unanimous declared outcome needs at most a glance
+at its `evidence_line`. Two specs × 5 repeats with 4 workers finish in well under a minute on the demo site.
+
+For a human reader (a PR, a ticket), `python scripts/report.py runs/<id>/<ts>` writes a single static
+`report.html` beside the trace: the result, the step table with the operation and target probabilities,
+checks, outcome answers, flags, and the screenshots inline. No server, no external resources.
+
+Keep specs independent (each has its own `setup`); shared state between specs is the fastest way to
+manufacture flakiness. Store `runs/` outside version control.
 
 ## Troubleshooting
 
@@ -207,8 +225,10 @@ is the fastest way to manufacture flakiness. Store `runs/` outside version contr
 
 ## Files
 
-- `scripts/run_test.py` — the loop; `scripts/spec.py` — validation; `scripts/summarize_trace.py` — reading
-  runs; `scripts/selftest.py` — offline check; `scripts/unit_tests.py` — unit tests for the pure parts;
+- `scripts/run_test.py` — the loop (one spec → `result.json` + `trace.json`); `scripts/run_suite.py` — many
+  specs × repeats on a worker pool → `results.json` + `results.md`; `scripts/report.py` — one run → static
+  `report.html`; `scripts/spec.py` — validation; `scripts/summarize_trace.py` — reading runs;
+  `scripts/selftest.py` — offline check; `scripts/unit_tests.py` — unit tests for the pure parts;
   `scripts/bench.py` — repeat a spec N times and report medians; `scripts/observe.py`, `scripts/policy.py`,
   `scripts/rules.py`, `scripts/jev_client.py` — the pieces (see `references/runner-design.md` before
   modifying them).
