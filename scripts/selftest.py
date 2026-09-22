@@ -174,6 +174,42 @@ SETTLE_PAGE = """<!doctype html><html><head><title>Settle</title></head><body>
 </script></body></html>"""
 
 
+# A page that loads for a while after a click: Start hides itself, "Loading..." shows, and after ?ms=<n>
+# milliseconds (default 1200; 0 = never) "Hello World!" replaces it. Nothing else is on the page, so the only
+# sensible decision while it loads is WAIT, again and again, on a page whose signature does not change.
+LOADING_PAGE = """<!doctype html><html><head><title>Loading</title></head><body>
+<h1>Dynamically loaded content</h1>
+<div id="start"><button onclick="start()">Start</button></div>
+<div id="loading" style="display:none">Loading...</div>
+<div id="finish" style="display:none">Hello World!</div>
+<script>
+ function start(){
+   document.getElementById('start').style.display = 'none';
+   document.getElementById('loading').style.display = 'block';
+   const ms = parseInt(new URLSearchParams(location.search).get('ms') || '1200', 10);
+   if (ms > 0) setTimeout(() => {
+     document.getElementById('loading').style.display = 'none';
+     document.getElementById('finish').style.display = 'block'; }, ms);
+ }
+</script></body></html>"""
+
+
+def loading_spec(url: str, max_steps: int = 12) -> dict:
+    from spec import DEFAULTS, _merge, validate
+
+    spec = _merge(DEFAULTS, {
+        "id": "selftest-loading", "start_url": url,
+        "goal": "Press Start and wait for the loading to finish, so that 'Hello World!' is displayed.",
+        "outcomes": {"loaded": {"when": "The text 'Hello World!' is displayed", "verdict": "pass"}},
+        "assert": [{"text_contains": "Hello World!"}],
+        "budget": {"max_steps": max_steps, "max_seconds": 60},
+        "browser": {"settle_ms": 100, "quiet_ms": 20},   # a WAIT pauses settle_ms: a 1.2 s load takes many of them
+    })
+    problems = validate(spec)
+    assert not problems, problems
+    return spec
+
+
 def settle_check(url: str) -> list[str]:
     """settle() ends on DOM quiet, on the cap, or on a visible autocomplete option. No Jev involved."""
     from playwright.sync_api import sync_playwright
@@ -509,6 +545,8 @@ class FakeJev:
             return r"Cart: [1-9]"
         if "error" in s or "wrong" in s:
             return "Something went wrong"
+        if "hello" in s:
+            return "Hello World!"
         return None
 
     def _outcome(self, criteria: dict, text: str) -> str:
@@ -546,7 +584,8 @@ class FakeJev:
         if "outcome" in questions:
             answers["outcome"] = self._choice(self._outcome(questions["outcome"]["criteria"], text), questions["outcome"]["criteria"])
         if "stuck_reason" in questions:
-            answers["stuck_reason"] = self._choice("control_had_no_effect", questions["stuck_reason"]["criteria"])
+            answers["stuck_reason"] = self._choice("still_loading" if "Loading..." in text else "control_had_no_effect",
+                                                   questions["stuck_reason"]["criteria"])
         if "operation" not in questions:
             return {"answers": answers, "usage": {"input_tokens": 300, "output_tokens": 20}, "model": "fake-jev", "latency_ms": 1}
 
@@ -572,6 +611,10 @@ class FakeJev:
 
         if self.mode == "dead_click" and self._find(clicks, "Apply filter"):
             op, target = "CLICK", ("click_target", self._find(clicks, "Apply filter"))  # a button that does nothing
+        elif self._find(clicks, '"Start"'):
+            op, target = "CLICK", ("click_target", self._find(clicks, '"Start"'))       # the loading fixture
+        elif "Loading..." in text:
+            op, target = "WAIT", None                                                    # the only sensible move while it loads
         elif self._find(clicks, "Accept cookies"):
             op, target = "CLICK", ("click_target", self._find(clicks, "Accept cookies"))
         elif not results_shown and self._find(types, "Search products") and not typed_before and "TYPE_TEXT" in ops:
@@ -864,6 +907,46 @@ def main() -> int:
     reason = (trace["result"] or {}).get("reason") or {}
     if reason.get("stuck_reason") != "control_had_no_effect" or reason.get("suggested_verdict") != "bug":
         failures.append(f"stuck with a dead control should suggest bug: {reason}")
+
+    # 4c. a page that loads for 1.2 s after Start: Jev chooses WAIT on an unchanged page many times over. A WAIT
+    #     is not an action, so it never counts toward `stuck` (a live 5 s loader ended stuck after 1.5 s), and the
+    #     run passes once "Hello World!" appears; each WAIT after the first carries stuck_reason still_loading.
+    loading_html = os.path.join(tmp, "loading.html")
+    with open(loading_html, "w", encoding="utf-8") as f:
+        f.write(LOADING_PAGE)
+    spec = loading_spec("file://" + loading_html)
+    jev = FakeJev()
+    out = os.path.join(tmp, "run-loading")
+    trace = run(spec, jev, out, screenshots="key")
+    print(summarize(trace, out))
+    print()
+    steps = trace["steps"]
+    waits = [s for s in steps if (s.get("operation") or {}).get("choice") == "WAIT" and (s.get("executed") or {}).get("action") == "WAIT"]
+    if trace["status"] != "passed" or (trace["outcome"], trace["verdict"]) != ("loaded", "pass"):
+        failures.append(f"loading: expected passed via 'loaded', got {trace['status']} {trace.get('outcome')} ({trace.get('error')})")
+    if len(waits) < 3 or any(s.get("repeat_count") for s in waits):
+        failures.append(f"loading: WAIT must not count as a repeated action: {len(waits)} waits, repeat counts {[s.get('repeat_count') for s in waits]}")
+    if (steps[0].get("target") or {}).get("label") != '[0] button "Start"' or steps[0].get("repeat_count") != 1:
+        failures.append(f"loading: the Start click is the one counted action: {steps[0].get('target')} {steps[0].get('repeat_count')}")
+    if not all((s.get("stuck_reason") or {}).get("choice") == "still_loading" for s in waits[1:]):
+        failures.append(f"loading: a WAIT on an unchanged page is asked stuck_reason: {[s.get('stuck_reason') for s in waits]}")
+    if trace["result"]["assertions"] and not all(a["ok"] for a in trace["result"]["assertions"]):
+        failures.append(f"loading: the assertion on the loaded text should hold: {trace['result']['assertions']}")
+
+    # 4d. a loader that never finishes (?ms=0) with a small budget: the budget ends the run, not `stuck`, and the
+    #     result carries the last still_loading (the final look asks none) so the suggestion is flaky, not test_issue
+    spec = loading_spec("file://" + loading_html + "?ms=0", max_steps=5)
+    out = os.path.join(tmp, "run-loading-forever")
+    trace = run(spec, FakeJev(), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    reason = (trace["result"] or {}).get("reason") or {}
+    if trace["status"] != "budget_exhausted" or len(trace["steps"]) != 6 or not trace["steps"][-1].get("final_look"):
+        failures.append(f"loading forever: expected budget_exhausted after 5 steps + final look, got {trace['status']} {len(trace['steps'])}")
+    if reason.get("stuck_reason") != "still_loading" or reason.get("suggested_verdict") != "flaky":
+        failures.append(f"loading forever: the result should carry the last still_loading and suggest flaky: {reason}")
+    if "stuck_reason" in trace["steps"][-1]:
+        failures.append("loading forever: the final look must not be asked stuck_reason")
 
     # 5. a low-confidence DONE is a WAIT, not a verdict -> the flow continues and passes
     spec = base_spec(url)

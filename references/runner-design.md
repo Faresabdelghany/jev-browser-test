@@ -112,7 +112,10 @@ animations move boxes without changing what a control means, and Playwright's ac
 geometry and hit-testing at click time anyway. A stale decision executes nothing (`step.stale` has the
 reason, `executed` is a WAIT), is not an action and is not shown to Jev as one; mutations are never retried.
 
-Repeat detection keys on `(page signature, operation, target, value_key)`. The signature hashes URL, title,
+Repeat detection keys on `(page signature, operation, target, value_key)`; a WAIT is never counted (choosing
+it again on a page that still says "Loading..." is right for as long as the page loads: a 5 s loader ended
+`stuck` after 1.5 s before this rule), so a page that never finishes loading ends with the budget, and
+`result.reason.stuck_reason` then carries the last `still_loading`. The signature hashes URL, title,
 the element table and the first 500 chars of visible text, so a page that changes only far below the fold
 can look "unchanged"; that is intentional, since Jev could not see the change either.
 

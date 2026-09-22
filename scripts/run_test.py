@@ -489,11 +489,21 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
     if not seen:
         blocked = (terminal.get("blocked_reason") or {}).get("choice")
         stuck = (terminal.get("stuck_reason") or {}).get("choice")
+        if stuck is None and status == "budget_exhausted":
+            # The final look asks no stuck_reason. A budget spent on a streak of WAITs (Jev's, or the runner's
+            # after refused decisions) on a page that never changed is reported with the last reason Jev gave
+            # for the no-op (`still_loading`: the page was still loading when the budget ran out).
+            for s in reversed(steps[:-1]):
+                if (s.get("executed") or {}).get("action") != "WAIT":
+                    break
+                if s.get("stuck_reason"):
+                    stuck = s["stuck_reason"].get("choice")
+                    break
         result["reason"] = {
             "status": status,
             "blocked_reason": blocked,
             "stuck_reason": stuck,
-            "suggested_verdict": suggested_verdict(status, [stuck if status == "stuck" else None,
+            "suggested_verdict": suggested_verdict(status, [stuck if status in ("stuck", "budget_exhausted") else None,
                                                             blocked if status in BLOCKED_REASON_STATUSES else None]),
         }
         if status == "assert_failed":
@@ -913,12 +923,17 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     finish(page, step, "blocked", {"action": "BLOCKED", "ok": True, "error": None})
                     break
 
-                key = (sig, operation, target["choice"] if target and not target.get("missing") else None, value_key)
-                repeats[key] = repeats.get(key, 0) + 1
-                step["repeat_count"] = repeats[key]
-                if repeats[key] >= th["max_repeat"]:
-                    finish(page, step, "stuck", dict(STOP))
-                    break
+                # Repeat detection: the same action on an unchanged page max_repeat times is `stuck`. A WAIT is
+                # not an action on the page: Jev choosing it again on a page that still says "Loading..." is the
+                # right answer for as long as the page keeps loading (measured live: a 5 s loader ended `stuck`
+                # after 1.5 s with stuck_reason still_loading), so only the budget bounds a streak of WAITs.
+                if operation != "WAIT":
+                    key = (sig, operation, target["choice"] if target and not target.get("missing") else None, value_key)
+                    repeats[key] = repeats.get(key, 0) + 1
+                    step["repeat_count"] = repeats[key]
+                    if repeats[key] >= th["max_repeat"]:
+                        finish(page, step, "stuck", dict(STOP))
+                        break
 
                 # The page Jev decided on, before anything changes it. The last allowed step is terminal
                 # for the budget (the for-else below), so it gets its picture like every terminal step.

@@ -39,8 +39,8 @@ prevents progress" (`nothing | missing_data_value | control_not_on_page | site_r
 human_step_required | wrong_page | other`); `stuck_reason` is asked only after an action with
 `page_changed: false` (`control_had_no_effect | overlay_or_modal | still_loading |
 needs_scroll_or_other_control | other`). The suggestion comes from a fixed table: `stuck_reason` counts for
-`stuck`, `blocked_reason` for `blocked`, `stuck`, `low_confidence` and `budget_exhausted` (a typed reason with
-a row wins over the status row there); for `done_unverified`, `assert_failed`, `unstable_page` and `error`
+`stuck` and for a `budget_exhausted` spent on a streak of WAITs, `blocked_reason` for `blocked`, `stuck`,
+`low_confidence` and `budget_exhausted` (a typed reason with a row wins over the status row there); for `done_unverified`, `assert_failed`, `unstable_page` and `error`
 the status row alone decides, because on those endings the step's `blocked_reason` is about progress on the
 page, not about the verdict:
 
@@ -127,9 +127,9 @@ environment failure (or a spec file is missing / two files share an id).
 | `done_unverified` | Jev said DONE confidently; the runner settled, re-observed, and no pass outcome is visible | Either the outcome wording is off (test issue) or the app did not do what it claims (bug). Look at `final.png`. Timing is already ruled out by the recheck |
 | `blocked` | Jev chose BLOCKED (`result.reason.blocked_reason` says why) | Usually a test issue: missing `data` value, missing precondition, wrong start page. Sometimes a real bug: the needed control is not rendered |
 | `never_violated` | (Runs before the results contract only.) A `never` check crossed its threshold; today this ends as `outcome` with `never_<check>` | Often a product bug. Confirm the error is real in the screenshot, and that the preceding action was reasonable |
-| `stuck` | Same action on an unchanged page `max_repeat` times | The action had no effect: dead button (bug), or Jev is confused by the page (test issue: add a note or a `setup` step) |
+| `stuck` | Same action on an unchanged page `max_repeat` times. A WAIT is not an action: waiting on a page that keeps loading never ends `stuck`, only the budget bounds it | The action had no effect: dead button (bug), or Jev is confused by the page (test issue: add a note or a `setup` step) |
 | `low_confidence` | `max_low_confidence_steps` consecutive uncertain decisions, none of them executed | Jev could not choose between the offered options: look at `decision_confidence` and the probabilities in `--step N`. A split over `type_value` means the `data` key names do not match the field labels (rename them); a split over targets means the goal/notes do not say which of several similar controls to use |
-| `budget_exhausted` | Ran out of steps or seconds. The final look is one more step (`final_look: true`): a sighting or DONE on the last step is confirmed by it (then the status is `passed`), a pass first seen there is recorded as `reason.pending_outcome` | Wandering (test issue, tighten the goal) or a very long flow (raise the budget); with `pending_outcome`, one more step would very likely have passed |
+| `budget_exhausted` | Ran out of steps or seconds. The final look is one more step (`final_look: true`): a sighting or DONE on the last step is confirmed by it (then the status is `passed`), a pass first seen there is recorded as `reason.pending_outcome`. When the budget went on a streak of WAITs, `reason.stuck_reason` carries the last reason Jev gave for the no-op (`still_loading`) | Wandering (test issue, tighten the goal) or a very long flow (raise the budget); with `pending_outcome`, one more step would very likely have passed; with `stuck_reason: still_loading` the page never finished loading (flaky: rerun, then raise the budget or suspect the app) |
 | `unstable_page` | `thresholds.max_stale` consecutive decisions were stale: the page changed between the observation and Jev's answer every time, so nothing was executed | Environment: the page never holds still (animation, polling, a slow render). Raise `browser.quiet_ms` / `settle_ms`, or add a `setup` `wait_for` for the thing that keeps changing. Each stale step's `stale` says what moved |
 | `error` | Runner, browser or API failure (`trace.error`). `invalid operation answer: <reason>` means Jev's `operation` answer failed validation twice in a row for one step (the step carries `invalid_answer` and `retried`) | Environment issue; rerun before concluding anything |
 
