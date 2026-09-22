@@ -51,8 +51,8 @@ it without opening a browser. Unknown fields are ignored; every optional field h
 | `browser.action_timeout_ms` | int | 8000 | Playwright timeout per click/fill |
 | `browser.storage_state` | path | null | Playwright storage state file (cookies/localStorage) for pre-authenticated sessions |
 | `browser.channel` | string | null | e.g. `"chrome"` to use an installed Chrome instead of bundled Chromium |
-| `observation.max_elements` | int | 60 | Cap on numbered elements per step (largest Choice Jev sees). Lower it if the API rejects big option sets |
-| `observation.max_text_chars` | int | 2000 | Visible text excerpt sent as state |
+| `observation.max_elements` | int | 200 | Cap on numbered elements per step (largest Choice Jev sees), 1–250. Elements beyond it are reported as `truncated_elements` and cannot be chosen |
+| `observation.max_text_chars` | int | 4000 | Visible text sent as state, viewport-first: what is on screen comes first, then the rest of the page, cut here (≥ 100) |
 | `observation.screenshots` | bool | `true` | Save `steps/NNN.png` per step for Claude to look at |
 
 ## Setup steps (deterministic Playwright, no Jev)

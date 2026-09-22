@@ -50,7 +50,9 @@ DEFAULTS = {
         "storage_state": None,
         "channel": None,
     },
-    "observation": {"max_elements": 60, "max_text_chars": 2000, "screenshots": True},
+    # 200 elements: the Choice cap is 255 and the table-row "stuck" seen in real runs was truncation at 60.
+    # 4000 chars of viewport-first text: the toast the checks look for must not be crowded out by the header.
+    "observation": {"max_elements": 200, "max_text_chars": 4000, "screenshots": True},
 }
 
 
@@ -192,6 +194,13 @@ def validate(spec: dict) -> list[str]:
         v = t.get(k, 1)
         if not (isinstance(v, int) and not isinstance(v, bool) and v >= 1):
             errors.append(f"'thresholds.{k}' must be an integer >= 1")
+    o = spec.get("observation", {})
+    me = o.get("max_elements", 1)
+    if not (isinstance(me, int) and not isinstance(me, bool) and 1 <= me <= 250):
+        errors.append("'observation.max_elements' must be an integer between 1 and 250 (a Choice takes at most 255 options)")
+    mt = o.get("max_text_chars", 100)
+    if not (isinstance(mt, int) and not isinstance(mt, bool) and mt >= 100):
+        errors.append("'observation.max_text_chars' must be an integer >= 100")
     return errors
 
 

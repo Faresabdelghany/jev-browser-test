@@ -550,6 +550,14 @@ class SpecValidationTests(unittest.TestCase):
         from spec import validate
         return validate(_merge(SPEC, overrides))
 
+    def test_observation_defaults_and_bounds(self) -> None:
+        self.assertEqual((DEFAULTS["observation"]["max_elements"], DEFAULTS["observation"]["max_text_chars"]), (200, 4000))
+        self.assertEqual(self.problems(observation={"max_elements": 250}), [])
+        self.assertEqual(self.problems(observation={"max_elements": 1, "max_text_chars": 100}), [])
+        self.assertTrue(any("max_elements" in p for p in self.problems(observation={"max_elements": 0})))
+        self.assertTrue(any("max_elements" in p for p in self.problems(observation={"max_elements": 251})))
+        self.assertTrue(any("max_text_chars" in p for p in self.problems(observation={"max_text_chars": 50})))
+
     def test_settle_defaults_and_bounds(self) -> None:
         self.assertEqual((DEFAULTS["browser"]["settle_ms"], DEFAULTS["browser"]["quiet_ms"]), (400, 100))
         self.assertEqual(self.problems(), [])

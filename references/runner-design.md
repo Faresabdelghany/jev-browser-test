@@ -96,7 +96,15 @@ beyond what `querySelectorAll` reaches; one tab (new tabs opened by the page are
 these are also outside jev-ultrafast's current scope. Put such steps in `setup` with plain Playwright when
 they are preconditions rather than the thing under test.
 
-## Observer: three passes
+## Observer: three passes, viewport-first text
+
+The table keeps up to `observation.max_elements` (default 200; a Choice takes at most 255 options) sorted
+top-to-bottom, left-to-right; the rest is reported as `truncated_elements` and cannot be chosen. The
+`visible_text` Jev sees is **viewport-first**: a TreeWalker over the text nodes collects those that
+intersect the viewport in document order, then the rest of the page, cut to `max_text_chars` (default
+4000). `body.innerText` from the top let a long header and navigation crowd out the toast the checks were
+looking for. The fingerprint's text head is the first 500 chars of the same text, computed by the same
+helper, and `signature()` hashes the same 500 chars.
 
 Pass 1 collects semantic controls (tags, ARIA roles, `[onclick]`, focusable `tabindex`). A form control
 at `opacity: 0` is **kept** if it still has a real box: that is the antd/MUI/Bootstrap "hidden input under

@@ -45,7 +45,7 @@ the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to re
       "n": 1, "url": "...", "title": "...", "signature": "7be5a4cf2445",
       "screenshot": "steps/001.png",
       "elements": [ { "idx": 3, "role": "button", "name": "Add to cart", "x": 116, "y": 151, "w": 79, "h": 21, ... } ],
-      "truncated_elements": 0, "visible_text": "first 600 chars...",
+      "truncated_elements": 0, "visible_text": "first 600 chars of the viewport-first text Jev saw...",
       "offered_operations": ["CLICK", "TYPE_TEXT", "WAIT", "DONE", "BLOCKED"],
       "operation": { "choice": "CLICK", "confidence": 0.91, "top_probabilities": { "CLICK": 0.9, "DONE": 0.05 } },
       "target": { "question": "click_target", "choice": "3", "element": 3, "label": "[3] button \"Add to cart\"",

@@ -51,7 +51,33 @@ JS_HELPERS = r"""
   // [connected, visible, value, checked, disabled, hash of the surrounding form/dialog/row/item text]
   const nodeTuple = el => [el.isConnected, visibleOf(el), valueOf(el), checkedOf(el), disabledOf(el),
                            strHash(clean(scopeOf(el).innerText || '').slice(0, 2000))];
-  const visibleText = maxChars => (document.body ? clean(document.body.innerText) : '').slice(0, maxChars);
+  // Viewport-first visible text: text nodes that intersect the viewport in document order, then the rest,
+  // cut to maxChars. body.innerText from the top let 2,000 chars of header and navigation crowd out the
+  // toast the checks were looking for. visibleText(500) is always a prefix of visibleText(4000).
+  const visibleText = maxChars => {
+    if (!document.body) return '';
+    const inView = [], rest = [];
+    let inLen = 0;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    let node;
+    while ((node = walker.nextNode()) && inLen < maxChars) {
+      const raw = node.textContent;
+      if (!raw || !raw.trim()) continue;
+      const parent = node.parentElement;
+      if (!parent || parent.closest('script, style, noscript, template')) continue;
+      if (parent.checkVisibility && !parent.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
+      range.selectNodeContents(node);
+      const r = range.getBoundingClientRect();
+      if (r.width <= 0 && r.height <= 0) continue;
+      const value = raw.replace(/\s+/g, ' ');
+      if (r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) { inView.push(value); inLen += value.length; }
+      else rest.push(value);
+    }
+    const head = clean(inView.join(' '));
+    if (head.length >= maxChars) return head.slice(0, maxChars);
+    return clean(head + ' ' + rest.join(' ')).slice(0, maxChars);
+  };
 """
 
 OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
@@ -223,7 +249,7 @@ GUARD_SKIPPED = {"SCROLL_DOWN", "SCROLL_UP", "WAIT"}
 TARGET_OPERATIONS = {"CLICK", "TYPE_TEXT", "SELECT"}
 
 
-def observe(page, max_elements: int = 60, max_text_chars: int = 2000) -> dict:
+def observe(page, max_elements: int = 200, max_text_chars: int = 4000) -> dict:
     """Run the observation script on the current page and return the observation dict.
 
     Besides the element table it carries `fingerprint`: url, title, the first 500 chars of visible text and

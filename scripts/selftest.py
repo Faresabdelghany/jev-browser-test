@@ -32,6 +32,7 @@ PAGE = """<!doctype html><html><head><title>Mini Shop</title>
  #banner{position:fixed;bottom:0;left:0;right:0;background:#333;color:#fff;padding:16px}
  .item{margin:8px 0}
 </style></head><body>
+<div id="filler" style="position:absolute;top:3000px;left:0;width:600px" hidden></div>
 <header><a href="#home">Home</a> &nbsp; <span id="cart">Cart: 0 items</span></header>
 <h1>Mini Shop</h1>
 <form id="search" onsubmit="event.preventDefault(); showResults();">
@@ -56,6 +57,13 @@ PAGE = """<!doctype html><html><head><title>Mini Shop</title>
      setTimeout(() => { first.disabled = true; }, 200);
      setTimeout(() => { first.disabled = false; }, 2000);
    }
+ }
+ if (location.search.includes('longtext=1')) {
+   // 5,000+ chars that come FIRST in DOM order but sit far below the fold: viewport-first text must put
+   // what is on screen before them, and keep them after it.
+   const f = document.getElementById('filler');
+   f.textContent = 'Lorem ipsum filler sentence number ' + Array.from({length: 600}, (_, i) => i).join(' lorem ') + '.';
+   f.hidden = false;
  }
  if (location.search.includes('unstable=1')) {
    // The cookie banner's text changes every 70 ms, so the Accept button's surroundings never hold still.
@@ -543,7 +551,25 @@ def main() -> int:
     if trace["steps"] and trace["steps"][-1]["executed"]["action"] != "STOP":
         failures.append(f"unstable: terminal step should be a STOP: {trace['steps'][-1]['executed']}")
 
-    # 12. .env in the working directory is loaded; already-exported variables win; quotes are stripped
+    # 12. viewport-first text: a long filler that comes first in the DOM but sits below the fold is
+    #     moved after what is on screen, not lost; the flow still passes
+    spec = base_spec(url + "?longtext=1")
+    jev = FakeJev()
+    out = os.path.join(tmp, "run-longtext")
+    trace = run(spec, jev, out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    text = jev.seen_states[0]["visible_text"]
+    if trace["status"] != "passed":
+        failures.append(f"longtext: expected passed, got {trace['status']} ({trace.get('error')})")
+    if not (0 <= text.find("Mini Shop") < text.find("Lorem ipsum")):
+        failures.append(f"visible_text is not viewport-first: Mini Shop at {text.find('Mini Shop')}, filler at {text.find('Lorem ipsum')}")
+    if "lorem 149" not in text or len(text) != spec["observation"]["max_text_chars"]:
+        failures.append(f"visible_text lost the below-the-fold text or ignored max_text_chars: len={len(text)}")
+    if trace["steps"][0]["visible_text"] != text[:600]:
+        failures.append("the step's visible_text excerpt is not the first 600 chars of what Jev saw")
+
+    # 13. .env in the working directory is loaded; already-exported variables win; quotes are stripped
     env_dir = os.path.join(tmp, "dotenv")
     os.makedirs(env_dir)
     with open(os.path.join(env_dir, ".env"), "w", encoding="utf-8") as f:
