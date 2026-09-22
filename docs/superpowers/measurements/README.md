@@ -232,3 +232,64 @@ the same export:
 Per-run wall under four concurrent browsers is higher than in the bench, as before. The `results.md` cells
 now hold the evidence line and a link to each `result.json`; the runner exits 2 for a spec problem or an
 unreachable browser and the suite exits 2 when no run produced a result, which no run here did.
+
+## After the real-app session (2026-09-22): the runner at `eecf79e`
+
+Both smoke specs, 5 repeats, medians, then the suite, from a `git archive eecf79e` export in the scratchpad
+with `GIT_COMMIT=eecf79e` set (all three files record the commit). `eecf79e` is the last code commit of the
+session: the three offline fixes of the review round (`9eab4fe` a run that wrote no trace is an environment
+failure, not an outcome; `99b0f0e` suite results carry paths relative to their directory; `99f4a6a` a warning
+for a secret too short to mask safely) and the three runner fixes the real-application trial produced
+(`d833f95` identical labels are told apart by the card or entry that contains them; `cf24586` a WAIT is not a
+repeated action and a budget spent waiting reports `still_loading`; `eecf79e` a BLOCKED right after a no-op
+action is suggested from that step's `stuck_reason`). Files: `2026-09-22-real-app-session-bench.json`,
+`2026-09-22-real-app-session-suite.json` / `.md`.
+
+| spec | measure | review fixes (`9c20838`) | real-app session (`eecf79e`) |
+|---|---|---:|---:|
+| `smoke-login` | result | `logged_in` (pass) 5/5, confirmed, 3/3 assertions | the same |
+| | first sighting → confirming step | 4 → 5 in 5/5 | 4 → 5 in 5/5 |
+| | evidence line | "You logged into a secure area!" 5/5 | the same, 5/5 |
+| | wall-clock | 6,372 ms | 6,376 ms |
+| | Jev ms per run / requests | 2,016 / 6 | 2,111 / 6 |
+| | adjudication request | 319 ms | 279 ms |
+| | Jev request, warm | 307 ms | 334.5 ms |
+| | browser per action | 152 ms | 145 ms |
+| | input tokens per run | 8,932 | 8,932 |
+| | decision confidence (median) | 0.94 | 0.96 |
+| `smoke-login-badpw` | result | `bad_credentials` (pass) 5/5, confirmed, 3/3 assertions | the same |
+| | first sighting → confirming step | 4 → 5 in 5/5 | 4 → 5 in 5/5 |
+| | evidence line | "Your password is invalid!" 5/5 | the same, 5/5 |
+| | wall-clock | 6,282 ms | 6,359 ms |
+| | Jev ms per run / requests | 1,966 / 6 | 1,994 / 6 |
+| | adjudication request | 291 ms | 321 ms |
+| | Jev request, warm | 296.5 ms | 324.5 ms |
+| | browser per action | 144 ms | 147 ms |
+| | input tokens per run | 9,774 | 9,774 |
+| | decision confidence (median) | 0.92 | 0.92 |
+
+**The smoke specs are unchanged, by construction.** The demo login page has no two controls with the same
+label (pass 4 of the observer adds nothing to its table), no step waits on a loader, and both runs end in a
+declared outcome, so none of the six fixes touches what Jev is sent or how these runs end: requests and
+tokens are identical, the sighting and confirming steps are the same in every run, and the evidence lines
+are the same words. The walls (+4 ms, +77 ms) sit inside the run-to-run spread (6,255–6,522 and 6,317–6,646
+ms) and the confidence medians (0.96 vs 0.94, 0.92 vs 0.92) are Jev's variance on identical requests.
+
+The suite, `run_suite.py specs/smoke-login.json specs/smoke-login-badpw.json --repeat 5 --workers 4`, from
+the same export:
+
+| | review fixes (`9c20838`) | real-app session (`eecf79e`) |
+|---|---|---|
+| wall-clock, 2 specs × 5 repeats, 4 workers | 20.8 s | 19.4 s (acceptance < 60 s ✓) |
+| `smoke-login` | pass 5/5, agreement 100%, step 4 in 5/5, median 7,461 ms | pass 5/5, agreement 100%, step 4 in 5/5, median 6,619 ms |
+| `smoke-login-badpw` | pass 5/5, agreement 100%, step 4 in 5/5, median 6,736 ms | pass 5/5, agreement 100%, step 4 in 5/5, median 6,498 ms |
+| suite verdict | ALL PASS | ALL PASS (`all_pass: true`, exit 0, no environment failures) |
+
+This is the first suite file written after `99b0f0e`: every path under `specs` is relative to the directory
+the file was written in (`smoke-login/01`, `smoke-login/01/trace.json`, `../export-eecf79e/specs/smoke-login.json`),
+each run carries its repeat number and its `trace`, each spec its `environment_failures` (empty) and
+`reason` (null), and the suite its `environment_failures` map; only the top-level `out_dir` still records the
+scratchpad directory the suite was given, as documented. The trial against the public sites is **not** in
+this directory: its nine specs are local (`specs/local/`, git-ignored) and its `results.json` files carry the
+sites' own text, so the handoff (`docs/superpowers/plans/2026-09-22-handoff-after-real-app.md`) describes it
+generically and cites the untracked files under `runs/`.
