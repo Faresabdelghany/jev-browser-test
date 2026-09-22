@@ -72,6 +72,31 @@ else, 2 = spec/environment problem. `SKILL.md` tells Claude how to write specs a
 (PASS / BUG / TEST_ISSUE / FLAKY / NEEDS_HUMAN); `references/` has the spec format, trace and result
 format, rubric and runner design.
 
+## Examples
+
+`specs/examples/` holds ten specs against public sites: the nine the real-application trial ran
+(`docs/superpowers/plans/2026-09-22-handoff-after-real-app.md`) and one more. Their suite run at `b3996fa`, 3
+repeats each, is `docs/superpowers/measurements/2026-09-22-examples-suite.md` (97 s on 2 workers, 205 Jev
+requests in all).
+
+| spec | site | flow | it exercises | at `b3996fa`, 3 repeats |
+|---|---|---|---|---|
+| `shop-checkout` | saucedemo.com, `standard_user` | login in `setup`, add a named product from six cards with identical "Add to cart" buttons, cart, a three-field form, overview, finish | identical labels told apart by their card, a multi-page path, three `data` values | pass 3/3, 11 requests |
+| `shop-add-second-item` | saucedemo.com | add the second card's product, open the cart | a wrong pick shows up as an outcome; the product name is the evidence line | pass 3/3 |
+| `shop-checkout-problem-account` | saucedemo.com, `problem_user` | the checkout with the account the site documents as broken: a form field drops its input | a declared `bug` outcome with the app's own error as its evidence line | bug 3/3, "Error: Last Name is required" |
+| `shop-checkout-error-account` | saucedemo.com, `error_user` | the checkout with the account whose Finish button does nothing | `stuck_reason: control_had_no_effect` after a no-op click, then BLOCKED with a suggested verdict | undetermined 3/3, suggested bug 3/3 |
+| `wiki-search` | en.wikipedia.org | type a term into the search box, the suggestions open, reach the article | a real autocomplete (`settle` ends on `options`), a very long page | pass 3/3, 47,872 input tokens a run |
+| `todo-add-filter` | demo.playwright.dev/todomvc | add two todos, complete one, open the Active filter | TYPE_TEXT then PRESS_ENTER, two values into one field, hidden checkboxes under styled boxes, hash routing, a two-sentence outcome statement | pass 3/3, "1 item left" |
+| `load-wait` | the-internet.herokuapp.com/dynamic_loading/1 | press Start, a loader runs for 5 s, a text appears | Jev choosing WAIT on a page with a timer (6 WAITs, 10 requests) | pass 3/3 |
+| `notify-random` | the-internet.herokuapp.com/notification_message_rendered | click once; the notification is a random success or a random failure | the computed `flaky` verdict, each run keeping its own declared verdict | flaky (bug 2, pass 1) |
+| `modal-close` | the-internet.herokuapp.com/entry_ad | close the modal that opens on load | an overlay that hides the page; an absence as the pass statement | pass 3/3 |
+| `menu-random` | the-internet.herokuapp.com/disappearing_elements | nothing to click: is every menu entry listed? | an outcome decided on the start page (one step, two requests); an entry the page drops at random | bug 3/3 (the entry was missing on every load) |
+
+The shop specs' credentials are the demo accounts the site prints on its own login page. Run them all with
+`scripts/run_suite.py specs/examples/*.json --repeat 3 --workers 2`, one with `scripts/run_test.py
+specs/examples/<id>.json --headed`. Copy one as the starting point for your own application, and keep specs for
+a private application under `specs/local/` (git-ignored).
+
 ## What it does with Jev's confidence
 
 The runner never acts on a guess. A decision below `thresholds.min_confidence` on the operation, the
@@ -141,7 +166,7 @@ scripts/bench.py            run a spec N times; medians of wall, Jev, browser, t
 scripts/selftest.py         offline: fake Jev, local pages, one case per terminal status and guard
 scripts/unit_tests.py       stdlib unittest for the pure parts (client, validation, criteria, bench)
 references/                 spec-format, trace-format, verdict-rubric, runner-design
-specs/                      example specs
+specs/                      the two smoke specs; specs/examples/ ten public-site specs (see Examples)
 docs/superpowers/           design spec, plans, and the measurement files every number above comes from
 ```
 

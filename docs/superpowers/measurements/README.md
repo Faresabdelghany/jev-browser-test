@@ -326,9 +326,8 @@ same whether the disagreement comes from the app (here, by design) or from the t
 declared bug with the app's own text as evidence, and the `.md` header says NOT ALL PASS and names the spec
 whose trace to open. Block G's per-sentence adjudication plays no part: both statements are one sentence.
 
-The spec is untracked (`specs/local/`, trial handoff deviation 1), so like the trial's numbers this file
-cites a spec that is not in the repo (its `spec` path points into the export). If block D promotes the trial
-specs, their committed twins are the ones to cite from then on.
+The spec was untracked when this was measured (its `spec` path points to `specs/local/` inside the export);
+since `b3996fa` it is committed unchanged as `specs/examples/notify-random.json`.
 
 ## The examples suite (2026-09-22): the ten public-site specs at `b3996fa`
 

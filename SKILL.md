@@ -241,4 +241,11 @@ manufacture flakiness. Store `runs/` outside version control.
   modifying them).
 - `references/spec-format.md`, `references/trace-format.md`, `references/verdict-rubric.md`,
   `references/runner-design.md`.
+- `specs/smoke-login.json`, `specs/smoke-login-badpw.json` — the demo-site smoke specs; `specs/examples/*.json` —
+  ten specs against public sites (an e-commerce demo's checkout in four variants, two of them with the accounts
+  the site documents as broken; an encyclopedia search with a real autocomplete; a todo app; four practice
+  pages: a 5 s loader, a random notification, a modal on load, a menu that drops an entry at random). The
+  richest examples of `setup` login, identical labels, a declared `bug` outcome, a WAIT on a loader and a page
+  that is random by design; `run_suite.py specs/examples/*.json --repeat 3 --workers 2` runs them all (about
+  100 s, 200 Jev requests). README.md "Examples" has the table.
 - `assets/spec.example.json` — a realistic spec with login in `setup` and a Jev-driven goal.

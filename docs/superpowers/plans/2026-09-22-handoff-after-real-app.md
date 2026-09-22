@@ -33,20 +33,22 @@ Commits of the session, in order (`d896cc4..HEAD`):
 
 ## What the real applications showed
 
-Nine specs, all under `specs/local/` (git-ignored; they exist only in this checkout, see the memory note
-and deviation 1), against public sites:
+Nine specs against public sites. They were under git-ignored `specs/local/` when this was written (deviation
+1); **since `b3996fa` (2026-09-22, block D of the next brief, on Fares's yes) they are committed unchanged under
+`specs/examples/`**, with a tenth (`menu-random`), and README.md "Examples" names them; the table below now
+names the sites too:
 
-| spec | flow | exercises |
-|---|---|---|
-| `shop-checkout` | e-commerce demo: login in `setup`, add a named product from a grid of six cards, cart, a three-field form, overview, finish, confirmation | identical buttons, multi-page path, three `data` values, `setup` login |
-| `shop-add-second-item` | the same grid: add the *second* card's product and open the cart | a probe that makes a wrong pick visible as an outcome |
-| `shop-checkout-problem-account` | the checkout with a test account the site documents as broken (a form field that drops its input) | a declared `bug` outcome for a real reason |
-| `shop-checkout-error-account` | the checkout with a second documented-broken account (a Finish button that does nothing) | `stuck_reason` after a no-op click |
-| `wiki-search` | an encyclopedia's search box: type the term, the suggestions open, reach the article | a real autocomplete (`settle` ends `options`), a very long page |
-| `todo-add-filter` | a todo demo: add two items, complete one, open the Active filter | TYPE_TEXT then PRESS_ENTER, two values into one field, a hidden checkbox under a styled box, hash routing |
-| `load-wait` | a practice page: press Start, a loader runs for 5 s, then a text appears | settle and WAIT on a page with a timer |
-| `notify-random` | a practice page whose notification is a random success or failure | the `flaky` verdict on a page that is random by design |
-| `modal-close` | a practice page with a modal on load | an overlay that hides the whole page |
+| spec | site | flow | exercises |
+|---|---|---|---|
+| `shop-checkout` | saucedemo.com (`standard_user`) | login in `setup`, add a named product from a grid of six cards, cart, a three-field form, overview, finish, confirmation | identical buttons, multi-page path, three `data` values, `setup` login |
+| `shop-add-second-item` | saucedemo.com | the same grid: add the *second* card's product and open the cart | a probe that makes a wrong pick visible as an outcome |
+| `shop-checkout-problem-account` | saucedemo.com (`problem_user`) | the checkout with the account the site documents as broken (a form field that drops its input) | a declared `bug` outcome for a real reason |
+| `shop-checkout-error-account` | saucedemo.com (`error_user`) | the checkout with the second documented-broken account (a Finish button that does nothing) | `stuck_reason` after a no-op click |
+| `wiki-search` | en.wikipedia.org | the search box: type the term, the suggestions open, reach the article | a real autocomplete (`settle` ends `options`), a very long page |
+| `todo-add-filter` | demo.playwright.dev/todomvc | add two items, complete one, open the Active filter | TYPE_TEXT then PRESS_ENTER, two values into one field, a hidden checkbox under a styled box, hash routing |
+| `load-wait` | the-internet.herokuapp.com/dynamic_loading/1 | press Start, a loader runs for 5 s, then a text appears | settle and WAIT on a page with a timer |
+| `notify-random` | the-internet.herokuapp.com/notification_message_rendered | the notification after one click is a random success or failure | the `flaky` verdict on a page that is random by design |
+| `modal-close` | the-internet.herokuapp.com/entry_ad | a modal on load | an overlay that hides the whole page |
 
 First pass (`runs/trial-1`, 9 specs × 1, 3 workers, 20.4 s, at `f982c9b`): 4 pass, 1 declared bug, **3
 `low_confidence`, 1 `stuck`**. The two undetermined endings were runner defects (below), not spec problems.
