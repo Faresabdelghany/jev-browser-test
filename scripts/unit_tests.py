@@ -21,7 +21,10 @@ import unittest
 from unittest import mock
 
 from jev_client import DEFAULT_BASE_URL, JevClient, JevError
-from policy import build_questions, read_checks, read_choice, resolve_target, validate_choice
+from policy import (
+    HISTORY_WINDOW, build_questions, build_state, element_operations, read_checks, read_choice, resolve_target,
+    validate_choice,
+)
 from spec import DEFAULTS, _merge
 
 ANSWER = {
@@ -441,6 +444,70 @@ class ReadAnswersTests(unittest.TestCase):
         self.assertNotIn("SELECT", meta["operations"])
         self.assertNotIn("SELECT", meta["offered"]["operation"])
         self.assertNotIn("select_target", questions)
+
+
+class BuildStateTests(unittest.TestCase):
+    ELEMENTS = [
+        {"idx": 0, "role": "textbox", "name": "Username", "value": "tom"},
+        {"idx": 1, "role": "button", "name": "Login", "text": "Log in now"},
+        {"idx": 2, "role": "checkbox", "name": "", "checked": True, "context": "Remember me"},
+        {"idx": 3, "role": "select", "name": "Size", "options": [{"i": 0, "text": "S"}, {"i": 1, "text": "M", "disabled": True}]},
+        {"idx": 4, "role": "button", "name": "Disabled", "disabled": True},
+        {"idx": 5, "role": "link", "name": "Help"},
+    ]
+
+    def test_shape_and_order(self) -> None:
+        spec = _merge(SPEC, {"notes": "dismiss the banner"})
+        history = [{"step": i, "operation": "CLICK", "target": f"[{i}]", "value_key": None, "ok": True, "page_changed": True}
+                   for i in range(1, 13)]
+        state = build_state(spec, observation(self.ELEMENTS), 13, history)
+        self.assertEqual(list(state), ["goal", "hints", "step", "page", "elements", "truncated_elements",
+                                       "visible_text", "available_data_values", "recent_actions"])
+        self.assertEqual(state["hints"], "dismiss the banner")
+        self.assertEqual(state["step"], {"n": 13, "max": 25})
+        self.assertEqual(state["page"], {"url": "http://x/", "title": "t"})
+        self.assertEqual(state["truncated_elements"], 0)
+        self.assertEqual(len(state["recent_actions"]), HISTORY_WINDOW)
+        self.assertEqual(state["recent_actions"][0]["step"], 3)  # the oldest two of 12 fell out of the window
+        self.assertNotIn("hints", build_state(SPEC, observation([]), 1, []))
+        self.assertEqual(build_state(SPEC, observation([]), 1, [])["recent_actions"], [])
+
+    def test_elements_are_records_with_operations(self) -> None:
+        state = build_state(SPEC, observation(self.ELEMENTS), 1, [])
+        by_index = {e["index"]: e for e in state["elements"]}
+        self.assertEqual(by_index[0], {"index": 0, "role": "textbox", "label": "Username", "value": "tom",
+                                       "checked": None, "context": None, "operations": ["TYPE_TEXT"]})
+        self.assertEqual(by_index[1]["text"], "Log in now")
+        self.assertEqual(by_index[1]["operations"], ["CLICK"])
+        self.assertEqual((by_index[2]["checked"], by_index[2]["context"], by_index[2]["label"]), (True, "Remember me", ""))
+        self.assertEqual(by_index[3]["options"], ["S"])  # the disabled option is not listed
+        self.assertEqual(by_index[3]["operations"], ["SELECT"])
+        self.assertEqual((by_index[4]["disabled"], by_index[4]["operations"]), (True, []))
+        self.assertNotIn("disabled", by_index[5])
+        self.assertNotIn("text", by_index[5])
+
+    def test_operations_follow_the_data(self) -> None:
+        textbox = self.ELEMENTS[0]
+        self.assertEqual(element_operations(SPEC, textbox), ["TYPE_TEXT"])
+        no_data = dict(SPEC, data={}, secrets=[])  # _merge would keep SPEC's keys inside an empty dict
+        self.assertEqual(element_operations(no_data, textbox), [])  # nothing to type -> not a TYPE_TEXT target
+        only_disabled = {"idx": 9, "role": "select", "name": "S", "options": [{"i": 0, "text": "x", "disabled": True}]}
+        self.assertEqual(element_operations(SPEC, only_disabled), [])
+        # build_questions offers exactly the elements the state marks as targets
+        _, meta = build_questions(SPEC, observation(self.ELEMENTS), None)
+        self.assertEqual(meta["offered"]["click_target"], ["1", "2", "5"])
+        self.assertEqual(meta["offered"]["type_target"], ["0"])
+        self.assertEqual(meta["offered"]["select_target"], ["3:0"])
+
+    def test_secrets_are_masked_in_values(self) -> None:
+        spec = _merge(SPEC, {"data": {"username": "tom", "password": "pw", "long": "x" * 50}})
+        state = build_state(spec, observation([]), 1, [])
+        self.assertEqual(state["available_data_values"], [
+            {"key": "username", "value": "tom"},
+            {"key": "password", "value": "<secret>"},
+            {"key": "long", "value": "x" * 37 + "..."},
+        ])
+        self.assertNotIn("pw", json.dumps(state))
 
 
 class ResolveTargetTests(unittest.TestCase):

@@ -60,8 +60,15 @@ can look "unchanged"; that is intentional, since Jev could not see the change ei
 - **iframes**: `observe.py` only sees the main frame. To include frames, run `OBSERVE_JS` per
   `page.frames` and prefix indices with a frame id; the locator in `execute` must then be built from the
   matching `frame.locator(...)`.
-- **Richer state**: add fields to `build_state`. Keep it small; Jev's answers get *less* reliable when the
-  state is padded with irrelevant text, and the element table already carries most of the signal.
+- **Richer state**: add fields to `build_state`. The state is an object with a descriptive name for every
+  part (`goal`, `hints`, `step {n, max}`, `page {url, title}`, `elements` as records with `index`, `role`,
+  `label`, `value`, `checked`, `context` and the `operations` each element can be the target of,
+  `truncated_elements`, `visible_text`, `available_data_values` as `{key, value}` with secrets masked, and
+  `recent_actions`: the last 10 history entries `{step, operation, target, value_key, ok, page_changed}`).
+  `page_changed` compares the page signature the action was decided on with the next observation, so Jev
+  can see that its own click did nothing. `policy.element_operations` is the single place that decides which
+  elements are targets, for both the state and the target questions. Keep the state small; Jev's answers get
+  *less* reliable when it is padded with irrelevant text.
 - **Score questions**: not used in the loop today. They fit "how far along is the flow" style rubrics; add
   them to `build_questions` and record them in the step like `checks`.
 - **Bigger option sets**: if the API rejects a Choice with too many criteria, lower

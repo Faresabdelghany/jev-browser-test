@@ -9,6 +9,9 @@ Design (borrowed from browser-use/jev-ultrafast):
   * Text Jev types comes from `spec.data` (prepared by Claude). Jev chooses WHICH value, never
     what to write. A needed-but-missing value should surface as BLOCKED, which escalates to Claude.
   * The spec's checks ride along as Noul questions every step, so verification costs no extra call.
+  * The state is structured (TypeSafe's guidance: an object with a descriptive name for each part):
+    `elements` as records with the operations each can be the target of, `available_data_values` as
+    {key, value}, `recent_actions` as {step, operation, target, value_key, ok, page_changed}.
   * Answers are data from a network service and the runner acts on them, so nothing is trusted
     before it is checked: a Choice answer must pick an offered key, carry a well-formed
     distribution over offered keys, and put its pick on top (`validate_choice`). Only a validated
@@ -17,14 +20,15 @@ Design (borrowed from browser-use/jev-ultrafast):
 from __future__ import annotations
 
 from jev_client import choice, noul
-from observe import element_label, render_table
+from observe import element_label
 
 CLICK_ROLES = {
     "link", "button", "submit", "reset", "image", "tab", "menuitem", "menuitemcheckbox", "menuitemradio",
     "option", "checkbox", "radio", "switch", "clickable", "file",
 }
 TYPE_ROLES = {"textbox", "searchbox", "combobox"}
-HISTORY_WINDOW = 8
+CHECKABLE_ROLES = {"checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"}
+HISTORY_WINDOW = 10  # recent_actions entries Jev sees; jev-ultrafast keeps the same window
 TARGET_QUESTIONS = {"CLICK": "click_target", "TYPE_TEXT": "type_target", "SELECT": "select_target"}
 PROBABILITY_SUM_TOLERANCE = 0.02
 
@@ -41,28 +45,74 @@ OPERATION_DESCRIPTIONS = {
 }
 
 
-def _value_preview(spec: dict, key: str) -> str:
+def value_preview(spec: dict, key: str) -> str:
+    """What Jev is shown for a data value: the literal "<secret>" for secrets, else the value cut to 40 chars."""
     if key in spec["secrets"]:
-        return f"{key} = <secret>"
+        return "<secret>"
     v = spec["data"][key]
-    v = v if len(v) <= 40 else v[:37] + "..."
-    return f'{key} = "{v}"'
+    return v if len(v) <= 40 else v[:37] + "..."
 
 
-def build_state(spec: dict, obs: dict, step: int, history: list[str]) -> dict:
-    """The state Jev evaluates. Keep it compact: goal, hints, where we are, what we did, what we see."""
-    recent = history[-HISTORY_WINDOW:]
-    state = {
-        "goal": spec["goal"],
-        "step": f"{step} of {spec['budget']['max_steps']}",
-        "page": {"title": obs["title"], "url": obs["url"]},
-        "actions_so_far": "\n".join(recent) if recent else "(none yet)",
-        "interactive_elements": render_table(obs),
-        "visible_text": obs["visible_text"],
-        "available_data_values": [_value_preview(spec, k) for k in spec["data"]] or ["(none)"],
-    }
+def data_values(spec: dict) -> list[dict]:
+    """`available_data_values` in the state and the `type_value` options share this rendering."""
+    return [{"key": k, "value": value_preview(spec, k)} for k in spec["data"]]
+
+
+def element_operations(spec: dict, e: dict) -> list[str]:
+    """The operations an observed element can be the target of.
+
+    Used both to describe the element in the state and to decide which elements each target
+    question offers, so the state and the questions cannot disagree about what is actionable.
+    """
+    ops = []
+    if e.get("disabled"):
+        return ops
+    if e["role"] in CLICK_ROLES:
+        ops.append("CLICK")
+    if e["role"] in TYPE_ROLES and spec["data"]:
+        ops.append("TYPE_TEXT")
+    if e["role"] == "select" and any(not o.get("disabled") for o in e.get("options") or []):
+        ops.append("SELECT")
+    return ops
+
+
+def describe_element(spec: dict, e: dict) -> dict:
+    """One element as Jev sees it in `state.elements`: named fields, not a rendered line."""
+    d = {"index": e["idx"], "role": e["role"], "label": e.get("name") or ""}
+    if e.get("text"):
+        d["text"] = e["text"]
+    d["value"] = e.get("value") or ""
+    d["checked"] = e.get("checked") if e.get("checked") is not None else None
+    d["context"] = e.get("context") or None
+    if e.get("disabled"):
+        d["disabled"] = True
+    if e["role"] == "select":
+        d["options"] = [o["text"] for o in e.get("options") or [] if not o.get("disabled")]
+    d["operations"] = element_operations(spec, e)
+    return d
+
+
+def build_state(spec: dict, obs: dict, step: int, history: list[dict]) -> dict:
+    """The state Jev evaluates: an object with a descriptive name for every part.
+
+    `elements` is the table as structured records, `available_data_values` the strings Jev may pick
+    for TYPE_TEXT (secrets masked), `recent_actions` the last HISTORY_WINDOW entries of the runner's
+    history. Each history entry is a dict {step, operation, target, value_key, ok, page_changed}
+    (runner-inserted waits carry a `reason` instead of a target). `page_changed` is filled in by the
+    runner once the next observation exists; it is what lets Jev notice its own click did nothing.
+    """
+    state = {"goal": spec["goal"]}
     if spec.get("notes"):
         state["hints"] = spec["notes"]
+    state.update({
+        "step": {"n": step, "max": spec["budget"]["max_steps"]},
+        "page": {"url": obs["url"], "title": obs["title"]},
+        "elements": [describe_element(spec, e) for e in obs["elements"]],
+        "truncated_elements": obs.get("truncated", 0),
+        "visible_text": obs["visible_text"],
+        "available_data_values": data_values(spec),
+        "recent_actions": list(history[-HISTORY_WINDOW:]),
+    })
     return state
 
 
@@ -74,14 +124,15 @@ def build_questions(spec: dict, obs: dict, last_operation: str | None) -> tuple[
     it offered, which is what `validate_choice` checks answers against.
     """
     elements = obs["elements"]
-    clickable = [e for e in elements if e["role"] in CLICK_ROLES and not e.get("disabled")]
-    typable = [e for e in elements if e["role"] in TYPE_ROLES and not e.get("disabled")]
-    selects = [e for e in elements if e["role"] == "select" and not e.get("disabled") and e.get("options")]
+    can = {e["idx"]: element_operations(spec, e) for e in elements}
+    clickable = [e for e in elements if "CLICK" in can[e["idx"]]]
+    typable = [e for e in elements if "TYPE_TEXT" in can[e["idx"]]]
+    selects = [e for e in elements if "SELECT" in can[e["idx"]]]
 
     ops = {}
     if clickable:
         ops["CLICK"] = OPERATION_DESCRIPTIONS["CLICK"]
-    if typable and spec["data"]:
+    if typable:
         ops["TYPE_TEXT"] = OPERATION_DESCRIPTIONS["TYPE_TEXT"]
     if last_operation == "TYPE_TEXT":
         ops["PRESS_ENTER"] = OPERATION_DESCRIPTIONS["PRESS_ENTER"]
@@ -113,22 +164,18 @@ def build_questions(spec: dict, obs: dict, last_operation: str | None) -> tuple[
         )
         questions["type_value"] = choice(
             "If the next operation is TYPE_TEXT, which of the available data values should be typed?",
-            {k: _value_preview(spec, k) for k in spec["data"]},
+            {d["key"]: f'{d["key"]} = "{d["value"]}"' for d in data_values(spec)},
         )
     if "SELECT" in ops:
-        select_options = {}
-        for e in selects:
-            for o in e["options"]:
-                if o.get("disabled"):
-                    continue
-                select_options[f"{e['idx']}:{o['i']}"] = f'{e["role"]} "{e["name"]}" -> "{o["text"]}"'
-        if select_options:
-            questions["select_target"] = choice(
-                "If the next operation is SELECT, which dropdown option should be chosen?",
-                select_options,
-            )
-        else:
-            del questions["operation"]["criteria"]["SELECT"]  # `ops` is that same dict
+        # element_operations only reports SELECT when at least one option is enabled, so this is never empty
+        select_options = {
+            f"{e['idx']}:{o['i']}": f'{e["role"]} "{e["name"]}" -> "{o["text"]}"'
+            for e in selects for o in e["options"] if not o.get("disabled")
+        }
+        questions["select_target"] = choice(
+            "If the next operation is SELECT, which dropdown option should be chosen?",
+            select_options,
+        )
 
     for name, statement in spec["checks"].items():
         questions[name] = noul(statement)

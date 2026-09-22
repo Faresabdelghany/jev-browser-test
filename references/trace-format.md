@@ -52,6 +52,7 @@ the *evidence*; the summary (`scripts/summarize_trace.py`) is the fast way to re
       "type_value": { "choice": "search_query", "confidence": 0.95, "top_probabilities": {...} },   // TYPE_TEXT only
       "checks": { "cart_has_item": 0.02, "error_visible": 0.01 },   // evaluated on the page BEFORE the action
       "low_confidence": false, "decision_confidence": 0.94, "repeat_count": 1,
+      "page_changed": true,                                          // set once the next observation exists: did this step's action change the page signature?
       "never_violated": ["error_visible"],                           // only when a never check fired
       "invalid_answer": "operation: choice 'FLY' was not offered",   // only when an answer failed validation
       "retried": true,                                               // only when the request was re-sent
@@ -87,6 +88,10 @@ Notes that matter when judging:
   `{ "question": ..., "missing": true, "invalid": "<reason>" }` (flag `NO-TARGET-ANSWER`) and the action
   fails safely with `executed.ok == false`. A check whose Noul value is malformed is simply absent from
   `checks` for that step. None of this is evidence about the page; it is evidence about the API answer.
+- `page_changed` on a step compares the page signature (URL, title, element table, first 500 chars of text)
+  the decision was made on with the **next** observation. `false` after a CLICK means the click did nothing
+  Jev could see; Jev gets the same flag in `recent_actions`, so a repeated no-op is its mistake, not blindness.
+  The terminal step has no `page_changed` (nothing was observed after it).
 - `executed.ok == false` means Playwright could not perform the action Jev chose (timeout, detached element).
   One failure is noise; the same failure repeating is a real signal (element not clickable → possible bug).
 - `executed.forced == true` means the click needed `force=True` because a transparent overlay intercepted it.

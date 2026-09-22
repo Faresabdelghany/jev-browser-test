@@ -162,15 +162,27 @@ def latency_of(resp: dict, started: float) -> int:
     return resp.get("latency_ms", int((time.perf_counter() - started) * 1000))
 
 
-def history_line(n: int, operation: str, target: dict | None, value_key: str | None, executed: dict) -> str:
-    line = f"{n}. {operation}"
-    if target and not target.get("missing"):
-        line += f" {target['label']}"
-    if value_key:
-        line += f" <- {value_key}"
+def history_entry(n: int, operation: str, target: dict | None, value_key: str | None, executed: dict) -> dict:
+    """One `recent_actions` record for Jev: what was done at step n and whether it worked.
+
+    `page_changed` is filled in when the next observation exists (see `run`); until then it is None.
+    """
+    entry = {
+        "step": n,
+        "operation": operation,
+        "target": target["label"] if target and not target.get("missing") else None,
+        "value_key": value_key,
+        "ok": executed["ok"],
+        "page_changed": None,
+    }
     if not executed["ok"]:
-        line += f"  (FAILED: {executed['error'][:80]})"
-    return line
+        entry["error"] = (executed.get("error") or "")[:80]
+    return entry
+
+
+def wait_entry(n: int, operation: str, reason: str) -> dict:
+    """A runner-inserted wait (low confidence, DONE confirmation) as Jev should see it in recent_actions."""
+    return {"step": n, "operation": operation, "reason": reason, "ok": True, "page_changed": None}
 
 
 def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: bool = False) -> dict:
@@ -195,13 +207,28 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
         "spec": redacted_spec(spec),
     }
     t_start = time.perf_counter()
-    history: list[str] = []
+    history: list[dict] = []
     last_operation: str | None = None
     low_streak = 0
     pending_done = False  # a confident DONE with unsatisfied checks gets one settle-and-recheck
+    pending_change: tuple[dict, dict, str] | None = None  # (history entry, trace step, signature decided on)
     repeats: dict = {}
     status: str | None = None
     error: str | None = None
+
+    def record(entry: dict, step: dict, sig: str) -> None:
+        """Append a history entry and remember which observation it was decided on, so the next
+        observation can say whether the page changed (`page_changed` on the entry and the step)."""
+        nonlocal pending_change
+        history.append(entry)
+        pending_change = (entry, step, sig)
+
+    def note_page_change(sig: str) -> None:
+        nonlocal pending_change
+        if pending_change:
+            entry, prev_step, before = pending_change
+            entry["page_changed"] = prev_step["page_changed"] = sig != before
+            pending_change = None
 
     def shot(page, name: str) -> str | None:
         if not screenshots:
@@ -241,6 +268,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
                     break
                 obs = observe(page, obs_cfg["max_elements"], obs_cfg["max_text_chars"])
                 sig = signature(obs)
+                note_page_change(sig)  # did the previous action change what Jev sees?
                 step: dict = {
                     "n": n,
                     "url": obs["url"],
@@ -353,7 +381,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
                         break
                     step["executed"] = {"action": "WAIT", "ok": True, "error": None,
                                         "reason": f"low confidence; {operation} not executed"}
-                    history.append(f"{n}. WAIT (undecided between options)")
+                    record(wait_entry(n, "WAIT", "undecided between the offered options; nothing was executed"), step, sig)
                     t_b = time.perf_counter()
                     settle(page, spec)
                     step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
@@ -376,7 +404,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
                     # again before calling it (a reload or redirect is often still in flight).
                     pending_done = True
                     step["executed"] = {"action": "WAIT", "ok": True, "error": None, "reason": "confirming DONE"}
-                    history.append(f"{n}. DONE (checking the result)")
+                    record(wait_entry(n, "DONE", "checking the result before finishing"), step, sig)
                     t_b = time.perf_counter()
                     settle(page, spec)
                     page.wait_for_timeout(spec["browser"]["settle_ms"] * 2)
@@ -403,7 +431,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
                 settle(page, spec)
                 step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
                 step["executed"] = executed
-                history.append(history_line(n, operation, target, value_key, executed))
+                record(history_entry(n, operation, target, value_key, executed), step, sig)
                 last_operation = operation if executed["ok"] else None
                 trace["steps"].append(step)
             else:
@@ -412,6 +440,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
             if status == "budget_exhausted":
                 # One last look: did the final action happen to reach the goal?
                 obs = observe(page, obs_cfg["max_elements"], obs_cfg["max_text_chars"])
+                note_page_change(signature(obs))
                 questions, _ = build_questions(spec, obs, last_operation)
                 only_checks = {k: v for k, v in questions.items() if k in spec["checks"]}
                 final_checks = {}

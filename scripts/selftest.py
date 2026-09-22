@@ -188,14 +188,15 @@ class FakeJev:
         if self.mode == "early_confident_done" and self.op_requests == 1:
             answers["operation"] = self._choice("DONE", ops, conf=0.9)      # confidently wrong
             return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
-        if self.mode == "done_after_add" and "Add to cart" in state["actions_so_far"]:
+        recent = state["recent_actions"]
+        if self.mode == "done_after_add" and any("Add to cart" in (a.get("target") or "") for a in recent):
             answers["operation"] = self._choice("DONE", ops, conf=0.9)      # right, but the page is still painting
             return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
         clicks = questions.get("click_target", {}).get("criteria", {})
         types = questions.get("type_target", {}).get("criteria", {})
         results_shown = self._find(clicks, "Add to cart") is not None
-        typed_before = "TYPE_TEXT" in state["actions_so_far"]
-        search_box_visible = "Search products" in state["interactive_elements"]
+        typed_before = any(a["operation"] == "TYPE_TEXT" for a in recent)
+        search_box_visible = any(e["label"] == "Search products" for e in state["elements"])
 
         if self._find(clicks, "Accept cookies"):
             op, target = "CLICK", ("click_target", self._find(clicks, "Accept cookies"))
@@ -222,6 +223,42 @@ class FakeJev:
 
     def usage_summary(self) -> dict:
         return {"jev_requests": self.requests, "input_tokens": 400 * self.requests, "output_tokens": 60 * self.requests, "model": "fake-jev"}
+
+
+STATE_KEYS = ["goal", "hints", "step", "page", "elements", "truncated_elements", "visible_text",
+              "available_data_values", "recent_actions"]
+
+
+def state_shape_check(state: dict, trace: dict) -> list[str]:
+    """The structured state of the last request of the happy path, and page_changed on the trace."""
+    failures = []
+    if list(state) != STATE_KEYS:
+        failures.append(f"state keys are {list(state)}, expected {STATE_KEYS}")
+    if state.get("step") != {"n": len(trace["steps"]), "max": 10}:
+        failures.append(f"state.step is {state.get('step')}")
+    els = state.get("elements") or []
+    if not els or not all(isinstance(e.get("index"), int) and isinstance(e.get("operations"), list) for e in els):
+        failures.append(f"state.elements is not a list of {{index:int, operations:list}} records: {els[:2]}")
+    if not any(e["label"] == "Home" and e["role"] == "link" and e["operations"] == ["CLICK"] for e in els):
+        failures.append(f"the Home link is not described with operations [CLICK]: {[e for e in els if e['label'] == 'Home']}")
+    if state.get("available_data_values") != [{"key": "search_query", "value": "blue hoodie"}, {"key": "password", "value": "<secret>"}]:
+        failures.append(f"available_data_values wrong: {state.get('available_data_values')}")
+    recent = state.get("recent_actions") or []
+    by_op = {a["operation"]: a for a in recent}
+    if set(by_op) != {"CLICK", "TYPE_TEXT", "PRESS_ENTER"}:
+        failures.append(f"recent_actions do not cover the executed operations: {recent}")
+    click = next((a for a in recent if "Add to cart" in (a.get("target") or "")), None)
+    if not click or click.get("page_changed") is not True or click.get("ok") is not True or click.get("value_key") is not None:
+        failures.append(f"the Add-to-cart entry lacks page_changed/ok: {click}")
+    typed = by_op.get("TYPE_TEXT") or {}
+    if typed.get("value_key") != "search_query" or typed.get("page_changed") is not True:
+        failures.append(f"the TYPE_TEXT entry lacks value_key/page_changed: {typed}")
+    steps = {s["n"]: s for s in trace["steps"]}
+    if steps.get(click["step"], {}).get("page_changed") is not True if click else True:
+        failures.append("the trace step for the click does not carry page_changed true")
+    if "page_changed" in trace["steps"][-1]:
+        failures.append("the terminal step has a page_changed (no action followed it)")
+    return failures
 
 
 def base_spec(url: str) -> dict:
@@ -285,6 +322,7 @@ def main() -> int:
         failures.append("screenshot missing")
     if not os.path.exists(os.path.join(out, "trace.json")):
         failures.append("trace.json missing")
+    failures += state_shape_check(jev.seen_states[-1], trace)
 
     # 2. the app shows an error -> never_violated
     spec = base_spec(url + "?fail=1")
