@@ -432,14 +432,20 @@ class ReadAnswersTests(unittest.TestCase):
             "type_target": ["0"],
             "type_value": ["username", "password"],
             "select_target": ["2:0"],  # the disabled option is not offered
-            "blocked_reason": list(BLOCKED_REASONS),  # always asked; SPEC declares no outcome with a `when`, so no outcome Choice
-        })
+        })  # no blocked_reason on an ordinary step (lever F1); SPEC declares no outcome with a `when`, so no outcome Choice
         for key, offered in meta["offered"].items():
             self.assertEqual(list(questions[key]["criteria"]), offered)
         self.assertNotIn("ok", meta["offered"])  # nouls have no option set
         _, meta = build_questions(SPEC, observation(ELEMENTS[:1]), last_operation=None)
-        self.assertEqual(set(meta["offered"]), {"operation", "type_target", "type_value", "blocked_reason"})
+        self.assertEqual(set(meta["offered"]), {"operation", "type_target", "type_value"})
         self.assertNotIn("CLICK", meta["offered"]["operation"])
+        _, meta = build_questions(SPEC, observation(ELEMENTS[:1]), last_operation=None, ask_blocked=True)  # the final look
+        self.assertEqual(meta["offered"]["blocked_reason"], list(BLOCKED_REASONS))
+        from policy import build_reason_questions
+        questions, offered = build_reason_questions()  # the follow-up on a terminal step
+        self.assertEqual(list(questions), ["blocked_reason"])
+        self.assertEqual(offered, {"blocked_reason": list(BLOCKED_REASONS)})
+        self.assertEqual(list(questions["blocked_reason"]["criteria"]), list(BLOCKED_REASONS))
 
     def test_select_with_only_disabled_options_is_withdrawn(self) -> None:
         el = {"idx": 2, "role": "select", "name": "Size", "options": [{"i": 0, "text": "S", "disabled": True}]}
@@ -905,7 +911,7 @@ class OutcomePolicyTests(unittest.TestCase):
         crit = outcome_criteria(self.OUTCOMES)
         self.assertEqual(list(crit), ["logged_in", "bad_pw", "none_yet"])
         self.assertEqual(outcome_criteria({k: v for k, v in self.OUTCOMES.items() if not v.get("when")}), {})
-        questions, meta = build_questions(SPEC, observation(ELEMENTS), None, outcomes=self.OUTCOMES, ask_stuck=True)
+        questions, meta = build_questions(SPEC, observation(ELEMENTS), None, outcomes=self.OUTCOMES, ask_stuck=True, ask_blocked=True)
         self.assertEqual(meta["offered"]["outcome"], ["logged_in", "bad_pw", "none_yet"])
         self.assertEqual(meta["offered"]["blocked_reason"], list(BLOCKED_REASONS))
         self.assertEqual(meta["offered"]["stuck_reason"], list(STUCK_REASONS))

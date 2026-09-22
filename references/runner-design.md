@@ -67,8 +67,11 @@ are declared, `goal_reached` (requires `done_when`, verdict pass) and `never_<ch
 `never_true`) synthesized from the old-style fields (design §5.1). Every step `policy.build_questions` adds one
 `outcome` Choice over the outcomes that have a `when` plus `none_yet` (asked only when at least one has a
 `when`; a Choice *compares* mutually exclusive endings, where independent Nouls can all read 0.85 at once
-or one can sit at 0.78 for steps), a `blocked_reason` Choice (always, phrased without a conditional), and a
-`stuck_reason` Choice after an action with `page_changed: false`. `policy.seen_outcomes` decides what the
+or one can sit at 0.78 for steps) and a `stuck_reason` Choice after an action with `page_changed: false`. The
+`blocked_reason` Choice (phrased without a conditional) is asked only where its answer is read: in one follow-up
+request on the terminal step of a `blocked`, `stuck` or `low_confidence` ending (`run_test.ask_reason`, over the
+state the step was decided on, `reason_request: true` on the step) and on the final look; until lever F1 it rode
+on every request. `policy.seen_outcomes` decides what the
 page shows: probability ≥ `outcome_true` (for a `when`) and every `requires` check ≥ its threshold.
 
 A pass sighting (or Jev's DONE) is a `pending` confirmation: the step is a WAIT (`settle_ms`, then settle),

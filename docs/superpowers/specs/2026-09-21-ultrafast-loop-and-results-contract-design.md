@@ -204,6 +204,10 @@ phrasing (§4.4) runs on the same harness and is adopted only if it wins.
   toward the goal on the current page?"): `nothing | missing_data_value | control_not_on_page |
   site_refused_or_error | human_step_required | wrong_page | other`. Consumed only when Jev chose BLOCKED
   or the run ends `blocked`/`stuck`.
+  *Amended 2026-09-22 (lever F1):* asked only where it is consumed: one follow-up request on the terminal step
+  of a `blocked`, `stuck` or `low_confidence` ending (same state, `reason_request: true`) and on the final look.
+  The measurements README ("Block F") has the per-run cost it saved and the check that the typed reasons are
+  unchanged.
 - `stuck_reason`: Choice, asked only when the last action had `page_changed: false`: `control_had_no_effect
   | overlay_or_modal | still_loading | needs_scroll_or_other_control | other`.
   Fan-out is cheap ("adding questions barely changes the response time"); consuming only the applicable

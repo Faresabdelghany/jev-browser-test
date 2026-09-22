@@ -36,10 +36,11 @@ HISTORY_WINDOW = 10  # recent_actions entries Jev sees; jev-ultrafast keeps the 
 TARGET_QUESTIONS = {"CLICK": "click_target", "TYPE_TEXT": "type_target", "SELECT": "select_target"}
 PROBABILITY_SUM_TOLERANCE = 0.02
 
-# The results contract's typed reasons (spec §5.2). `blocked_reason` is asked every step without a
-# conditional and consumed only when the run ends blocked / stuck / low_confidence / budget_exhausted;
-# `stuck_reason` only when the last action had page_changed: false. Fan-out is cheap; consuming only the
-# applicable answer is the documented pattern.
+# The results contract's typed reasons (spec §5.2, amended by lever F1). `blocked_reason` is consumed only when
+# the run ends blocked / stuck / low_confidence / budget_exhausted, so it is asked only there: in one follow-up
+# request on the terminal step (`build_reason_questions`) and on the final look, not on every step (until F1 it
+# rode on every request and its answer was read on none that went on; the measurements README has the cost).
+# `stuck_reason` is asked on the step after an action with page_changed: false, as before.
 BLOCKED_REASONS = {
     "nothing": "Nothing: a useful next operation is available on this page",
     "missing_data_value": "A field the goal needs has no value in available_data_values",
@@ -202,14 +203,15 @@ def outcome_criteria(outcomes: dict) -> dict:
 
 
 def build_questions(spec: dict, obs: dict, last_operation: str | None, outcomes: dict | None = None,
-                    ask_stuck: bool = False) -> tuple[dict, dict]:
+                    ask_stuck: bool = False, ask_blocked: bool = False) -> tuple[dict, dict]:
     """Return (questions, meta).
 
     meta["operations"] lists the offered operations; meta["offered"] maps every Choice question that
     was actually built (operation, click_target, type_target, type_value, select_target, outcome,
     blocked_reason, stuck_reason) to the keys it offered, which is what `validate_choice` checks answers
     against. `outcomes` defaults to spec.effective_outcomes(spec); `ask_stuck` adds the stuck_reason
-    question (the loop sets it when the last action had page_changed: false).
+    question (the loop sets it when the last action had page_changed: false); `ask_blocked` adds the
+    blocked_reason question (the final look; an ordinary step asks it in a follow-up only when it ends the run).
     """
     elements = obs["elements"]
     can = {e["idx"]: element_operations(spec, e) for e in elements}
@@ -269,7 +271,8 @@ def build_questions(spec: dict, obs: dict, last_operation: str | None, outcomes:
     crit = outcome_criteria(effective_outcomes(spec) if outcomes is None else outcomes)
     if crit:
         questions["outcome"] = choice(QUESTIONS["outcome"], crit)
-    questions["blocked_reason"] = choice(QUESTIONS["blocked_reason"], BLOCKED_REASONS)
+    if ask_blocked:
+        questions["blocked_reason"] = choice(QUESTIONS["blocked_reason"], BLOCKED_REASONS)
     if ask_stuck:
         questions["stuck_reason"] = choice(QUESTIONS["stuck_reason"], STUCK_REASONS)
     meta = {
@@ -277,6 +280,13 @@ def build_questions(spec: dict, obs: dict, last_operation: str | None, outcomes:
         "offered": {k: list(q["criteria"]) for k, q in questions.items() if q["type"] == "choice"},
     }
     return questions, meta
+
+
+def build_reason_questions() -> tuple[dict, dict]:
+    """The follow-up request on a terminal step (lever F1): the `blocked_reason` Choice alone, sent over the
+    state the step was decided on. Returns (questions, offered) in the shape of build_questions' meta["offered"]."""
+    questions = {"blocked_reason": choice(QUESTIONS["blocked_reason"], BLOCKED_REASONS)}
+    return questions, {"blocked_reason": list(BLOCKED_REASONS)}
 
 
 def read_outcome(answers: dict, offered: list[str]) -> dict | None:

@@ -593,6 +593,10 @@ class FakeJev:
         if "stuck_reason" in questions:
             answers["stuck_reason"] = self._choice("still_loading" if "Loading..." in text else "control_had_no_effect",
                                                    questions["stuck_reason"]["criteria"])
+        if set(questions) == {"blocked_reason"}:
+            # The follow-up on a terminal step (lever F1): the reason for the ending, over the step's own state.
+            why = "other" if self.mode == "blocked_after_dead_click" else "missing_data_value"
+            answers["blocked_reason"] = self._choice(why, questions["blocked_reason"]["criteria"])
         if "operation" not in questions:
             return {"answers": answers, "usage": {"input_tokens": 300, "output_tokens": 20}, "model": "fake-jev", "latency_ms": 1}
 
@@ -860,7 +864,8 @@ def main() -> int:
     spec["data"] = {}
     spec["secrets"] = []
     out = os.path.join(tmp, "run-blocked")
-    trace = run(spec, FakeJev(), out, screenshots=False)
+    jev = FakeJev()
+    trace = run(spec, jev, out, screenshots=False)
     print(summarize(trace, out))
     print()
     if trace["status"] != "blocked":
@@ -870,6 +875,10 @@ def main() -> int:
     reason = (trace["result"] or {}).get("reason") or {}
     if trace["outcome"] != "undetermined" or reason.get("blocked_reason") != "missing_data_value" or reason.get("suggested_verdict") != "test_issue":
         failures.append(f"blocked should be undetermined with the typed reason missing_data_value -> test_issue: {trace['outcome']} {reason}")
+    if (not trace["steps"][-1].get("reason_request") or jev.requests != len(trace["steps"]) + 1
+            or any("blocked_reason" in s for s in trace["steps"][:-1])):
+        failures.append(f"blocked: blocked_reason is asked once, as a follow-up on the terminal step: {jev.requests} requests for "
+                        f"{len(trace['steps'])} steps, asked on {[('blocked_reason' in s) for s in trace['steps']]}")
 
     # 4. Jev unsure WHICH value to type -> nothing is typed, run ends low_confidence (was: typed anyway);
     #    in key mode every low-confidence step has a picture
@@ -1184,8 +1193,8 @@ def main() -> int:
     first = trace["steps"][0]
     if (first.get("outcome") or {}).get("choice") != "none_yet" or set((first["outcome"] or {}).get("probabilities", {})) != {"item_added", "app_error", "none_yet"}:
         failures.append(f"outcome pass: the outcome Choice should be asked every step over the declared outcomes + none_yet: {first.get('outcome')}")
-    if (first.get("blocked_reason") or {}).get("choice") != "nothing" or "stuck_reason" in first:
-        failures.append(f"outcome pass: blocked_reason is asked every step, stuck_reason only after a no-op action: {first.get('blocked_reason')} {first.get('stuck_reason')}")
+    if "blocked_reason" in first or "stuck_reason" in first or any(s.get("reason_request") for s in trace["steps"]):
+        failures.append(f"outcome pass: blocked_reason is asked only on a terminal step that needs it, stuck_reason only after a no-op action: {first.get('blocked_reason')} {first.get('stuck_reason')}")
     if jev.requests != len(trace["steps"]) + 1 or (trace.get("adjudication") or {}).get("line_id") is None:
         failures.append(f"outcome pass: expected one adjudication request after the steps: {jev.requests} requests, {trace.get('adjudication')}")
     failures += result_shape_check(trace, out)

@@ -34,8 +34,8 @@ low_confidence | done_unverified | budget_exhausted | unstable_page | error`, or
 an assertion failed (`assert_failed`). Then `reason` is `{ "status", "blocked_reason", "stuck_reason",
 "suggested_verdict" }` plus `failed_assertions` (with `actual` values) and `outcome_seen` for
 `assert_failed`, `pending_outcome` for a `budget_exhausted` whose final look saw a pass for the first time
-(not rechecked, so not a pass: give the run one more step), and `error` for `error`. `blocked_reason` is Jev's answer on the terminal step to "what most
-prevents progress" (`nothing | missing_data_value | control_not_on_page | site_refused_or_error |
+(not rechecked, so not a pass: give the run one more step), and `error` for `error`. `blocked_reason` is Jev's answer on the terminal step (asked there, in one follow-up request, and on the
+final look; not on ordinary steps) to "what most prevents progress" (`nothing | missing_data_value | control_not_on_page | site_refused_or_error |
 human_step_required | wrong_page | other`); `stuck_reason` is asked only after an action with
 `page_changed: false` (`control_had_no_effect | overlay_or_modal | still_loading |
 needs_scroll_or_other_control | other`). The suggestion comes from a fixed table: `stuck_reason` counts for
@@ -170,7 +170,8 @@ environment failure (or a spec file is missing / two files share an id).
       "type_value": { "choice": "search_query", "confidence": 0.95, "top_probabilities": {...} },   // TYPE_TEXT only
       "checks": { "cart_has_item": 0.02, "error_visible": 0.01 },   // evaluated on the page BEFORE the action
       "outcome": { "choice": "none_yet", "confidence": 0.9, "probabilities": { "item_added": 0.03, "app_error": 0.02, "none_yet": 0.95 } },  // the outcome Choice (only when an outcome has a `when`)
-      "blocked_reason": { "choice": "nothing", "confidence": 0.9, "top_probabilities": {...} },   // asked every step, consumed for undetermined
+      "blocked_reason": { "choice": "missing_data_value", ... },   // only on the terminal step of blocked / stuck / low_confidence (a follow-up request) and on the final look
+      "reason_request": true,                                        // that follow-up was sent for this step; its latency is in latency_ms.jev
       "stuck_reason": { "choice": "control_had_no_effect", ... },    // only after an action with page_changed: false
       "outcome_seen": "app_error",                                   // a non-pass outcome was seen here (terminal with fail_fast)
       "pending_outcome": "item_added",                               // a pass was seen here; executed is a WAIT "confirming outcome ..." and the next step decides

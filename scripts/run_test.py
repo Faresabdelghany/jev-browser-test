@@ -34,8 +34,9 @@ from observe import (
     observe, signature,
 )
 from policy import (
-    ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, build_adjudication, build_questions, build_state, evidence_line_keys, is_field,
-    quoted_pick, read_checks, read_choice, read_outcome, resolve_target, seen_outcomes, suggested_verdict, validate_choice,
+    ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, build_adjudication, build_questions, build_reason_questions, build_state,
+    evidence_line_keys, is_field, quoted_pick, read_checks, read_choice, read_outcome, resolve_target, seen_outcomes,
+    suggested_verdict, validate_choice,
 )
 from spec import UNDETERMINED, effective_outcomes, load_dotenv, load_spec, spec_warnings, validate
 from summarize_trace import is_action_step, summarize
@@ -643,6 +644,28 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         capture(page, step, terminal=True)
         trace["steps"].append(step)
 
+    def ask_reason(step: dict, state: dict) -> None:
+        """Lever F1: `blocked_reason` is asked only where it is read, on the terminal step of a `blocked`, `stuck`
+        or `low_confidence` ending, as one follow-up request over the state the step was decided on (the final
+        look asks it in its own request). Recorded on the step as the per-step answer used to be, with
+        `reason_request: true` and its latency added to the step's. Never fatal: the run is ending anyway."""
+        if step.get("blocked_reason") is not None:
+            return
+        questions, offered = build_reason_questions()
+        step["reason_request"] = True
+        t_r = time.perf_counter()
+        try:
+            resp = jev.system_one(state, questions)
+            step.setdefault("latency_ms", {})["jev"] = step.get("latency_ms", {}).get("jev", 0) + latency_of(resp, t_r)
+            answers = resp["answers"] if isinstance(resp.get("answers"), dict) else {}
+            got = read_choice(answers, "blocked_reason", offered["blocked_reason"])
+            if got is None:
+                note_invalid(step, f"blocked_reason: {validate_choice(answers.get('blocked_reason'), offered['blocked_reason'])}")
+            step["blocked_reason"] = got
+        except Exception as e:  # noqa: BLE001 - JevError or a malformed body: the ending stands, its typed reason is missing
+            step["blocked_reason"] = None
+            note_invalid(step, f"blocked_reason: {type(e).__name__}: {str(e)[:200]}")
+
     def park(step: dict, reason: str, entry: dict | None, sig: str, pause: bool = True) -> None:
         """A step the runner refuses to act on (a pending confirmation, a low-confidence decision, a stale
         decision): recorded as a WAIT, pictured per the policy, `entry` (when given) appended to Jev's
@@ -903,6 +926,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     low_streak += 1
                     stale_streak = 0  # a refused decision is not a stale one: `max_stale` counts consecutive stale steps
                     if low_streak >= th["max_low_confidence_steps"]:
+                        ask_reason(step, state)
                         finish(page, step, "low_confidence", dict(STOP))
                         break
                     park(step, f"low confidence; {operation} not executed",
@@ -945,6 +969,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     confirm_later(passes[0]["name"] if passes else None, "DONE", "confirming DONE", "DONE")
                     continue
                 if operation == "BLOCKED":
+                    ask_reason(step, state)
                     finish(page, step, "blocked", {"action": "BLOCKED", "ok": True, "error": None})
                     break
 
@@ -957,6 +982,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     repeats[key] = repeats.get(key, 0) + 1
                     step["repeat_count"] = repeats[key]
                     if repeats[key] >= th["max_repeat"]:
+                        ask_reason(step, state)
                         finish(page, step, "stuck", dict(STOP))
                         break
 
@@ -994,7 +1020,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     "elements": obs["elements"], "truncated_elements": obs["truncated"],
                     "visible_text": obs["visible_text"][:600], "final_look": True, "offered_operations": [],
                 }
-                questions, meta = build_questions(spec, obs, last_operation, outcomes)
+                questions, meta = build_questions(spec, obs, last_operation, outcomes, ask_blocked=True)
                 last_look = {k: v for k, v in questions.items() if k in spec["checks"] or k in ("outcome", "blocked_reason")}
                 checks, outcome_answer = {}, None
                 try:
