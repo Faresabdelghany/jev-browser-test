@@ -565,12 +565,19 @@ class FakeJev:
         if self.delay_ms:
             time.sleep(self.delay_ms / 1000)
         answers: dict = {}
-        if "evidence_line" in questions:
-            # The adjudication request: pick the line that states the outcome, verbatim selection.
-            kw = self._keyword(state.get("statement", ""))
-            hit = next((ln["id"] for ln in state.get("lines", []) if kw and re.search(kw, ln["text"])), "none")
-            answers["evidence_line"] = self._choice(hit, questions["evidence_line"]["criteria"])
-            answers["evidence_present"] = {"type": "noul", "noul": 0.95 if hit != "none" else 0.1}
+        line_keys = [k for k in questions if k == "evidence_line" or k.startswith("evidence_line_")]
+        if line_keys:
+            # The adjudication request: pick the line that states the outcome, verbatim selection; a compound
+            # statement asks one Choice per sentence (`evidence_line_1`, …), each judged on its own sentence.
+            any_hit = False
+            for key in line_keys:
+                instructions = questions[key]["instructions"]
+                sentence = instructions.get("sentence") if isinstance(instructions, dict) else None
+                kw = self._keyword(sentence or state.get("statement", ""))
+                hit = next((ln["id"] for ln in state.get("lines", []) if kw and re.search(kw, ln["text"])), "none")
+                any_hit = any_hit or hit != "none"
+                answers[key] = self._choice(hit, questions[key]["criteria"])
+            answers["evidence_present"] = {"type": "noul", "noul": 0.95 if any_hit else 0.1}
             return {"answers": answers, "usage": {"input_tokens": 200, "output_tokens": 20}, "model": "fake-jev", "latency_ms": 1}
         text = state.get("visible_text", "")
         for key, q in questions.items():
@@ -1221,6 +1228,32 @@ def main() -> int:
         failures.append(f"assert: failing assertions should report actual values: {failed}")
     if [a["ok"] for a in res["assertions"]] != [False, False, True]:
         failures.append(f"assert: all three assertions should be reported: {res['assertions']}")
+
+    # 18. a two-sentence outcome statement: one evidence_line Choice per sentence rides in the one adjudication
+    #     request, and the most confident sentence's line is quoted (here the second: the first names
+    #     nothing the fixture shows and gets `none`)
+    spec = outcome_spec(url)
+    spec["outcomes"]["item_added"]["when"] = "The order can be placed now. The header shows the cart contains at least one item"
+    jev = FakeJev()
+    out = os.path.join(tmp, "run-outcome-sentences")
+    trace = run(spec, jev, out, screenshots="key")
+    print(summarize(trace, out))
+    print()
+    res = trace["result"]
+    adj = trace.get("adjudication") or {}
+    sentences = adj.get("sentences") or []
+    if trace["status"] != "passed" or (res["outcome"], res["confirmed"]) != ("item_added", True):
+        failures.append(f"sentences: expected the pass as before, got {trace['status']} {res['outcome']} {res['confirmed']}")
+    if jev.requests != len(trace["steps"]) + 1:
+        failures.append(f"sentences: the per-sentence Choices ride in the one adjudication request: {jev.requests} requests for {len(trace['steps'])} steps")
+    if (len(sentences) != 2 or sentences[0].get("sentence") != "The order can be placed now" or sentences[0].get("line_id") != "none"
+            or sentences[0].get("line") is not None or "Cart: 1 items" not in (sentences[1].get("line") or "")):
+        failures.append(f"sentences: expected the first sentence unmatched and the second quoting the header: {sentences}")
+    if "Cart: 1 items" not in (res["evidence"]["line"] or "") or (sentences and adj.get("line_id") != sentences[1].get("line_id")):
+        failures.append(f"sentences: evidence.line should be the first sentence's line that was found: {res['evidence']} {adj}")
+    if not (res["evidence"]["present"] or 0) >= 0.9:
+        failures.append(f"sentences: evidence_present is still judged over the whole statement: {res['evidence']}")
+    failures += result_shape_check(trace, out)
 
     # 14. .env in the working directory is loaded; already-exported variables win; quotes are stripped
     env_dir = os.path.join(tmp, "dotenv")

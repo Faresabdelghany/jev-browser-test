@@ -242,6 +242,13 @@ State: the terminal observation's visible text split into numbered lines (≤ 20
 chosen line verbatim into `result.evidence.line` — Jev cannot quote text, so selection is how a quote is
 produced (the `semantic_find` recipe).
 
+*Amended 2026-09-22 (block G after the real-application trial):* a `when` of several sentences (split on
+". ", "; " and ", and ", at most four) asks one `evidence_line_<n>` Choice per sentence in the same request,
+each over the same lines; the most confident sentence's line is quoted (the first on a tie) and every pick
+is kept in `trace.adjudication.sentences`. One-sentence statements send exactly the request above. Still one request
+per run. Motivation: the trial's compound statements (a filter, a list content and a footer text in one
+clause) got no evidence line in 2 of 3 runs while `present` stayed high.
+
 ### 5.5 `result.json` — written beside `trace.json`; the file Claude reads first
 ```jsonc
 {

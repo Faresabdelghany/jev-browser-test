@@ -92,7 +92,14 @@ text as up to 200 numbered lines with the outcome's statement (`observe.LINES_JS
 lines in the viewport first, the same visibility rules as the observation, masked like it); `evidence_line`
 selects the line that states it (or `none`) and `evidence_present` re-judges the statement. Code copies the
 selected line verbatim into `result.evidence.line`: Jev cannot quote text, so selection is how a quote is
-produced. A failed adjudication (transport, a non-JSON body, a malformed answer) is recorded, never fatal.
+produced. A statement of several sentences (`policy.split_statement`: the pieces between ". ", "; " and
+", and ", at most four; a bare "and" is not a seam, so the smoke specs' statements stay one sentence and
+their request is unchanged) gets one `evidence_line_<n>` Choice per sentence in the same request, each over
+the same lines, because a compound statement rarely has one line that states all of it while one of its
+sentences usually does; the most confident sentence's line is quoted (`policy.quoted_pick`: the first in
+sentence order on a tie; a hesitant pick over a sentence that still names two facts loses to a sure one) and
+every sentence's pick is kept in `trace.adjudication.sentences`. Still one request per run; the cost is one copy of the lines per sentence.
+A failed adjudication (transport, a non-JSON body, a malformed answer) is recorded, never fatal.
 
 `run_test.build_result` writes `result.json` (references/trace-format.md): outcome, verdict, note,
 probability, confidence, seen_at_step, confirmed, `path_confidence` (the weakest executed decision),

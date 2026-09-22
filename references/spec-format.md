@@ -186,11 +186,17 @@ Checks are Noul questions: Jev returns the probability that the statement is tru
   same statement that read 0.73–0.84 as a lone Noul is chosen at 0.8+ as soon as the message is on screen.
 - Outcome `when` statements follow the same rules, with one more: the outcomes should be distinguishable
   from each other on sight. Two outcomes true of the same page split the probability and neither is seen.
+- A `when` that names several facts is best written as sentences, with ". ", "; " or ", and " between them
+  (a bare "and" does not separate). The adjudication asks for the evidence line sentence by sentence and
+  quotes the sentence Jev is most confident about, so a short sentence naming one visible string ("The
+  footer says '1 item left'") is what gets quoted, even beside a longer clause; "the list shows X, with Y
+  in the footer" as one clause often gets no line at all. An absence ("no modal covers the page") has no
+  line to quote; `evidence.present` is its evidence.
 - Name `data` keys after the field labels the app shows. Jev picks a key per field; `username`/`password`
   for fields labelled Username/Password is unambiguous, `user`/`pw` is a coin flip it will refuse to call.
 - Check names are identifiers (`cart_has_item`), not sentences, and must not be one of the reserved question
   names `operation`, `click_target`, `type_target`, `type_value`, `select_target`, `outcome`, `blocked_reason`,
-  `stuck_reason`, `evidence_line`, `evidence_present`.
+  `stuck_reason`, `evidence_line`, `evidence_present`, nor `evidence_line_<n>`.
 
 ## Writing the goal and data
 

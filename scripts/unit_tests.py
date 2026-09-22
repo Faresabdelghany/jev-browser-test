@@ -991,6 +991,67 @@ class OutcomePolicyTests(unittest.TestCase):
         self.assertEqual(list(questions["evidence_line"]["criteria"]), offered)
         self.assertEqual(questions["evidence_present"], {"type": "noul", "instructions": "A red flash says the password is invalid"})
 
+    def test_split_statement(self) -> None:
+        from policy import ADJUDICATION_MAX_SENTENCES, split_statement
+        self.assertEqual(ADJUDICATION_MAX_SENTENCES, 4)
+        one = "A red flash says the password is invalid"
+        self.assertEqual(split_statement(one), [one])
+        # a bare "and" is not a seam: the smoke specs' statements stay one sentence, their requests unchanged
+        smoke = "The page heading says 'Secure Area' and a green flash message says 'You logged into a secure area!'"
+        self.assertEqual(split_statement(smoke), [smoke])
+        self.assertEqual(split_statement("The Active filter is selected. The footer says '1 item left'"),
+                         ["The Active filter is selected", "The footer says '1 item left'"])
+        self.assertEqual(split_statement("The list is empty; the footer is hidden, and the input has focus."),
+                         ["The list is empty", "the footer is hidden", "the input has focus."])
+        self.assertEqual(split_statement("a. b. c. d. e. f"), ["a", "b", "c", "d. e. f"])  # the tail stays joined to the fourth
+        self.assertEqual(split_statement("Done. "), ["Done"])                                 # a trailing seam adds no sentence
+        self.assertEqual(split_statement("   "), ["   "])                                     # nothing to split: the statement itself
+
+    def test_build_adjudication_per_sentence(self) -> None:
+        from policy import build_adjudication, evidence_line_keys
+        lines = ["Secure Area", "You logged into a secure area!", "Logout"]
+        when = "The heading says 'Secure Area'. A green flash says you logged in"
+        state, questions, offered = build_adjudication("logged_in", when, lines)
+        self.assertEqual(evidence_line_keys(questions), ["evidence_line_1", "evidence_line_2"])
+        self.assertEqual(list(questions), ["evidence_line_1", "evidence_line_2", "evidence_present"])
+        q1, q2 = questions["evidence_line_1"], questions["evidence_line_2"]
+        self.assertEqual(list(q1["criteria"]), offered)
+        self.assertEqual(q1["criteria"], q2["criteria"])                       # every sentence is judged over the same lines
+        self.assertEqual(q1["instructions"]["sentence"], "The heading says 'Secure Area'")
+        self.assertEqual(q2["instructions"]["sentence"], "A green flash says you logged in")
+        self.assertEqual((q1["instructions"]["statement"], q1["instructions"]["outcome"]), (when, "logged_in"))
+        self.assertEqual(state, {"outcome": "logged_in", "statement": when,                # the state is what one sentence sends
+                                 "lines": [{"id": "1", "text": "Secure Area"}, {"id": "2", "text": "You logged into a secure area!"},
+                                           {"id": "3", "text": "Logout"}]})
+        self.assertEqual(questions["evidence_present"], {"type": "noul", "instructions": when})  # the Noul stays over the whole statement
+        # one sentence: the request is exactly what it was
+        _, questions1, _ = build_adjudication("bad_pw", "A red flash says the password is invalid", lines)
+        self.assertEqual(evidence_line_keys(questions1), ["evidence_line"])
+        self.assertEqual(list(questions1), ["evidence_line", "evidence_present"])
+        self.assertNotIn("sentence", questions1["evidence_line"]["instructions"])
+
+    def test_quoted_pick(self) -> None:
+        from policy import quoted_pick
+        weak = {"line_id": "3", "line": "walk the dog", "confidence": 0.27}
+        strong = {"line_id": "4", "line": "1 item left", "confidence": 1.0}
+        none_ = {"line_id": "none", "line": None, "confidence": 0.9}
+        self.assertEqual(quoted_pick([weak, strong]), strong)                              # the most confident sentence is quoted
+        self.assertEqual(quoted_pick([strong, dict(strong, line_id="5", line="x")]), strong)  # the first on a tie
+        self.assertEqual(quoted_pick([none_, weak]), weak)                                 # a `none`, however sure, never beats a line
+        self.assertEqual(quoted_pick([None, none_]), none_)                                # nothing found: the first valid answer
+        self.assertIsNone(quoted_pick([None, None]))
+        self.assertEqual(quoted_pick([strong]), strong)                                    # one sentence: its pick, as before
+
+    def test_per_sentence_keys_are_reserved_names(self) -> None:
+        from spec import is_reserved_question, validate
+        self.assertTrue(is_reserved_question("evidence_line") and is_reserved_question("evidence_line_2"))
+        self.assertFalse(is_reserved_question("evidence_lines") or is_reserved_question("evidence_line_"))
+        spec = {"id": "x", "start_url": "https://x.test/", "goal": "read the page", "checks": {"evidence_line_2": "A line is shown"},
+                "outcomes": {"evidence_line_1": {"when": "A line is shown", "verdict": "pass"}}}
+        problems = validate(spec)
+        self.assertTrue(any("check 'evidence_line_2'" in p for p in problems), problems)
+        self.assertTrue(any("outcome name 'evidence_line_1'" in p for p in problems), problems)
+
 
 class AssertionTests(unittest.TestCase):
     class FakePage:

@@ -19,6 +19,8 @@ Design (borrowed from browser-use/jev-ultrafast):
 """
 from __future__ import annotations
 
+import re
+
 from jev_client import choice, noul
 from observe import element_label
 from rules import CHECK, NEXT_ACTION, TARGET, VALUE
@@ -321,23 +323,62 @@ def suggested_verdict(status: str, typed: list[str | None]) -> str | None:
 
 ADJUDICATION_MAX_LINES = 200
 ADJUDICATION_NONE = "none"
+ADJUDICATION_MAX_SENTENCES = 4
+EVIDENCE_LINE = "evidence_line"
+_SENTENCE_SEAM = re.compile(r"\. |; |, and ")
+
+
+def split_statement(when: str) -> list[str]:
+    """The sentences of an outcome statement: the pieces between ". ", "; " and ", and " (the seams a spec
+    author uses to name several facts in one `when`), at most ADJUDICATION_MAX_SENTENCES of them (the tail
+    stays joined to the last one), empty pieces dropped. A bare "and" is not a seam, so a statement such as
+    "The heading says 'Secure Area' and a green flash says …" stays one sentence, as does any statement
+    without those seams."""
+    pieces = [p.strip() for p in _SENTENCE_SEAM.split(when, maxsplit=ADJUDICATION_MAX_SENTENCES - 1)]
+    return [p for p in pieces if p] or [when]
+
+
+def evidence_line_keys(questions: dict) -> list[str]:
+    """The evidence-line question keys of an adjudication request, in sentence order: `evidence_line` for a
+    one-sentence statement, `evidence_line_1`, `evidence_line_2`, … for one Choice per sentence."""
+    return [k for k in questions if k == EVIDENCE_LINE or k.startswith(EVIDENCE_LINE + "_")]
+
+
+def quoted_pick(picks: list[dict | None]) -> dict | None:
+    """Which sentence's pick becomes `evidence.line`: the most confident of those that found a line (the first
+    in sentence order on a tie), else the first valid pick (a `none`), else None. Confidence decides because
+    a sentence that still names two facts draws a hesitant pick (0.3 on the filter bar) while a sentence
+    naming one visible string draws a sure one (1.0 on "1 item left"); the order of the sentences does not."""
+    found = [p for p in picks if p and p.get("line") is not None]
+    if found:
+        return max(found, key=lambda p: p.get("confidence") or 0)  # max keeps the first of equals
+    return next((p for p in picks if p), None)
 
 
 def build_adjudication(name: str, when: str, lines: list[str]) -> tuple[dict, dict, list[str]]:
     """The final adjudication request (spec §5.4): the terminal page's text as numbered lines plus the seen
     outcome's statement; `evidence_line` chooses the line that states it (or none), `evidence_present`
     is the Noul over the statement. Code copies the chosen line verbatim: selection is how Jev quotes.
-    Returns (state, questions, offered line ids)."""
+    A statement with several sentences (`split_statement`) gets one Choice per sentence in the same request,
+    `evidence_line_1` … `evidence_line_n`, each over the same lines: a compound statement rarely has a
+    single line that states all of it, one of its sentences usually does. The caller quotes the most
+    confident sentence's line (`quoted_pick`). Returns (state, questions, offered line ids)."""
     lines = [ln[:300] for ln in lines[:ADJUDICATION_MAX_LINES]]
     ids = [str(i + 1) for i in range(len(lines))]
     state = {"outcome": name, "statement": when, "lines": [{"id": i, "text": t} for i, t in zip(ids, lines)]}
     criteria = {i: t for i, t in zip(ids, lines)}
     criteria[ADJUDICATION_NONE] = "No line of the page states this outcome"
-    questions = {
-        "evidence_line": choice({"question": "Which numbered line of the page states the outcome?", "outcome": name,
-                                 "statement": when}, criteria),
-        "evidence_present": noul(when),
-    }
+    sentences = split_statement(when)
+    questions: dict = {}
+    if len(sentences) == 1:
+        questions[EVIDENCE_LINE] = choice({"question": "Which numbered line of the page states the outcome?", "outcome": name,
+                                           "statement": when}, criteria)
+    else:
+        for n, sentence in enumerate(sentences, 1):
+            questions[f"{EVIDENCE_LINE}_{n}"] = choice(
+                {"question": "Which numbered line of the page states this sentence of the outcome?", "outcome": name,
+                 "statement": when, "sentence": sentence}, criteria)
+    questions["evidence_present"] = noul(when)
     return state, questions, ids + [ADJUDICATION_NONE]
 
 

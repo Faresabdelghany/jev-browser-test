@@ -145,6 +145,8 @@ environment failure (or a spec file is missing / two files share an id).
   "status": "passed", "status_meaning": "...", "pass": true, "error": null,
   "outcome": "item_added", "verdict": "pass",  // as in result.json; "result" holds the whole result.json, "outcomes" the effective outcomes (declared + synthesized)
   "adjudication": { "outcome": "item_added", "statement": "...", "line": "Cart: 1 items", "line_id": "3", "present": 0.95, "confidence": 0.9, "latency_ms": 290 },
+  //   a statement of several sentences (split on ". ", "; ", ", and ") adds "sentences": [{ "sentence", "line_id", "line", "confidence" }, …],
+  //   one Choice per sentence in the same request; "line" / "line_id" / "confidence" are those of the most confident sentence that found a line
   "started_at": "...", "ended_at": "...", "duration_ms": 6210,
   "actions_executed": 4,                 // steps that changed the browser (not DONE/STOP, not runner-inserted WAITs)
   "timing": { "launch_ms": 150, "navigation_ms": 2000, "setup_ms": 0, "steps_ms": 2500, "final_ms": 30 },  // where the wall-clock went

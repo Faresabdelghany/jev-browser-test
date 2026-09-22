@@ -23,6 +23,14 @@ RESERVED_QUESTIONS = {
     "evidence_line",
     "evidence_present",
 }
+
+
+def is_reserved_question(name: str) -> bool:
+    """A check or outcome name the runner uses as a question key: the fixed set above plus the per-sentence
+    evidence keys `evidence_line_1`, `evidence_line_2`, … of a compound outcome statement."""
+    return name in RESERVED_QUESTIONS or re.fullmatch(r"evidence_line_\d+", name) is not None
+
+
 OUTCOME_NONE = "none_yet"  # the outcome Choice's "nothing listed is visible yet" option; not a valid outcome name
 UNDETERMINED = "undetermined"  # result.outcome when the run ended in no declared outcome
 VERDICTS = ("pass", "bug", "test_issue", "needs_human")
@@ -158,8 +166,8 @@ def validate(spec: dict) -> list[str]:
         errors.append("'checks' must be an object mapping check_name -> statement")
         checks = {}
     for name, statement in checks.items():
-        if name in RESERVED_QUESTIONS:
-            errors.append(f"check '{name}' collides with a reserved question name {sorted(RESERVED_QUESTIONS)}")
+        if is_reserved_question(name):
+            errors.append(f"check '{name}' collides with a reserved question name {sorted(RESERVED_QUESTIONS)} (or evidence_line_<n>)")
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
             errors.append(f"check name '{name}' must be a simple identifier (letters, digits, underscore)")
         if not isinstance(statement, str) or len(statement.strip()) < 8:
@@ -177,7 +185,7 @@ def validate(spec: dict) -> list[str]:
         errors.append("'outcomes' must be an object mapping outcome_name -> {when, verdict, requires?, note?}")
         outcomes = {}
     for name, o in outcomes.items():
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or name == OUTCOME_NONE or name in RESERVED_QUESTIONS:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or name == OUTCOME_NONE or is_reserved_question(name):
             errors.append(f"outcome name '{name}' must be a simple identifier other than '{OUTCOME_NONE}' and the reserved "
                           f"question names {sorted(RESERVED_QUESTIONS)}")
         if not isinstance(o, dict):

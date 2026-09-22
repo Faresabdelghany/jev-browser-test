@@ -34,8 +34,8 @@ from observe import (
     observe, signature,
 )
 from policy import (
-    ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, build_adjudication, build_questions, build_state, is_field, read_checks,
-    read_choice, read_outcome, resolve_target, seen_outcomes, suggested_verdict, validate_choice,
+    ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, build_adjudication, build_questions, build_state, evidence_line_keys, is_field,
+    quoted_pick, read_checks, read_choice, read_outcome, resolve_target, seen_outcomes, suggested_verdict, validate_choice,
 )
 from spec import UNDETERMINED, effective_outcomes, load_dotenv, load_spec, spec_warnings, validate
 from summarize_trace import is_action_step, summarize
@@ -393,7 +393,8 @@ def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = No
 
 def adjudicate(page, jev, name: str, when: str, secrets: list[str] | None = None) -> dict:
     """One extra request after a seen outcome (spec §5.4): Jev selects the line of the final page that states
-    the outcome (`evidence_line`) and re-judges the statement (`evidence_present`). The chosen line is copied
+    the outcome (`evidence_line`; one Choice per sentence of a compound statement, the most confident
+    sentence's line is quoted) and re-judges the statement (`evidence_present`). The chosen line is copied
     verbatim into the result: selection is how a quote is produced. The lines are masked like every
     observation, so a secret the page echoes reaches neither Jev nor the result. Never fatal: the run was
     already decided when this is asked, so any failure (transport, a non-JSON body, a malformed answer) is
@@ -405,19 +406,31 @@ def adjudicate(page, jev, name: str, when: str, secrets: list[str] | None = None
         rec["error"] = f"could not read the page text: {type(e).__name__}"
         return rec
     state, questions, offered = build_adjudication(name, when, lines)
+    keys = evidence_line_keys(questions)  # one key for a one-sentence statement, one per sentence otherwise
     t0 = time.perf_counter()
     try:
         resp = jev.system_one(state, questions)
         rec["latency_ms"] = latency_of(resp, t0)
         answers = resp["answers"] if isinstance(resp.get("answers"), dict) else {}
-        picked = read_choice(answers, "evidence_line", offered)
-        if picked is None:
-            rec["invalid_answer"] = f"evidence_line: {validate_choice(answers.get('evidence_line'), offered)}"
-        else:
-            rec["line_id"] = picked["choice"]
-            rec["confidence"] = picked["confidence"]
-            if picked["choice"] != ADJUDICATION_NONE:
-                rec["line"] = state["lines"][int(picked["choice"]) - 1]["text"]
+        picks: list[dict | None] = []
+        invalid = []
+        for key in keys:
+            picked = read_choice(answers, key, offered)
+            if picked is None:
+                invalid.append(f"{key}: {validate_choice(answers.get(key), offered)}")
+                picks.append(None)
+                continue
+            line = state["lines"][int(picked["choice"]) - 1]["text"] if picked["choice"] != ADJUDICATION_NONE else None
+            picks.append({"line_id": picked["choice"], "line": line, "confidence": picked["confidence"]})
+        if invalid:
+            rec["invalid_answer"] = "; ".join(invalid)
+        if len(keys) > 1:
+            # every sentence's pick is kept; `line` below is the most confident sentence's line (`quoted_pick`)
+            rec["sentences"] = [{"sentence": questions[k]["instructions"]["sentence"],
+                                 **(p or {"line_id": None, "line": None, "confidence": None})} for k, p in zip(keys, picks)]
+        quoted = quoted_pick(picks)
+        if quoted:
+            rec["line_id"], rec["line"], rec["confidence"] = quoted["line_id"], quoted["line"], quoted["confidence"]
         present = answers.get("evidence_present")
         if isinstance(present, dict) and isinstance(present.get("noul"), (int, float)) and 0 <= present["noul"] <= 1:
             rec["present"] = round(float(present["noul"]), 3)
