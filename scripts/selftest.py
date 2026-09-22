@@ -201,15 +201,20 @@ def cdp_check(url: str, tmp: str) -> list[str]:
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     try:
-        before = None
+        before: list[dict] | None = None
         for _ in range(100):  # the debugging endpoint needs a moment to come up
             try:
-                before = pages()
-                break
+                listed = pages()
             except Exception:  # noqa: BLE001
-                time.sleep(0.1)
+                listed = []
+            # Ready means the endpoint answers AND lists a page: the DevTools server starts answering a few
+            # ms before the initial about:blank target exists, and a snapshot taken in that gap is [].
+            if listed:
+                before = listed
+                break
+            time.sleep(0.1)
         if before is None:
-            return [f"could not reach the remote-debugging endpoint at {endpoint}"]
+            return [f"could not reach the remote-debugging endpoint at {endpoint} (or it listed no tab)"]
         spec = base_spec(url)
         spec["browser"]["cdp_url"] = endpoint
         spec["browser"]["storage_state"] = os.path.join(tmp, "ignored-state.json")  # must be ignored, not opened
