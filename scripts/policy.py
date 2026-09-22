@@ -92,6 +92,25 @@ def describe_element(spec: dict, e: dict) -> dict:
     return d
 
 
+def target_criterion(e: dict) -> dict:
+    """A click_target / type_target option as an object (TypeSafe criteria may be objects).
+
+    `element` and `role` always; `current_value` always for text fields and selects (an empty string
+    tells Jev the field is empty, which the rule about not re-filling a field needs) and otherwise only
+    when non-empty; `checked` as "true"/"false" for checkable roles; `text` and `context` when present.
+    """
+    c = {"element": f'[{e["idx"]}] {e["role"]} "{e.get("name") or ""}"', "role": e["role"]}
+    if e.get("text"):
+        c["text"] = e["text"]
+    if e["role"] in TYPE_ROLES or e["role"] == "select" or e.get("value"):
+        c["current_value"] = e.get("value") or ""
+    if e["role"] in CHECKABLE_ROLES and e.get("checked") is not None:
+        c["checked"] = "true" if e["checked"] else "false"
+    if e.get("context"):
+        c["context"] = e["context"]
+    return c
+
+
 def build_state(spec: dict, obs: dict, step: int, history: list[dict]) -> dict:
     """The state Jev evaluates: an object with a descriptive name for every part.
 
@@ -155,21 +174,22 @@ def build_questions(spec: dict, obs: dict, last_operation: str | None) -> tuple[
     if "CLICK" in ops:
         questions["click_target"] = choice(
             "If the next operation is CLICK, which element should be clicked to make progress toward the goal?",
-            {str(e["idx"]): element_label(e) for e in clickable},
+            {str(e["idx"]): target_criterion(e) for e in clickable},
         )
     if "TYPE_TEXT" in ops:
         questions["type_target"] = choice(
             "If the next operation is TYPE_TEXT, which text field should receive the value?",
-            {str(e["idx"]): element_label(e) for e in typable},
+            {str(e["idx"]): target_criterion(e) for e in typable},
         )
         questions["type_value"] = choice(
             "If the next operation is TYPE_TEXT, which of the available data values should be typed?",
-            {d["key"]: f'{d["key"]} = "{d["value"]}"' for d in data_values(spec)},
+            {d["key"]: d for d in data_values(spec)},
         )
     if "SELECT" in ops:
         # element_operations only reports SELECT when at least one option is enabled, so this is never empty
         select_options = {
-            f"{e['idx']}:{o['i']}": f'{e["role"]} "{e["name"]}" -> "{o["text"]}"'
+            f"{e['idx']}:{o['i']}": {"element": f'[{e["idx"]}] select "{e.get("name") or ""}"', "option": o["text"],
+                                     "current_value": e.get("value") or ""}
             for e in selects for o in e["options"] if not o.get("disabled")
         }
         questions["select_target"] = choice(

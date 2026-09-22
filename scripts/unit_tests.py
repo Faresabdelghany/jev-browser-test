@@ -510,6 +510,41 @@ class BuildStateTests(unittest.TestCase):
         self.assertNotIn("pw", json.dumps(state))
 
 
+class CriteriaTests(unittest.TestCase):
+    ELEMENTS = [
+        {"idx": 0, "role": "textbox", "name": "Username", "value": "tom"},
+        {"idx": 1, "role": "textbox", "name": "Password"},
+        {"idx": 2, "role": "checkbox", "name": "", "checked": True, "context": "Remember me"},
+        {"idx": 3, "role": "link", "name": "Help", "value": None},
+        {"idx": 4, "role": "clickable", "name": "", "text": "Nile row", "context": "1000-05 Residual Nile"},
+        {"idx": 5, "role": "select", "name": "Size", "value": "S", "options": [{"i": 0, "text": "S"}, {"i": 1, "text": "M"}, {"i": 2, "text": "L", "disabled": True}]},
+    ]
+
+    def setUp(self) -> None:
+        self.questions, self.meta = build_questions(SPEC, observation(self.ELEMENTS), None)
+
+    def test_target_criteria_are_objects(self) -> None:
+        click = self.questions["click_target"]["criteria"]
+        typ = self.questions["type_target"]["criteria"]
+        self.assertEqual(typ["0"], {"element": '[0] textbox "Username"', "role": "textbox", "current_value": "tom"})
+        self.assertEqual(typ["1"], {"element": '[1] textbox "Password"', "role": "textbox", "current_value": ""})
+        self.assertEqual(click["2"], {"element": '[2] checkbox ""', "role": "checkbox", "checked": "true", "context": "Remember me"})
+        self.assertEqual(click["3"], {"element": '[3] link "Help"', "role": "link"})  # no empty fields
+        self.assertEqual(click["4"], {"element": '[4] clickable ""', "role": "clickable", "text": "Nile row",
+                                      "context": "1000-05 Residual Nile"})
+        self.assertNotIn("5", click)  # a select is a SELECT target, not a click target
+
+    def test_select_and_value_criteria(self) -> None:
+        sel = self.questions["select_target"]["criteria"]
+        self.assertEqual(list(sel), ["5:0", "5:1"])  # the disabled option is not offered
+        self.assertEqual(sel["5:1"], {"element": '[5] select "Size"', "option": "M", "current_value": "S"})
+        self.assertEqual(self.questions["type_value"]["criteria"], {
+            "username": {"key": "username", "value": "tom"},
+            "password": {"key": "password", "value": "<secret>"},
+        })
+        self.assertNotIn("pw", json.dumps(self.questions))
+
+
 class ResolveTargetTests(unittest.TestCase):
     def setUp(self) -> None:
         self.obs = observation(ELEMENTS)

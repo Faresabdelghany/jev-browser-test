@@ -14,7 +14,11 @@ The step loop follows browser-use/jev-ultrafast, the reference Jev browser agent
 2. **Speculative targets, one round trip.** `policy.py` asks `operation` and *every* possible target
    (`click_target`, `type_target` + `type_value`, `select_target`) in the same request. Jev evaluates all
    questions in parallel, so this costs almost nothing extra, and the runner executes only the target that
-   matches the chosen operation. Two decisions, one network call (~100–500 ms).
+   matches the chosen operation. Two decisions, one network call. Target options are objects, not lines:
+   `{"element": "[4] button \"Login\"", "role", "current_value", "checked", "context", "text"}` with empty
+   fields omitted (text fields and selects always carry `current_value`, so "do not re-fill a field that
+   already holds the value" is decidable); `type_value` options are `{"key", "value"}` with secrets shown
+   as `<secret>`; `select_target` options are `{"element", "option", "current_value"}` keyed `idx:option`.
 3. **Only possible operations are offered.** No text field → no TYPE_TEXT. Nothing below the fold →
    no SCROLL_DOWN. PRESS_ENTER only right after a successful TYPE_TEXT. BLOCKED is always available so
    "I can't" is a first-class answer instead of a hallucinated click.

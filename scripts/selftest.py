@@ -157,8 +157,10 @@ class FakeJev:
 
     @staticmethod
     def _find(options: dict, needle: str) -> str | None:
+        """First option whose description (a string, or any string inside an object) mentions `needle`."""
         for k, v in options.items():
-            if needle.lower() in v.lower():
+            text = v if isinstance(v, str) else " ".join(str(x) for x in v.values()) if isinstance(v, dict) else str(v)
+            if needle.lower() in text.lower():
                 return k
         return None
 
