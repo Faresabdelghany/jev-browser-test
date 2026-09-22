@@ -1,0 +1,641 @@
+{
+  "label": "track3-acceptance",
+  "timestamp": "2026-09-22T10:21:51+03:00",
+  "git_commit": "185a10f",
+  "repeat": 5,
+  "workers": 4,
+  "run_args": [],
+  "elapsed_ms": 18627,
+  "out_dir": "runs/suite/track3-acceptance",
+  "specs": {
+    "smoke-login": {
+      "spec": "specs/smoke-login.json",
+      "runs": [
+        {
+          "out_dir": "runs/suite/track3-acceptance/smoke-login/01",
+          "exit_code": 0,
+          "wall_ms": 6377,
+          "outcome": "logged_in",
+          "verdict": "pass",
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 6266,
+          "jev_ms": 1917,
+          "browser_ms": 1249,
+          "requests": 6,
+          "input_tokens": 8932,
+          "output_tokens": 1587,
+          "model": "jev-1.13.0",
+          "steps": 5,
+          "actions_executed": 3,
+          "decision_confidence": 0.96,
+          "min_decision_confidence": 0.9,
+          "step_confidences": [
+            1.0,
+            0.9,
+            0.96
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 780,
+          "jev_warm_ms": 286.5,
+          "browser_per_action_ms": 139,
+          "step_jev_ms": [
+            780,
+            285,
+            288,
+            274,
+            290
+          ],
+          "step_browser_ms": [
+            129,
+            139,
+            474,
+            507,
+            null
+          ],
+          "action_browser_ms": [
+            129,
+            139,
+            474
+          ],
+          "launch_ms": 320,
+          "navigation_ms": 2088,
+          "setup_ms": 0,
+          "result": "runs/suite/track3-acceptance/smoke-login/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "You logged into a secure area!",
+          "first_seen_at_step": 4
+        },
+        {
+          "out_dir": "runs/suite/track3-acceptance/smoke-login/02",
+          "exit_code": 0,
+          "wall_ms": 6432,
+          "outcome": "logged_in",
+          "verdict": "pass",
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 6324,
+          "jev_ms": 2004,
+          "browser_ms": 1205,
+          "requests": 6,
+          "input_tokens": 8932,
+          "output_tokens": 1587,
+          "model": "jev-1.13.0",
+          "steps": 5,
+          "actions_executed": 3,
+          "decision_confidence": 0.96,
+          "min_decision_confidence": 0.88,
+          "step_confidences": [
+            1.0,
+            0.88,
+            0.96
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 748,
+          "jev_warm_ms": 319.5,
+          "browser_per_action_ms": 129,
+          "step_jev_ms": [
+            748,
+            339,
+            300,
+            353,
+            264
+          ],
+          "step_browser_ms": [
+            129,
+            119,
+            445,
+            512,
+            null
+          ],
+          "action_browser_ms": [
+            129,
+            119,
+            445
+          ],
+          "launch_ms": 320,
+          "navigation_ms": 2137,
+          "setup_ms": 0,
+          "result": "runs/suite/track3-acceptance/smoke-login/02/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "You logged into a secure area!",
+          "first_seen_at_step": 4
+        },
+        {
+          "out_dir": "runs/suite/track3-acceptance/smoke-login/03",
+          "exit_code": 0,
+          "wall_ms": 6500,
+          "outcome": "logged_in",
+          "verdict": "pass",
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 6392,
+          "jev_ms": 1943,
+          "browser_ms": 1264,
+          "requests": 6,
+          "input_tokens": 8932,
+          "output_tokens": 1587,
+          "model": "jev-1.13.0",
+          "steps": 5,
+          "actions_executed": 3,
+          "decision_confidence": 0.95,
+          "min_decision_confidence": 0.89,
+          "step_confidences": [
+            1.0,
+            0.89,
+            0.95
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 773,
+          "jev_warm_ms": 288.5,
+          "browser_per_action_ms": 148,
+          "step_jev_ms": [
+            773,
+            279,
+            298,
+            325,
+            268
+          ],
+          "step_browser_ms": [
+            148,
+            144,
+            466,
+            506,
+            null
+          ],
+          "action_browser_ms": [
+            148,
+            144,
+            466
+          ],
+          "launch_ms": 319,
+          "navigation_ms": 2071,
+          "setup_ms": 0,
+          "result": "runs/suite/track3-acceptance/smoke-login/03/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "You logged into a secure area!",
+          "first_seen_at_step": 4
+        },
+        {
+          "out_dir": "runs/suite/track3-acceptance/smoke-login/04",
+          "exit_code": 0,
+          "wall_ms": 7234,
+          "outcome": "logged_in",
+          "verdict": "pass",
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 7127,
+          "jev_ms": 1990,
+          "browser_ms": 1273,
+          "requests": 6,
+          "input_tokens": 8932,
+          "output_tokens": 1587,
+          "model": "jev-1.13.0",
+          "steps": 5,
+          "actions_executed": 3,
+          "decision_confidence": 0.95,
+          "min_decision_confidence": 0.83,
+          "step_confidences": [
+            1.0,
+            0.83,
+            0.95
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 729,
+          "jev_warm_ms": 313,
+          "browser_per_action_ms": 146,
+          "step_jev_ms": [
+            729,
+            292,
+            343,
+            307,
+            319
+          ],
+          "step_browser_ms": [
+            141,
+            146,
+            468,
+            518,
+            null
+          ],
+          "action_browser_ms": [
+            141,
+            146,
+            468
+          ],
+          "launch_ms": 320,
+          "navigation_ms": 2878,
+          "setup_ms": 0,
+          "result": "runs/suite/track3-acceptance/smoke-login/04/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "You logged into a secure area!",
+          "first_seen_at_step": 4
+        },
+        {
+          "out_dir": "runs/suite/track3-acceptance/smoke-login/05",
+          "exit_code": 0,
+          "wall_ms": 6050,
+          "outcome": "logged_in",
+          "verdict": "pass",
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 5956,
+          "jev_ms": 2026,
+          "browser_ms": 1257,
+          "requests": 6,
+          "input_tokens": 8932,
+          "output_tokens": 1587,
+          "model": "jev-1.13.0",
+          "steps": 5,
+          "actions_executed": 3,
+          "decision_confidence": 0.96,
+          "min_decision_confidence": 0.84,
+          "step_confidences": [
+            1.0,
+            0.84,
+            0.96
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 731,
+          "jev_warm_ms": 334.5,
+          "browser_per_action_ms": 129,
+          "step_jev_ms": [
+            731,
+            276,
+            321,
+            348,
+            350
+          ],
+          "step_browser_ms": [
+            127,
+            129,
+            485,
+            516,
+            null
+          ],
+          "action_browser_ms": [
+            127,
+            129,
+            485
+          ],
+          "launch_ms": 96,
+          "navigation_ms": 2030,
+          "setup_ms": 0,
+          "result": "runs/suite/track3-acceptance/smoke-login/05/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "You logged into a secure area!",
+          "first_seen_at_step": 4
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_counts": {
+        "logged_in": 5
+      },
+      "verdict_counts": {
+        "pass": 5
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 6432,
+        "duration_ms": 6324,
+        "jev_ms": 1990,
+        "browser_ms": 1257,
+        "requests": 6,
+        "input_tokens": 8932,
+        "decision_confidence": 0.96,
+        "steps": 5
+      },
+      "passes": 5
+    },
+    "smoke-login-badpw": {
+      "spec": "specs/smoke-login-badpw.json",
+      "runs": [
+        {
+          "out_dir": "runs/suite/track3-acceptance/smoke-login-badpw/01",
+          "exit_code": 0,
+          "wall_ms": 6295,
+          "outcome": "bad_credentials",
+          "verdict": "pass",
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 6196,
+          "jev_ms": 1894,
+          "browser_ms": 1231,
+          "requests": 6,
+          "input_tokens": 9774,
+          "output_tokens": 1741,
+          "model": "jev-1.13.0",
+          "steps": 5,
+          "actions_executed": 3,
+          "decision_confidence": 0.86,
+          "min_decision_confidence": 0.86,
+          "step_confidences": [
+            0.86,
+            0.86,
+            0.93
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 722,
+          "jev_warm_ms": 293,
+          "browser_per_action_ms": 131,
+          "step_jev_ms": [
+            722,
+            310,
+            276,
+            300,
+            286
+          ],
+          "step_browser_ms": [
+            131,
+            131,
+            458,
+            511,
+            null
+          ],
+          "action_browser_ms": [
+            131,
+            131,
+            458
+          ],
+          "launch_ms": 89,
+          "navigation_ms": 2444,
+          "setup_ms": 0,
+          "result": "runs/suite/track3-acceptance/smoke-login-badpw/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Your password is invalid!",
+          "first_seen_at_step": 4
+        },
+        {
+          "out_dir": "runs/suite/track3-acceptance/smoke-login-badpw/02",
+          "exit_code": 0,
+          "wall_ms": 5927,
+          "outcome": "bad_credentials",
+          "verdict": "pass",
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 5840,
+          "jev_ms": 1972,
+          "browser_ms": 1234,
+          "requests": 6,
+          "input_tokens": 9774,
+          "output_tokens": 1741,
+          "model": "jev-1.13.0",
+          "steps": 5,
+          "actions_executed": 3,
+          "decision_confidence": 0.92,
+          "min_decision_confidence": 0.8,
+          "step_confidences": [
+            0.92,
+            0.8,
+            0.95
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 795,
+          "jev_warm_ms": 292,
+          "browser_per_action_ms": 131,
+          "step_jev_ms": [
+            795,
+            276,
+            278,
+            317,
+            306
+          ],
+          "step_browser_ms": [
+            129,
+            131,
+            462,
+            512,
+            null
+          ],
+          "action_browser_ms": [
+            129,
+            131,
+            462
+          ],
+          "launch_ms": 77,
+          "navigation_ms": 1964,
+          "setup_ms": 0,
+          "result": "runs/suite/track3-acceptance/smoke-login-badpw/02/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Your password is invalid!",
+          "first_seen_at_step": 4
+        },
+        {
+          "out_dir": "runs/suite/track3-acceptance/smoke-login-badpw/03",
+          "exit_code": 0,
+          "wall_ms": 5740,
+          "outcome": "bad_credentials",
+          "verdict": "pass",
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 5652,
+          "jev_ms": 1929,
+          "browser_ms": 1234,
+          "requests": 6,
+          "input_tokens": 9774,
+          "output_tokens": 1743,
+          "model": "jev-1.13.0",
+          "steps": 5,
+          "actions_executed": 3,
+          "decision_confidence": 0.91,
+          "min_decision_confidence": 0.88,
+          "step_confidences": [
+            0.88,
+            0.91,
+            0.93
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 715,
+          "jev_warm_ms": 298,
+          "browser_per_action_ms": 134,
+          "step_jev_ms": [
+            715,
+            306,
+            288,
+            290,
+            330
+          ],
+          "step_browser_ms": [
+            123,
+            134,
+            459,
+            518,
+            null
+          ],
+          "action_browser_ms": [
+            123,
+            134,
+            459
+          ],
+          "launch_ms": 76,
+          "navigation_ms": 1866,
+          "setup_ms": 0,
+          "result": "runs/suite/track3-acceptance/smoke-login-badpw/03/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Your password is invalid!",
+          "first_seen_at_step": 4
+        },
+        {
+          "out_dir": "runs/suite/track3-acceptance/smoke-login-badpw/04",
+          "exit_code": 0,
+          "wall_ms": 6192,
+          "outcome": "bad_credentials",
+          "verdict": "pass",
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 6097,
+          "jev_ms": 2093,
+          "browser_ms": 1299,
+          "requests": 6,
+          "input_tokens": 9774,
+          "output_tokens": 1741,
+          "model": "jev-1.13.0",
+          "steps": 5,
+          "actions_executed": 3,
+          "decision_confidence": 0.93,
+          "min_decision_confidence": 0.89,
+          "step_confidences": [
+            0.93,
+            0.89,
+            0.94
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 783,
+          "jev_warm_ms": 317,
+          "browser_per_action_ms": 143,
+          "step_jev_ms": [
+            783,
+            348,
+            391,
+            285,
+            286
+          ],
+          "step_browser_ms": [
+            126,
+            143,
+            520,
+            510,
+            null
+          ],
+          "action_browser_ms": [
+            126,
+            143,
+            520
+          ],
+          "launch_ms": 111,
+          "navigation_ms": 1975,
+          "setup_ms": 0,
+          "result": "runs/suite/track3-acceptance/smoke-login-badpw/04/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Your password is invalid!",
+          "first_seen_at_step": 4
+        },
+        {
+          "out_dir": "runs/suite/track3-acceptance/smoke-login-badpw/05",
+          "exit_code": 0,
+          "wall_ms": 6195,
+          "outcome": "bad_credentials",
+          "verdict": "pass",
+          "status": "passed",
+          "pass": true,
+          "error": null,
+          "duration_ms": 6102,
+          "jev_ms": 2084,
+          "browser_ms": 1317,
+          "requests": 6,
+          "input_tokens": 9774,
+          "output_tokens": 1741,
+          "model": "jev-1.13.0",
+          "steps": 5,
+          "actions_executed": 3,
+          "decision_confidence": 0.95,
+          "min_decision_confidence": 0.8,
+          "step_confidences": [
+            0.95,
+            0.8,
+            0.95
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 797,
+          "jev_warm_ms": 316.5,
+          "browser_per_action_ms": 136,
+          "step_jev_ms": [
+            797,
+            324,
+            348,
+            306,
+            309
+          ],
+          "step_browser_ms": [
+            128,
+            136,
+            533,
+            520,
+            null
+          ],
+          "action_browser_ms": [
+            128,
+            136,
+            533
+          ],
+          "launch_ms": 111,
+          "navigation_ms": 2013,
+          "setup_ms": 0,
+          "result": "runs/suite/track3-acceptance/smoke-login-badpw/05/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Your password is invalid!",
+          "first_seen_at_step": 4
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_counts": {
+        "bad_credentials": 5
+      },
+      "verdict_counts": {
+        "pass": 5
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 6192,
+        "duration_ms": 6097,
+        "jev_ms": 1972,
+        "browser_ms": 1234,
+        "requests": 6,
+        "input_tokens": 9774,
+        "decision_confidence": 0.92,
+        "steps": 5
+      },
+      "passes": 5
+    }
+  },
+  "suite": {
+    "all_pass": true,
+    "verdicts": {
+      "smoke-login": "pass",
+      "smoke-login-badpw": "pass"
+    },
+    "flaky": [],
+    "undetermined": []
+  }
+}

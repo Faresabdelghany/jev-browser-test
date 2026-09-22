@@ -101,6 +101,27 @@ buys: the run comes back as one declared outcome with the page's own line as evi
 is decided on the first step its message appears, and the hesitant post-error steps (0.04–0.12 operation
 confidence, three refused WAITs) are gone.
 
+## Track 3 (2026-09-22): hands-off suite
+
+`scripts/run_suite.py specs/smoke-login.json specs/smoke-login-badpw.json --repeat 5 --workers 4` at commit
+`185a10f` (the runner of Track 2): `2026-09-22-track3-suite.json` / `.md` are the `results.json` /
+`results.md` it wrote.
+
+| | |
+|---|---|
+| wall-clock for 2 specs × 5 repeats, 4 workers | 18.6 s (acceptance: < 60 s ✓) |
+| `smoke-login` | `logged_in` (pass) 5/5, agreement 100%, first sighting at step 4 in every run, median 6,432 ms |
+| `smoke-login-badpw` | `bad_credentials` (pass) 5/5, agreement 100%, first sighting at step 4 in every run, median 6,192 ms |
+| suite verdict | ALL PASS, exit 0 |
+
+Agreement and the `flaky` verdict are computed by `run_suite.aggregate_spec`, exercised in the unit tests
+with a fake runner whose spec alternates outcomes (agreement 50% → `flaky`), a spec that is always
+`undetermined` (suggested verdicts tallied) and a runner that exits 2 (recorded as an error run). The
+brief's third acceptance item, re-running the target-question phrasing A/B through the suite tool, was
+not done: the temporary env knob that produced `...-ab-phrasing-implicit.json` was removed after the tie,
+as the brief required, so there is nothing to switch; re-adding it for one suite run would have cost 20
+live runs to re-measure a tie already recorded above.
+
 ### Per-item A/B (3 repeats each, both specs)
 
 `2026-09-21-track1-after-all-items.json` is the first after-measurement with every Track 1 item on: it
