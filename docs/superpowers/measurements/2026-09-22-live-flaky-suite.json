@@ -1,0 +1,308 @@
+{
+  "label": "",
+  "timestamp": "2026-09-22T15:51:29+03:00",
+  "git_commit": "20833f2",
+  "repeat": 5,
+  "workers": 2,
+  "run_args": [],
+  "elapsed_ms": 16389,
+  "out_dir": "/private/tmp/claude-501/-Users-fares-Downloads-jev-browser-test/c3d629b9-fd47-446e-87cd-a81340dc598e/scratchpad/e1-notify",
+  "specs": {
+    "notify-random": {
+      "spec": "../export-20833f2/specs/local/notify-random.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "notify-random/01",
+          "exit_code": 0,
+          "wall_ms": 6218,
+          "outcome": "action_successful",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "notify-random/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 6033,
+          "jev_ms": 1574,
+          "adjudication_ms": 301,
+          "browser_ms": 1080,
+          "requests": 4,
+          "input_tokens": 4531,
+          "output_tokens": 748,
+          "model": "jev-1.13.0",
+          "steps": 3,
+          "actions_executed": 1,
+          "decision_confidence": 0.99,
+          "min_decision_confidence": 0.99,
+          "step_confidences": [
+            0.99
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 821,
+          "jev_warm_ms": 376.5,
+          "browser_per_action_ms": 572,
+          "step_jev_ms": [
+            821,
+            311,
+            442
+          ],
+          "step_browser_ms": [
+            572,
+            508,
+            null
+          ],
+          "action_browser_ms": [
+            572
+          ],
+          "launch_ms": 431,
+          "navigation_ms": 2093,
+          "setup_ms": 0,
+          "result": "notify-random/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Action successful",
+          "first_seen_at_step": 2
+        },
+        {
+          "run": 2,
+          "out_dir": "notify-random/02",
+          "exit_code": 0,
+          "wall_ms": 6143,
+          "outcome": "action_successful",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "notify-random/02/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 5960,
+          "jev_ms": 1444,
+          "adjudication_ms": 315,
+          "browser_ms": 1099,
+          "requests": 4,
+          "input_tokens": 4531,
+          "output_tokens": 748,
+          "model": "jev-1.13.0",
+          "steps": 3,
+          "actions_executed": 1,
+          "decision_confidence": 0.99,
+          "min_decision_confidence": 0.99,
+          "step_confidences": [
+            0.99
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 811,
+          "jev_warm_ms": 316.5,
+          "browser_per_action_ms": 585,
+          "step_jev_ms": [
+            811,
+            352,
+            281
+          ],
+          "step_browser_ms": [
+            585,
+            514,
+            null
+          ],
+          "action_browser_ms": [
+            585
+          ],
+          "launch_ms": 431,
+          "navigation_ms": 2077,
+          "setup_ms": 0,
+          "result": "notify-random/02/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Action successful",
+          "first_seen_at_step": 2
+        },
+        {
+          "run": 3,
+          "out_dir": "notify-random/03",
+          "exit_code": 1,
+          "wall_ms": 4500,
+          "outcome": "action_unsuccessful",
+          "verdict": "bug",
+          "status": "outcome",
+          "trace": "notify-random/03/trace.json",
+          "pass": false,
+          "error": null,
+          "duration_ms": 4343,
+          "jev_ms": 1070,
+          "adjudication_ms": 291,
+          "browser_ms": 478,
+          "requests": 3,
+          "input_tokens": 3205,
+          "output_tokens": 523,
+          "model": "jev-1.13.0",
+          "steps": 2,
+          "actions_executed": 1,
+          "decision_confidence": 0.99,
+          "min_decision_confidence": 0.99,
+          "step_confidences": [
+            0.99
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 778,
+          "jev_warm_ms": 292,
+          "browser_per_action_ms": 478,
+          "step_jev_ms": [
+            778,
+            292
+          ],
+          "step_browser_ms": [
+            478,
+            null
+          ],
+          "action_browser_ms": [
+            478
+          ],
+          "launch_ms": 158,
+          "navigation_ms": 2004,
+          "setup_ms": 0,
+          "result": "notify-random/03/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Action unsuccesful, please try again",
+          "first_seen_at_step": 2
+        },
+        {
+          "run": 4,
+          "out_dir": "notify-random/04",
+          "exit_code": 1,
+          "wall_ms": 4646,
+          "outcome": "action_unsuccessful",
+          "verdict": "bug",
+          "status": "outcome",
+          "trace": "notify-random/04/trace.json",
+          "pass": false,
+          "error": null,
+          "duration_ms": 4501,
+          "jev_ms": 1052,
+          "adjudication_ms": 338,
+          "browser_ms": 499,
+          "requests": 3,
+          "input_tokens": 3205,
+          "output_tokens": 523,
+          "model": "jev-1.13.0",
+          "steps": 2,
+          "actions_executed": 1,
+          "decision_confidence": 0.99,
+          "min_decision_confidence": 0.99,
+          "step_confidences": [
+            0.99
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 729,
+          "jev_warm_ms": 323,
+          "browser_per_action_ms": 499,
+          "step_jev_ms": [
+            729,
+            323
+          ],
+          "step_browser_ms": [
+            499,
+            null
+          ],
+          "action_browser_ms": [
+            499
+          ],
+          "launch_ms": 302,
+          "navigation_ms": 1986,
+          "setup_ms": 0,
+          "result": "notify-random/04/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Action unsuccesful, please try again",
+          "first_seen_at_step": 2
+        },
+        {
+          "run": 5,
+          "out_dir": "notify-random/05",
+          "exit_code": 0,
+          "wall_ms": 5742,
+          "outcome": "action_successful",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "notify-random/05/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 5586,
+          "jev_ms": 1642,
+          "adjudication_ms": 351,
+          "browser_ms": 995,
+          "requests": 4,
+          "input_tokens": 4531,
+          "output_tokens": 748,
+          "model": "jev-1.13.0",
+          "steps": 3,
+          "actions_executed": 1,
+          "decision_confidence": 0.99,
+          "min_decision_confidence": 0.99,
+          "step_confidences": [
+            0.99
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 888,
+          "jev_warm_ms": 377,
+          "browser_per_action_ms": 485,
+          "step_jev_ms": [
+            888,
+            330,
+            424
+          ],
+          "step_browser_ms": [
+            485,
+            510,
+            null
+          ],
+          "action_browser_ms": [
+            485
+          ],
+          "launch_ms": 142,
+          "navigation_ms": 2084,
+          "setup_ms": 0,
+          "result": "notify-random/05/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Action successful",
+          "first_seen_at_step": 2
+        }
+      ],
+      "verdict": "flaky",
+      "agreement": 0.6,
+      "outcome_counts": {
+        "action_successful": 3,
+        "action_unsuccessful": 2
+      },
+      "verdict_counts": {
+        "pass": 3,
+        "bug": 2
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 5742,
+        "duration_ms": 5586,
+        "jev_ms": 1444,
+        "browser_ms": 995,
+        "requests": 4,
+        "input_tokens": 4531,
+        "decision_confidence": 0.99,
+        "steps": 3
+      },
+      "passes": 3,
+      "environment_failures": [],
+      "reason": null
+    }
+  },
+  "suite": {
+    "all_pass": false,
+    "verdicts": {
+      "notify-random": "flaky"
+    },
+    "flaky": [
+      "notify-random"
+    ],
+    "undetermined": [],
+    "environment_failures": {}
+  }
+}

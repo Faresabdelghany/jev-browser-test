@@ -293,3 +293,39 @@ scratchpad directory the suite was given, as documented. The trial against the p
 this directory: its nine specs are local (`specs/local/`, git-ignored) and its `results.json` files carry the
 sites' own text, so the handoff (`docs/superpowers/plans/2026-09-22-handoff-after-real-app.md`) describes it
 generically and cites the untracked files under `runs/`.
+
+## A live `flaky` (2026-09-22): the runner at `20833f2`
+
+The computed `flaky` verdict on real runs, for the first time. `run_suite.py specs/local/notify-random.json
+--repeat 5 --workers 2` from a `git archive 20833f2` export in the scratchpad with `GIT_COMMIT=20833f2` set
+and the spec copied into the export (it is local, see below). Files: `2026-09-22-live-flaky-suite.json` / `.md`.
+
+The page is a practice page whose notification after one click is a random success or a random failure by
+design: the trial's `notify-random` spec (`docs/superpowers/plans/2026-09-22-handoff-after-real-app.md`),
+whose earlier 6 runs had all succeeded. The spec declares the success as `action_successful` (pass, with a
+`text_contains` assertion) and the failure as `action_unsuccessful` (bug, with a note that the page is
+random by design).
+
+| | at `20833f2` |
+|---|---|
+| runs | 5, 2 workers, 16.4 s wall-clock |
+| outcomes | `action_successful` 3, `action_unsuccessful` 2 |
+| verdicts | pass 3, bug 2 |
+| agreement | 60% |
+| suite verdict | **flaky** (`all_pass: false`, `flaky: ["notify-random"]`, no environment failure, `suggested_verdicts` empty: every run ended in a declared outcome) |
+| evidence lines | "Action successful" 3/3 and "Action unsuccesful, please try again" 2/2: the page's own words, its spelling |
+| outcome probability / confidence | 0.91–0.93 / 0.87–0.89 for the pass, 0.98–0.99 / 0.97–0.98 for the bug |
+| first sighting → deciding step | 2 → 3 for the pass (the settle-and-recheck confirms it), 2 → 2 for the bug (terminal at first sighting) |
+| requests / input tokens per run | 4 / 4,531 for a pass, 3 / 3,205 for a bug (one step and one request fewer) |
+| wall-clock (median) | 5,742 ms |
+| decision confidence (median) | 0.99 |
+
+What it shows: `flaky` is computed from the disagreement between repeats and never diagnosed, so it reads the
+same whether the disagreement comes from the app (here, by design) or from the test; the per-run
+`result.json` files keep each run's declared verdict, so a reader sees at once that 2 of 5 runs ended in the
+declared bug with the app's own text as evidence, and the `.md` header says NOT ALL PASS and names the spec
+whose trace to open. Block G's per-sentence adjudication plays no part: both statements are one sentence.
+
+The spec is untracked (`specs/local/`, trial handoff deviation 1), so like the trial's numbers this file
+cites a spec that is not in the repo (its `spec` path points into the export). If block D promotes the trial
+specs, their committed twins are the ones to cite from then on.
