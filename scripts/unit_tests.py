@@ -558,6 +558,13 @@ class SpecValidationTests(unittest.TestCase):
         self.assertTrue(any("max_elements" in p for p in self.problems(observation={"max_elements": 251})))
         self.assertTrue(any("max_text_chars" in p for p in self.problems(observation={"max_text_chars": 50})))
 
+    def test_cdp_url(self) -> None:
+        self.assertIsNone(DEFAULTS["browser"]["cdp_url"])
+        self.assertEqual(self.problems(browser={"cdp_url": "http://127.0.0.1:9222"}), [])
+        self.assertEqual(self.problems(browser={"cdp_url": "ws://127.0.0.1:9222/devtools/browser/abc"}), [])
+        self.assertTrue(any("cdp_url" in p for p in self.problems(browser={"cdp_url": "127.0.0.1:9222"})))
+        self.assertTrue(any("cdp_url" in p for p in self.problems(browser={"cdp_url": 9222})))
+
     def test_settle_defaults_and_bounds(self) -> None:
         self.assertEqual((DEFAULTS["browser"]["settle_ms"], DEFAULTS["browser"]["quiet_ms"]), (400, 100))
         self.assertEqual(self.problems(), [])

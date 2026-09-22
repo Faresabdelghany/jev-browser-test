@@ -171,6 +171,65 @@ def settle_check(url: str) -> list[str]:
     return failures
 
 
+def cdp_check(url: str, tmp: str) -> list[str]:
+    """browser.cdp_url attaches to a browser we did not launch, runs the flow in a new tab and closes only that tab."""
+    import socket
+    import subprocess
+    import urllib.request
+    from playwright.sync_api import sync_playwright
+
+    failures = []
+    with sync_playwright() as p:
+        chromium = p.chromium.executable_path
+    with socket.socket() as s:  # a free port: reviewers run selftests concurrently
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    endpoint = f"http://127.0.0.1:{port}"
+
+    def pages() -> list[dict]:
+        with urllib.request.urlopen(f"{endpoint}/json/list", timeout=2) as resp:
+            return [t for t in json.load(resp) if t.get("type") == "page"]
+
+    proc = subprocess.Popen(
+        [chromium, "--headless=new", f"--remote-debugging-port={port}", f"--user-data-dir={os.path.join(tmp, 'cdp-profile')}",
+         "--no-first-run", "--no-default-browser-check", "about:blank"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        before = None
+        for _ in range(100):  # the debugging endpoint needs a moment to come up
+            try:
+                before = pages()
+                break
+            except Exception:  # noqa: BLE001
+                time.sleep(0.1)
+        if before is None:
+            return [f"could not reach the remote-debugging endpoint at {endpoint}"]
+        spec = base_spec(url)
+        spec["browser"]["cdp_url"] = endpoint
+        spec["browser"]["storage_state"] = os.path.join(tmp, "ignored-state.json")  # must be ignored, not opened
+        out = os.path.join(tmp, "run-cdp")
+        trace = run(spec, FakeJev(), out, screenshots=False)
+        print(summarize(trace, out))
+        print()
+        after = pages()
+        if trace["status"] != "passed":
+            failures.append(f"cdp: expected passed, got {trace['status']} ({trace.get('error')})")
+        if trace.get("browser") != {"attached": True, "cdp_url": endpoint, "storage_state_ignored": True}:
+            failures.append(f"cdp: trace.browser is {trace.get('browser')}")
+        if proc.poll() is not None:
+            failures.append("cdp: the attached browser was killed by the run")
+        if len(after) != len(before) or {t["id"] for t in after} != {t["id"] for t in before}:
+            failures.append(f"cdp: the browser's own tabs changed: before={[t['url'] for t in before]} after={[t['url'] for t in after]}")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    return failures
+
+
 def observer_check(url: str) -> list[str]:
     """Observation + execution sanity on CONTROLS_PAGE. No Jev involved."""
     from playwright.sync_api import sync_playwright
@@ -569,7 +628,10 @@ def main() -> int:
     if trace["steps"][0]["visible_text"] != text[:600]:
         failures.append("the step's visible_text excerpt is not the first 600 chars of what Jev saw")
 
-    # 13. .env in the working directory is loaded; already-exported variables win; quotes are stripped
+    # 13. browser.cdp_url: attach to a browser we did not launch, leave its tabs alone
+    failures += cdp_check(url, tmp)
+
+    # 14. .env in the working directory is loaded; already-exported variables win; quotes are stripped
     env_dir = os.path.join(tmp, "dotenv")
     os.makedirs(env_dir)
     with open(os.path.join(env_dir, ".env"), "w", encoding="utf-8") as f:

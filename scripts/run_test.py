@@ -1,6 +1,6 @@
 """Run one Jev browser test from a spec and write a trace.
 
-    python scripts/run_test.py path/to/spec.json [--out runs/<id>] [--headed] [--no-screenshots]
+    python scripts/run_test.py path/to/spec.json [--out runs/<id>] [--headed] [--no-screenshots] [--cdp-url URL]
 
 Exit codes: 0 = passed, 1 = did not pass (see trace status), 2 = spec / environment problem.
 
@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from jev_client import JevClient, JevError
 from observe import GUARD_SKIPPED, TARGET_OPERATIONS, compare_fingerprint, fingerprint, observe, signature
 from policy import build_questions, build_state, read_checks, read_choice, resolve_target, validate_choice
-from spec import load_dotenv, load_spec
+from spec import load_dotenv, load_spec, validate
 from summarize_trace import summarize
 
 TERMINAL_STATUSES = {
@@ -322,15 +322,33 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
         return [c for c in spec["never"] if checks.get(c, 0.0) >= th["never_true"]]
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=not headed and spec["browser"]["headless"],
-            channel=spec["browser"]["channel"],
-        )
-        ctx_kwargs = {"viewport": {"width": spec["browser"]["viewport"][0], "height": spec["browser"]["viewport"][1]}}
-        if spec["browser"]["storage_state"]:
-            ctx_kwargs["storage_state"] = spec["browser"]["storage_state"]
-        context = browser.new_context(**ctx_kwargs)
-        page = context.new_page()
+        cdp_url = spec["browser"]["cdp_url"]
+        viewport = {"width": spec["browser"]["viewport"][0], "height": spec["browser"]["viewport"][1]}
+        created_context = True
+        if cdp_url:
+            # Attach to a browser the user already runs (Chrome started with --remote-debugging-port). Its
+            # logged-in profile is the point: SSO-walled apps get tested without scripting the login.
+            # storage_state is meaningless here and ignored. We open one tab and close only that tab.
+            browser = p.chromium.connect_over_cdp(cdp_url)
+            if browser.contexts:
+                context, created_context = browser.contexts[0], False
+            else:
+                context = browser.new_context(viewport=viewport)
+            page = context.new_page()
+            page.set_viewport_size(viewport)
+            trace["browser"] = {"attached": True, "cdp_url": cdp_url,
+                                "storage_state_ignored": bool(spec["browser"]["storage_state"])}
+        else:
+            browser = p.chromium.launch(
+                headless=not headed and spec["browser"]["headless"],
+                channel=spec["browser"]["channel"],
+            )
+            ctx_kwargs = {"viewport": viewport}
+            if spec["browser"]["storage_state"]:
+                ctx_kwargs["storage_state"] = spec["browser"]["storage_state"]
+            context = browser.new_context(**ctx_kwargs)
+            page = context.new_page()
+            trace["browser"] = {"attached": False}
         page.set_default_timeout(spec["browser"]["action_timeout_ms"])
         try:
             page.goto(spec["start_url"], wait_until="domcontentloaded")
@@ -574,7 +592,17 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | None = None, headed: 
             except Exception:
                 trace["final"] = {"url": None, "title": None, "checks": {}}
         finally:
-            context.close()
+            if cdp_url:
+                # Only what we opened goes away: the user's tabs stay. On a connected browser,
+                # browser.close() just disconnects (and drops a context only if we created it).
+                try:
+                    page.close()
+                except Exception:  # noqa: BLE001 - already gone
+                    pass
+                if created_context:
+                    context.close()
+            else:
+                context.close()
             browser.close()
 
     trace["status"] = status or "error"
@@ -601,11 +629,17 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--headed", action="store_true", help="show the browser window")
     ap.add_argument("--no-screenshots", action="store_true")
     ap.add_argument("--model", help="override TYPESAFE_MODEL (default jev-latest)")
+    ap.add_argument("--cdp-url", help="attach to a running browser (overrides browser.cdp_url), e.g. http://127.0.0.1:9222")
     args = ap.parse_args(argv[1:])
 
     load_dotenv()  # ./.env, if present; exported variables win
     try:
         spec = load_spec(args.spec)
+        if args.cdp_url:
+            spec["browser"]["cdp_url"] = args.cdp_url
+            problems = validate(spec)
+            if problems:
+                raise ValueError("Spec problems:\n  - " + "\n  - ".join(problems))
     except (ValueError, json.JSONDecodeError, OSError) as e:
         print(str(e), file=sys.stderr)
         return 2

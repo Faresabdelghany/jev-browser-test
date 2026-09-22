@@ -49,6 +49,7 @@ DEFAULTS = {
         "action_timeout_ms": 8000,
         "storage_state": None,
         "channel": None,
+        "cdp_url": None,    # attach to a running browser (Chrome started with --remote-debugging-port) instead of launching
     },
     # 200 elements: the Choice cap is 255 and the table-row "stuck" seen in real runs was truncation at 60.
     # 4000 chars of viewport-first text: the toast the checks look for must not be crowded out by the header.
@@ -185,6 +186,9 @@ def validate(spec: dict) -> list[str]:
         errors.append("'browser.settle_ms' must be an integer between 0 and 10000 (the cap on the post-action settle)")
     elif not (isinstance(quiet_ms, int) and not isinstance(quiet_ms, bool) and 0 <= quiet_ms <= settle_ms):
         errors.append("'browser.quiet_ms' must be an integer between 0 and browser.settle_ms")
+    cdp = br.get("cdp_url")
+    if cdp is not None and not (isinstance(cdp, str) and cdp.startswith(("http://", "https://", "ws://", "wss://"))):
+        errors.append("'browser.cdp_url' must be an http(s):// or ws(s):// URL of a browser's remote-debugging endpoint")
     t = spec.get("thresholds", {})
     for k in ("check_true", "never_true", "min_confidence"):
         v = t.get(k, 0.5)

@@ -51,9 +51,27 @@ it without opening a browser. Unknown fields are ignored; every optional field h
 | `browser.action_timeout_ms` | int | 8000 | Playwright timeout per click/fill |
 | `browser.storage_state` | path | null | Playwright storage state file (cookies/localStorage) for pre-authenticated sessions |
 | `browser.channel` | string | null | e.g. `"chrome"` to use an installed Chrome instead of bundled Chromium |
+| `browser.cdp_url` | URL | null | Attach to a browser that is already running instead of launching one (see below). `storage_state`, `headless` and `channel` are ignored when attached |
 | `observation.max_elements` | int | 200 | Cap on numbered elements per step (largest Choice Jev sees), 1–250. Elements beyond it are reported as `truncated_elements` and cannot be chosen |
 | `observation.max_text_chars` | int | 4000 | Visible text sent as state, viewport-first: what is on screen comes first, then the rest of the page, cut here (≥ 100) |
 | `observation.screenshots` | bool | `true` | Save `steps/NNN.png` per step for Claude to look at |
+
+## Attach to a running browser
+
+For an app behind SSO, a hardware token or any login you cannot script, run the test inside a browser
+you are already logged into. Start Chrome with remote debugging on and point the spec (or the CLI) at it:
+
+```bash
+# macOS; use a separate profile so your everyday Chrome is not the one being driven
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="$HOME/chrome-jev" &
+# log in once in that window, then:
+python scripts/run_test.py specs/orders.json --cdp-url http://127.0.0.1:9222
+```
+
+or `"browser": { "cdp_url": "http://127.0.0.1:9222" }` in the spec. The runner opens **one new tab** in the
+first existing context (so cookies and sessions are shared), runs the flow there, and on exit closes only
+that tab; your other tabs are untouched. `storage_state` is ignored when attached (the profile already holds
+the session), and the trace records `browser: { attached: true, cdp_url, storage_state_ignored }`.
 
 ## Setup steps (deterministic Playwright, no Jev)
 
