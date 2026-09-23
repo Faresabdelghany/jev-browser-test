@@ -96,12 +96,14 @@ format, rubric and runner design.
 
 ## Examples
 
-`specs/examples/` holds ten specs against public sites: the nine the real-application trial ran
-(`docs/superpowers/plans/2026-09-22-handoff-after-real-app.md`) and one more. Their latest suite run, at `0a8727c`
-with 3 repeats each on 2 workers, is `docs/superpowers/measurements/2026-09-22-examples-suite-after-speed.md`
-(183 Jev requests in all, was 205 at `188e50e`; every pass confirmed by its assertions).
+`specs/examples/` holds eighteen specs against public sites: the nine the real-application trial ran
+(`docs/superpowers/plans/2026-09-22-handoff-after-real-app.md`), one more, and eight added on 2026-09-24 to reach
+flows the first ten did not (`docs/superpowers/plans/2026-09-24-handoff-after-more-examples.md`; they found four
+runner defects, fixed in `4bd7429` and the commit after `14ecee9`). Their latest suite run, at `14ecee9` with 3
+repeats each on 2 workers, is `docs/superpowers/measurements/2026-09-24-examples-suite-eighteen.md` (359 Jev
+requests over 54 runs, 228 s on 2 workers; the ten older specs read as at `0a8727c`).
 
-| spec | site | flow | it exercises | at `0a8727c`, 3 repeats |
+| spec | site | flow | it exercises | at `14ecee9`, 3 repeats |
 |---|---|---|---|---|
 | `shop-checkout` | saucedemo.com, `standard_user` | login in `setup`, add a named product from six cards with identical "Add to cart" buttons, cart, a three-field form, overview, finish | identical labels told apart by their card, a multi-page path, three `data` values | pass 3/3, 10 requests, "Checkout: Complete!" |
 | `shop-add-second-item` | saucedemo.com | add the second card's product, open the cart | a wrong pick shows up as an outcome; the product name is the evidence line | pass 3/3, 4 requests |
@@ -112,11 +114,20 @@ with 3 repeats each on 2 workers, is `docs/superpowers/measurements/2026-09-22-e
 | `load-wait` | the-internet.herokuapp.com/dynamic_loading/1 | press Start, a loader runs for 5 s, a text appears | Jev choosing WAIT on a page with a timer; each WAIT ends the moment the page changes | pass 3/3, 7 requests, "Hello World!" |
 | `notify-random` | the-internet.herokuapp.com/notification_message_rendered | click once; the notification is a random success or a random failure | the computed `flaky` verdict, each run keeping its own declared verdict; `text_in` on the notification element (`#flash`), because the page's own copy contains both messages and a page-wide `text_contains` could never fail | flaky (pass 2, bug 1), 3 requests |
 | `modal-close` | the-internet.herokuapp.com/entry_ad | close the modal that opens on load | an overlay that hides the page; an absence as the pass statement | pass 3/3, 4 requests |
-| `menu-random` | the-internet.herokuapp.com/disappearing_elements | nothing to click: is every menu entry listed? | an outcome decided on the start page (one step, two requests); an entry the page drops at random | flaky (bug 2, pass 1) |
+| `menu-random` | the-internet.herokuapp.com/disappearing_elements | nothing to click: is every menu entry listed? | an outcome decided on the start page (one step, two requests); an entry the page drops at random | bug 3/3 this time (flaky, bug 2 / pass 1, at `0a8727c`): the page's own coin |
+| `web-form-submit` | selenium.dev/selenium/web/web-form.html | a text input, a textarea, a native select, a checkbox, a radio, Submit | SELECT, a checkbox and a radio under `<label>`s, two typed values into different fields, the GET query asserted with `url_matches` | pass 3/3, 8 requests, "Form submitted" |
+| `add-remove-elements` | the-internet.herokuapp.com/add_remove_elements/ | Add Element twice, then one of the two Delete buttons | the same button twice on a page that changes each time (not a repeat), two identical buttons, a count asserted exactly with `text_in` `equals` | pass 3/3, 5 requests, "Delete" |
+| `dynamic-controls` | the-internet.herokuapp.com/dynamic_controls | Remove (a loader), then Enable (a loader) | WAIT after two asynchronous actions; undecided steps while a loader is visible, which the runner now waits out with backoff; `element_absent`; a pass outcome without `requires` (a check hovered at 0.79 while the Choice read 0.81) | pass 3/3, 10 requests, "It's gone!" |
+| `forgot-password` | the-internet.herokuapp.com/forgot_password | type an e-mail, Retrieve password | the demo answers "Internal Server Error": a bug outcome whose evidence line is the server's own text, kept as an `expect` spec | expected 3/3 (server_error), 4 requests |
+| `login-logout` | the-internet.herokuapp.com/login | Jev types the published username and password, logs in, logs out | a credential typed by Jev and masked through `secrets`, a two-page flow, `text_in` on `#flash` | pass 3/3, 6 requests, "You logged out of the secure area!" |
+| `table-sort-due` | the-internet.herokuapp.com/tables | click the Due header of Example 1 | headers with no affordance at all (no role, tabindex, onclick or pointer cursor): not in Jev's table, so the run ends undetermined by `low_confidence`, `stuck` or `blocked`; an `expect` on the outcome only; `text_in` on the cells because `text_order` would be fooled by the second table | expected 3/3 (undetermined; `low_confidence` 3/3 with the footer link named in `notes`), 4 requests |
+| `hrm-add-employee` | opensource-demo.orangehrmlive.com, Admin / admin123 | login in `setup`, PIM, Add Employee, two names, Save | a slow admin single-page app: forms under loading overlays (`covered_controls`), a sidebar with its own Search box, NO-EFFECT while Save is in flight, `field_value` on the saved record, `settle_ms` 2500; on 2 workers two forms opened in the same second share the pre-filled Employee Id and the second Save is rejected (`employee_id_taken`, a race in the app): run it on one worker | pass 1/3 at `14ecee9` (the id collision, then an outcome the spec lacked); see the follow-up in the measurements README |
+| `toolshop-search-cart` | practicesoftwaretesting.com | search, open a product from the results, add to cart, open the cart | a search box with its own button, card links, a toast and a header badge, `field_value` on the cart's quantity field | pass 3/3, 10 requests, "Proceed to checkout" |
 
-The shop specs' credentials are the demo accounts the site prints on its own login page. Run them all with
-`scripts/run_suite.py specs/examples/*.json --repeat 3 --workers 2`, one with `scripts/run_test.py
-specs/examples/<id>.json --headed`. Copy one as the starting point for your own application, and keep specs for
+The shop and HRM specs' credentials are the demo accounts the sites print on their own login pages. Run them all
+with `scripts/run_suite.py specs/examples/*.json --repeat 3 --workers 2` (the-internet is a free Heroku app: a cold
+start can add 25 s to a run's navigation, which the runner reports as such), one with `scripts/run_test.py
+specs/examples/<id>.json --headed`, and `hrm-add-employee` on its own with `--workers 1`. Copy one as the starting point for your own application, and keep specs for
 a private application under `specs/local/` (git-ignored).
 
 ## What it does with Jev's confidence

@@ -122,6 +122,13 @@ and for a `blocked` right after a no-op action whose `blocked_reason` has no row
 `unstable_page` and `error` the step's `blocked_reason` is about progress, not the verdict). `trace.outcome` /
 `trace.verdict` repeat the headline and `trace.result` the whole file, so a trace alone is enough.
 
+**The confirmation looks again while the page moves.** A pass sighting or Jev's DONE gets a settle-and-recheck; if
+that look finds the page's signature changed since the sighting and no pass visible, it is not the settled page, so
+`run_test` parks again (settle_ms × 2, then × 4, ending when the page changes) and looks once more, `CONFIRM_RECHECKS_MAX`
+= 2 times at most (`step.recheck_again`). Live: an admin app's Save navigated during the pause and the one look saw
+the next page's loading overlay (`done_unverified` 2/3 on a flow that had in fact saved); with the rule the second
+look sees the record.
+
 **Observation vs navigation.** `observe()` is one `page.evaluate`; a navigation landing during it (a slow Save's
 redirect arriving mid-read) throws "Execution context was destroyed". `run_test.observe_after_navigation` waits for
 the new document, settles and looks again, twice at most, counting `trace.observation_retries`; any other error

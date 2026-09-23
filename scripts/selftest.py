@@ -177,6 +177,7 @@ SETTLE_PAGE = """<!doctype html><html><head><title>Settle</title></head><body>
 # A page that loads for a while after a click: Start hides itself, "Loading..." shows, and after ?ms=<n>
 # milliseconds (default 1200; 0 = never) "Hello World!" replaces it. Nothing else is on the page, so the only
 # sensible decision while it loads is WAIT, again and again, on a page whose signature does not change.
+# ?stage=<n> swaps the loading text for "Almost there..." at n ms: a page that changes without reaching the pass.
 LOADING_PAGE = """<!doctype html><html><head><title>Loading</title></head><body>
 <h1>Dynamically loaded content</h1>
 <div id="start"><button onclick="start()">Start</button></div>
@@ -187,6 +188,8 @@ LOADING_PAGE = """<!doctype html><html><head><title>Loading</title></head><body>
    document.getElementById('start').style.display = 'none';
    document.getElementById('loading').style.display = 'block';
    const ms = parseInt(new URLSearchParams(location.search).get('ms') || '1200', 10);
+   const stage = parseInt(new URLSearchParams(location.search).get('stage') || '0', 10);
+   if (stage > 0) setTimeout(() => { document.getElementById('loading').textContent = 'Almost there...'; }, stage);
    if (ms > 0) setTimeout(() => {
      document.getElementById('loading').style.display = 'none';
      document.getElementById('finish').style.display = 'block'; }, ms);
@@ -545,7 +548,7 @@ class FakeJev:
     """Rule-based stand-in for Jev. Answers exactly the shapes the real API returns."""
 
     def __init__(self, mode: str = "normal", delay_ms: int = 0) -> None:
-        # normal | hedge_value | early_low_done | early_confident_done | done_after_add | undecided_while_loading
+        # normal | hedge_value | early_low_done | early_confident_done | done_after_add | undecided_while_loading | done_after_start
         # | invalid_operation_once | invalid_operation_always | dead_click | blocked_after_dead_click
         self.mode = mode
         self.delay_ms = delay_ms  # a slow "model", so a page mutation can land between observation and decision
@@ -656,6 +659,9 @@ class FakeJev:
         recent = state["recent_actions"]
         if self.mode == "done_after_add" and any("Add to cart" in (a.get("target") or "") for a in recent):
             answers["operation"] = self._choice("DONE", ops, conf=0.9)      # right, but the page is still painting
+            return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
+        if self.mode == "done_after_start" and any(a.get("operation") == "CLICK" for a in recent):
+            answers["operation"] = self._choice("DONE", ops, conf=0.9)      # live: DONE 0.66 on a page whose Save was still in flight
             return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
         if self.mode == "undecided_while_loading" and any(a.get("operation") == "CLICK" for a in recent):
             answers["operation"] = self._choice("WAIT", ops, conf=0.3)      # live: WAIT 0.47 vs DONE 0.46 on a visible loader
@@ -1083,6 +1089,22 @@ def main() -> int:
         failures.append(f"undecided then pass: expected passed/loaded, got {trace['status']}/{trace['outcome']} ({trace.get('error')})")
     if not any(s.get("low_confidence") for s in trace["steps"]):
         failures.append("undecided then pass: expected at least one undecided step before the pass came into view")
+
+    # 4h. a confident DONE while a two-stage loader runs: the confirmation look lands on a page that changed during the
+    #     pause ("Almost there...") and shows no pass, so it is not the settled page: the runner looks again (settle_ms
+    #     x 2, ending when the page changes) and the second look sees "Hello World!" -> passed. One look ended it
+    #     done_unverified before (live: a Save that navigated during the pause, then the next page's loading overlay).
+    spec = loading_spec("file://" + loading_html + "?ms=900&stage=250")
+    spec["browser"]["settle_ms"], spec["browser"]["quiet_ms"] = 300, 20
+    out = os.path.join(tmp, "run-done-while-staged-loading")
+    trace = run(spec, FakeJev("done_after_start"), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    again = [s for s in trace["steps"] if s.get("recheck_again")]
+    if trace["status"] != "passed" or trace["outcome"] != "loaded":
+        failures.append(f"DONE during a staged loader: expected passed/loaded, got {trace['status']}/{trace['outcome']} ({trace.get('error')})")
+    if len(again) != 1 or again[0].get("recheck_again") != 1 or (again[0].get("executed") or {}).get("wait_ms") != 600:
+        failures.append(f"the confirmation should look again once, pausing settle_ms x2: {[(s.get('recheck_again'), (s.get('executed') or {}).get('wait_ms')) for s in again]}")
 
     # 5. a low-confidence DONE is a WAIT, not a verdict -> the flow continues and passes
     spec = base_spec(url)

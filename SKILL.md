@@ -252,8 +252,13 @@ request change nothing), so what *you* control is the number of round trips and 
   `rules.py`, `jev_client.py` (read `references/runner-design.md` before changing them).
 - `references/spec-format.md`, `trace-format.md`, `verdict-rubric.md`, `runner-design.md`.
 - `specs/smoke-login.json`, `specs/smoke-login-badpw.json` (the demo-site smoke specs); `specs/examples/*.json`,
-  ten specs against public sites: a shop checkout in four variants (two with the accounts the site documents as
+  eighteen specs against public sites: a shop checkout in four variants (two with the accounts the site documents as
   broken, one of them an `expect` spec), an encyclopedia search with a real autocomplete, a todo app, a 5 s loader,
-  a random notification (`text_in` on the notification), a modal on load, a menu that drops an entry at random.
-  Copy one as the starting point for your own app. README.md "Examples" has the table.
+  a random notification (`text_in` on the notification), a modal on load, a menu that drops an entry at random, a
+  static web form (select, checkbox, radio, the GET query asserted), add/remove elements (a count asserted with
+  `text_in` `equals`), two asynchronous controls with loaders, a forgot-password form that answers with a server
+  error (expected-red), a Jev-typed login and logout, sortable table headers with no affordance (an expected
+  TEST_ISSUE: what a control Jev cannot see looks like), an admin panel's Add Employee behind loading overlays
+  (`covered_controls`, `settle_ms` raised for a slow demo), a shop's search-to-cart. Copy one as the starting point
+  for your own app. README.md "Examples" has the table.
 - `assets/spec.example.json` — a realistic spec with login in `setup` and a Jev-driven goal.

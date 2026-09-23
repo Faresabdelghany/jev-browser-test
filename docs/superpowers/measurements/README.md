@@ -531,3 +531,76 @@ from a clean export of `0a8727c`. Against the previous suite at `188e50e`:
 - **Wall-clock is not a measurement in this file**: three eval subagents were starting on the same machine while
   the suite ran (122 s against 94 s for the same suite at `7b93b47` an hour earlier); the request and token
   counts, verdicts, confidence and evidence lines are the comparison.
+
+## More examples (2026-09-24): eighteen specs at `14ecee9`, and the runner defects the eight new ones forced
+
+`2026-09-24-bench-smoke-login.json`: `bench.py specs/smoke-login.json --repeat 5` from a clean export of `14ecee9`.
+`2026-09-24-examples-suite-eighteen.json` / `.md`: `run_suite.py specs/examples/*.json --repeat 3 --workers 2` from the
+same export (54 runs, 359 Jev requests, 228 s on 2 workers). `2026-09-24-follow-up-hrm-table.json` / `.md`: the two
+specs that disagreed with themselves, rerun from a clean export of the commit that fixed their causes (section end).
+
+**The bench, against `7b93b47`** (medians of 5, the same 3 actions and 5 requests):
+
+| | `7b93b47` | `14ecee9` |
+|---|---:|---:|
+| wall | 4,958 ms | 6,085 ms |
+| runner (duration) | 4,801 ms | 5,965 ms |
+| Jev, 5 requests | 1,196 ms (239 a request) | 1,494 ms (299 a request) |
+| browser work | 764 ms | 765 ms |
+| input tokens | 6,418 | 6,446 |
+
+The runner's own browser work is the same to the millisecond and the request and token counts did not move; the
+extra second is the API answering 60 ms slower a request tonight and the demo site's page load (2.1 s). None of the
+runner changes below touches a run that never hesitates.
+
+**The suite** (verdict, median requests and input tokens a run, the evidence line Jev quoted):
+
+| spec | verdict at `14ecee9` | requests | tokens in | evidence |
+|---|---|---:|---:|---|
+| `shop-checkout` | pass 3/3 | 10 | 24,455 | "Checkout: Complete!" 3/3 |
+| `shop-add-second-item` | pass 3/3 | 4 | 10,333 | "Sauce Labs Bike Light" 3/3 |
+| `shop-checkout-problem-account` | bug 3/3 | 9 | 22,796 | "Error: Last Name is required" 3/3 |
+| `shop-checkout-error-account` | expected 3/3 | 10 | 25,730 | none (blocked, `control_had_no_effect`, as declared) |
+| `wiki-search` | pass 3/3 | 4 | 33,533 | "Playwright (software)" 3/3 |
+| `todo-add-filter` | pass 3/3 | 8 | 15,169 | "1 item left" 3/3 |
+| `load-wait` | pass 3/3 | 7 | 6,991 | "Hello World!" 3/3 |
+| `notify-random` | flaky (pass 2, bug 1) | 3 | 2,677 | "Action successful" 2/3, "Action unsuccesful, please try again" 1/3 |
+| `modal-close` | pass 3/3 | 4 | 3,527 | "If closed, it will not appear on subsequent page loads." 2/3 |
+| `menu-random` | bug 3/3 (was flaky bug 2 / pass 1) | 2 | 1,900 | none 3/3: the entry the page drops at random was missing every time |
+| `web-form-submit` | **pass 3/3** | 8 | 20,484 | "Form submitted" 3/3 |
+| `add-remove-elements` | **pass 3/3** | 5 | 5,078 | "Delete" 3/3 |
+| `dynamic-controls` | **pass 3/3** | 10 | 13,682 | "It's gone!" 3/3 |
+| `forgot-password` | **expected 3/3** (server_error) | 4 | 3,643 | "Internal Server Error" 3/3 |
+| `login-logout` | **pass 3/3** | 6 | 8,395 | "You logged out of the secure area!" 3/3 |
+| `table-sort-due` | **flaky**: declared result in 2/3 (`low_confidence` 2, `stuck` 1) | 7 | 18,705 | none |
+| `hrm-add-employee` | **flaky**: pass 1/3, `done_unverified` 2/3 | 9 | 41,461 | "Jevtest Runner" 1/3 |
+| `toolshop-search-cart` | **pass 3/3** | 10 | 39,169 | "Proceed to checkout" 3/3 |
+
+- **Wall-clock is not a measurement in this file**: the-internet.herokuapp.com is a free Heroku app and cold-started
+  three times during the suite (23–26 s of `navigation_ms` in a run; `dynamic-controls` median 25 s, one
+  `table-sort-due` run 27 s, against 5–9 s warm). The runner reports it as navigation time, never as a verdict.
+- **The ten older specs read exactly as at `0a8727c`** (verdicts, requests, evidence), except `menu-random`, whose
+  page drops an entry at random and dropped it three times of three tonight.
+- **`table-sort-due`** ended `low_confidence` twice and `stuck` once: the footer link "Elemental Selenium" was the only
+  clickable thing near the goal, and Jev's confidence in clicking it sat on both sides of `min_confidence` (0.44–0.61);
+  once executed, the link changed nothing (it opens a new tab) and three of those made `stuck`. Both endings say the
+  same thing (the headers cannot be reached), so the spec's `expect` now names the outcome only, and its `notes` name
+  the footer link as not part of the task. Follow-up: 3/3 `low_confidence` matched, 4 requests a run.
+- **`hrm-add-employee`** lost two runs to a single look: Jev said DONE while the demo's Save was in flight (`NO-EFFECT`
+  on the click, then a saving overlay: `COVERED:9`); the one confirmation look, 2.5 s later, landed on the next
+  page's own loading overlay (`COVERED:15`, the employee's name not yet rendered) and read `employee_saved` at
+  0.72–0.75. The record existed in every run (`empNumber` 470–472). The runner now looks again while the page keeps
+  changing between looks (`recheck_again`, twice at most, `CONFIRM_RECHECKS_MAX`), and the follow-up rerun on the
+  fixed runner passed the runs where the page moved. It also exposed a race in the app: two forms opened in the
+  same second on two workers were both pre-filled with Employee Id 0684 and the second Save was rejected with
+  "Employee Id already exists", an ending the spec had no outcome for (`done_unverified`, `validation_error` 0.31).
+  It is now the `employee_id_taken` bug outcome, and the spec says to run it on one worker.
+- **Four runner defects the new specs found**, all committed with offline scenarios: (1) three undecided steps ended a
+  run `low_confidence` in ~2 s while a 5 s loader was visibly running (Jev split WAIT 0.47 / DONE 0.46): undecided
+  steps now wait like a chosen WAIT, `settle_ms` × 1, 2, 4, ending when the page changes, and the count restarts when
+  the page changes; (2) Jev typed a first name into the sidebar's Search box because the form's fields sat under a
+  loading overlay and Search was the only field offered: the observer now counts `covered_controls` and Jev sees the
+  count (the same step then read TYPE_TEXT into Search at 0.38 and was refused; the next step typed into First Name
+  at 1.00); (3) a Save that navigated during the confirmation look raised "Execution context was destroyed" and the
+  run ended `error` / suggested `flaky` for a flow that had saved: the observation is retried on the new document;
+  (4) the single confirmation look described above.

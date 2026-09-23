@@ -54,7 +54,7 @@ TERMINAL_STATUSES = {
     "passed": "an outcome with verdict pass was seen and confirmed (by every assertion holding on that page, or after a settle-and-recheck when the spec has no assertions), and every assertion held",
     "outcome": "a declared outcome with a verdict other than pass was seen (result.outcome names it)",
     "assert_failed": "a pass outcome was confirmed but an assertion did not hold on the final page (result.assertions)",
-    "done_unverified": "Jev chose DONE confidently, and after a settle-and-recheck no pass outcome is visible",
+    "done_unverified": "Jev chose DONE confidently, and after a settle-and-recheck (repeated while the page kept changing) no pass outcome is visible",
     "blocked": "Jev chose BLOCKED: it saw no way to make progress",
     "never_violated": "a 'never' check became true (runs before the results contract; now status outcome)",
     "stuck": "the same action on the same page repeated max_repeat times",
@@ -211,6 +211,7 @@ def run_setup(page, spec: dict, results: list[dict] | None = None) -> list[dict]
 
 
 WAIT_BACKOFF_MAX = 4  # lever F4: consecutive WAITs on an unchanged page pause settle_ms x 1, 2, 4, 4, ... (never more than x4)
+CONFIRM_RECHECKS_MAX = 2  # a confirmation look at a page that changed during the pause and shows no pass looks again, this many times at most
 WAIT_POLL_MS = 100  # a WAIT re-reads the page's fingerprint this often and ends as soon as the page has changed
 NO_EFFECT_ACTIONS = {"CLICK", "TYPE_TEXT", "SELECT", "PRESS_ENTER"}  # an executed one of these that changed nothing is flagged
 
@@ -1063,6 +1064,19 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                         pre = {**merged_adj, "answers": answers} if merged_adj and merged_adj["name"] == passes[0]["name"] else None
                         settle_pass(page, step, obs, passes[0], was["action"], jev, pre)
                         break
+                    if sig != was["sig"] and was["rechecks"] < CONFIRM_RECHECKS_MAX:
+                        # The page changed during the pause and shows no pass yet: this is not the settled page, so
+                        # the look has not ruled out timing. Look again, pausing settle_ms x 2, x 4 (ending the moment
+                        # the page changes again), until two consecutive looks agree or the bound is reached. Live: a
+                        # slow Save navigated during the pause and the confirmation saw the next page's loading overlay.
+                        pending = {**was, "sig": sig, "rechecks": was["rechecks"] + 1}
+                        step["pending_outcome"] = was["name"]
+                        step["recheck_again"] = pending["rechecks"]
+                        park(step, "page still changing during the confirmation; looking again",
+                             wait_entry(n, was["action"], "the page changed while the result was being checked; checking again"), sig,
+                             wait_ms=spec["browser"]["settle_ms"] * min(2 ** pending["rechecks"], WAIT_BACKOFF_MAX),
+                             before=obs.get("fingerprint"))
+                        continue
                     if was["action"] == "DONE":
                         finish(page, step, "done_unverified", {"action": "DONE", "ok": True, "error": None, "confirmed": True})
                         break
@@ -1071,7 +1085,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
 
                 def confirm_later(name: str | None, action: str, reason: str, entry_op: str) -> None:
                     nonlocal pending
-                    pending = {"name": name, "action": action}
+                    pending = {"name": name, "action": action, "sig": sig, "rechecks": 0}  # sig: the page the sighting / DONE was made on
                     step["pending_outcome"] = name
                     if name:
                         final["first_seen_at_step"] = n  # the sighting; seen_at_step will be the confirming step
