@@ -1,0 +1,44 @@
+{
+  "id": "dynamic-controls",
+  "comment": "the-internet's Dynamic Controls: two buttons that each show a loading bar for a few seconds before the page changes (a checkbox is removed, a text field is enabled). Exercises WAIT after an asynchronous action, twice, undecided steps while a loader is visible (the runner waits them out with backoff and restarts the count when the page changes), and element_absent on the final page. The pass outcome carries no `requires`: the 'It's enabled!' check hovered at 0.79 while the outcome Choice read 0.81, and the exact facts are in `assert` anyway.",
+  "start_url": "https://the-internet.herokuapp.com/dynamic_controls",
+  "goal": "Click Remove and wait until the checkbox is gone, then click Enable and wait until the text field is enabled, so that the page shows both messages 'It's gone!' and 'It's enabled!'.",
+  "notes": "After each button a loading bar runs for a few seconds; the message appears when it finishes. Do not click the button again while the bar is running.",
+  "checks": {
+    "checkbox_gone": "The message 'It's gone!' is shown and no checkbox is visible",
+    "input_enabled": "The message 'It's enabled!' is shown"
+  },
+  "outcomes": {
+    "both_done": {
+      "when": "The message 'It's gone!' is shown. The message 'It's enabled!' is shown",
+      "verdict": "pass"
+    },
+    "app_error": {
+      "when": "An error message or a blank page is shown instead of the Dynamic Controls example",
+      "verdict": "bug"
+    }
+  },
+  "assert": [
+    {
+      "text_contains": "It's gone!"
+    },
+    {
+      "text_contains": "It's enabled!"
+    },
+    {
+      "element_absent": {
+        "role": "checkbox"
+      }
+    },
+    {
+      "element_present": {
+        "role": "button",
+        "name": "Disable"
+      }
+    }
+  ],
+  "budget": {
+    "max_steps": 14,
+    "max_seconds": 120
+  }
+}

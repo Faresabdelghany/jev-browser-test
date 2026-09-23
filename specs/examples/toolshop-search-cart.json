@@ -1,0 +1,26 @@
+{
+  "id": "toolshop-search-cart",
+  "comment": "practicesoftwaretesting.com, an Angular practice shop: search from the home page, open a product from the results, add it to the cart, open the cart. Exercises a search box with its own button, a results grid of card links, a toast, a header badge, and field_value on the cart's quantity field. No login needed.",
+  "start_url": "https://practicesoftwaretesting.com/",
+  "goal": "Search for the given term, open the 'Combination Pliers' product from the results, add it to the cart, then open the cart, so that the cart lists Combination Pliers with quantity 1.",
+  "notes": "The Search box sits in the left column under the price slider and has its own Search button. Every product in the grid is a card link showing the name and the price. The product page has an 'Add to cart' button; a toast confirms 'Product added to shopping cart.' and the cart icon in the header then shows a count and opens the cart page.",
+  "data": { "search": "Pliers" },
+  "checks": {
+    "results_shown": "The product grid shows results for the search, including Combination Pliers",
+    "on_product_page": "The page shows the Combination Pliers product with an 'Add to cart' button",
+    "added_toast": "A toast or the header cart badge shows that a product was added"
+  },
+  "outcomes": {
+    "in_cart": { "when": "The cart page lists 'Combination Pliers' with quantity 1. A 'Proceed to checkout' button is shown", "verdict": "pass" },
+    "no_results": { "when": "The results say that no products were found for the search", "verdict": "bug", "requires_action": true },
+    "app_error": { "when": "An error page, a stack trace or 'something went wrong' text is shown", "verdict": "bug" }
+  },
+  "assert": [
+    { "url_matches": "**/checkout" },
+    { "text_in": { "selector": "[data-test=\"product-title\"]", "contains": "Combination Pliers" } },
+    { "field_value": { "label": "Quantity for Combination Pliers", "equals": "1" } },
+    { "element_present": { "role": "button", "name": "Proceed to checkout" } }
+  ],
+  "browser": { "settle_ms": 800, "quiet_ms": 150 },
+  "budget": { "max_steps": 14, "max_seconds": 150 }
+}

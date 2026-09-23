@@ -1,0 +1,23 @@
+{
+  "id": "login-logout",
+  "comment": "the-internet's login: Jev types a username and a password from data (the page publishes both), submits, then logs out. The password is listed in secrets although it is public, to exercise masking on a value Jev types itself. text_in on #flash because the login page's own copy talks about the secure area.",
+  "start_url": "https://the-internet.herokuapp.com/login",
+  "goal": "Log in with the given username and password so that the secure area says 'You logged into a secure area!', then click Logout, so that the login page shows the message 'You logged out of the secure area!'.",
+  "notes": "The Username and Password fields are on the Login Page; the Login button submits them. The secure area has a Logout button.",
+  "data": { "username": "tomsmith", "password": "SuperSecretPassword!" },
+  "secrets": ["password"],
+  "checks": {
+    "logged_in": "The heading says 'Secure Area' and a Logout button is shown",
+    "login_error": "A message bar says the username or the password is invalid"
+  },
+  "outcomes": {
+    "logged_out": { "when": "The message bar says 'You logged out of the secure area!'. The 'Login Page' heading is shown", "verdict": "pass" },
+    "login_rejected": { "when": "The message bar says 'Your username is invalid!' or 'Your password is invalid!'", "verdict": "bug", "note": "the credentials are the ones the page itself publishes" }
+  },
+  "assert": [
+    { "url_matches": "**/login" },
+    { "text_in": { "selector": "#flash", "contains": "You logged out of the secure area!" } },
+    { "element_present": { "role": "button", "name": "Login" } }
+  ],
+  "budget": { "max_steps": 10, "max_seconds": 90 }
+}

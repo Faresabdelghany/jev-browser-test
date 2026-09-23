@@ -1,0 +1,86 @@
+{
+  "id": "hrm-add-employee",
+  "comment": "OrangeHRM's public demo (Admin / admin123, printed on its login page): a real admin panel. Login is scripted in setup; Jev then navigates the sidebar (PIM, Add Employee), fills two of three name fields and saves, and the pass is the new employee's Personal Details page. Exercises a slow single-page app with loading overlays (the form's fields are `covered_controls` for a moment after the route change, and again while Save is in flight), a long permanent sidebar of menu entries with its own Search box, and field_value on the saved record. settle_ms 2500 because the demo's Save takes about four seconds to navigate; the sidebar Search box was where Jev typed the first name before the observer reported covered controls.",
+  "start_url": "https://opensource-demo.orangehrmlive.com/web/index.php/auth/login",
+  "goal": "Open PIM from the sidebar, then Add Employee, type the given first name and last name, and click Save, so that the new employee's Personal Details page shows the name 'Jevtest Runner'.",
+  "notes": "The left sidebar lists the modules; PIM is the employee module, and its top row has Employee List, Add Employee and Reports. The sidebar's Search box only filters the menu entries: never type into it. After Add Employee is clicked the form takes a moment to load; type the names only once the First Name, Middle Name and Last Name fields are shown, and leave Middle Name and the Employee Id as they are. Do not turn on 'Create Login Details'. A spinner shows for a moment after Save before the Personal Details page appears.",
+  "data": {
+    "first_name": "Jevtest",
+    "last_name": "Runner"
+  },
+  "setup": [
+    {
+      "action": "fill",
+      "selector": "input[name=\"username\"]",
+      "value": "Admin"
+    },
+    {
+      "action": "fill",
+      "selector": "input[name=\"password\"]",
+      "value": "admin123"
+    },
+    {
+      "action": "click",
+      "selector": "button[type=\"submit\"]"
+    },
+    {
+      "action": "wait_for",
+      "url": "**/dashboard/**",
+      "timeout_ms": 40000
+    },
+    {
+      "action": "wait_for",
+      "selector": "a[href*=\"/pim/\"]",
+      "timeout_ms": 30000
+    }
+  ],
+  "checks": {
+    "on_add_form": "The page heading says 'Add Employee' and shows First Name, Middle Name and Last Name fields",
+    "required_error": "A red 'Required' message is shown under a form field"
+  },
+  "outcomes": {
+    "employee_saved": {
+      "when": "The page heading says 'Personal Details'. The employee name 'Jevtest Runner' is shown",
+      "verdict": "pass"
+    },
+    "validation_error": {
+      "when": "A red 'Required' or 'Invalid' message is shown under a field of the Add Employee form after Save",
+      "verdict": "bug",
+      "requires_action": true,
+      "note": "both required names were provided in data"
+    },
+    "app_error": {
+      "when": "An error page, a stack trace or 'something went wrong' text is shown",
+      "verdict": "bug"
+    }
+  },
+  "assert": [
+    {
+      "url_matches": "**/pim/viewPersonalDetails/empNumber/*"
+    },
+    {
+      "text_contains": "Personal Details"
+    },
+    {
+      "field_value": {
+        "label": "First Name",
+        "equals": "Jevtest"
+      }
+    },
+    {
+      "field_value": {
+        "label": "Last Name",
+        "equals": "Runner"
+      }
+    }
+  ],
+  "browser": {
+    "settle_ms": 2500,
+    "quiet_ms": 200,
+    "navigation_timeout_ms": 45000
+  },
+  "budget": {
+    "max_steps": 16,
+    "max_seconds": 200
+  }
+}

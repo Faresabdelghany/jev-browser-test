@@ -1,0 +1,56 @@
+{
+  "id": "table-sort-due",
+  "comment": "the-internet's Data Tables, Example 1: the column headers sort the table but carry no affordance at all: no role, no tabindex, no onclick attribute, default cursor, handlers bound by jQuery. Neither the observer nor a sighted user hovering the header can tell they are clickable, so Jev is offered only the row links and splits CLICK against BLOCKED below min_confidence; the runner executes nothing and ends low_confidence with a TEST_ISSUE suggestion (the accessibility-gap row of the troubleshooting table). Kept as an expected-red spec: it documents what a control without affordance looks like, and turns green the day the headers get a role or a pointer cursor. The requires_action bug outcome 'not_sorted' read 0.79 on the start page and was correctly deferred.",
+  "start_url": "https://the-internet.herokuapp.com/tables",
+  "goal": "In the first table (Example 1), click the 'Due' column header so that the rows are sorted by the amount due in ascending order, $50.00 first and $100.00 last.",
+  "notes": "Only Example 1, the upper table, matters. One click on a header sorts ascending; a second click reverses it.",
+  "checks": {
+    "due_ascending": "In the first table the Due column reads $50.00, $50.00, $51.00, $100.00 from top to bottom"
+  },
+  "outcomes": {
+    "sorted_ascending": {
+      "when": "The rows of the first table are ordered by the Due amount from smallest to largest, with $100.00 in the last row",
+      "verdict": "pass"
+    },
+    "sorted_as_text": {
+      "when": "In the first table $100.00 is in the top row of the Due column after the header was clicked",
+      "verdict": "bug",
+      "requires_action": true,
+      "note": "amounts sorted as strings, not as numbers"
+    },
+    "not_sorted": {
+      "when": "After the Due header was clicked the first table still lists Smith, Bach, Doe, Conway in that order",
+      "verdict": "bug",
+      "requires_action": true
+    }
+  },
+  "assert": [
+    {
+      "text_in": {
+        "selector": "#table1 tbody tr:nth-child(1) td:nth-child(4)",
+        "equals": "$50.00"
+      }
+    },
+    {
+      "text_in": {
+        "selector": "#table1 tbody tr:nth-child(3) td:nth-child(4)",
+        "equals": "$51.00"
+      }
+    },
+    {
+      "text_in": {
+        "selector": "#table1 tbody tr:nth-child(4) td:nth-child(4)",
+        "equals": "$100.00"
+      }
+    }
+  ],
+  "budget": {
+    "max_steps": 8,
+    "max_seconds": 60
+  },
+  "expect": {
+    "outcome": "undetermined",
+    "status": "low_confidence",
+    "suggested_verdict": "test_issue"
+  }
+}

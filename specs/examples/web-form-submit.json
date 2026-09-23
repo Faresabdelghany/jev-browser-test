@@ -1,0 +1,27 @@
+{
+  "id": "web-form-submit",
+  "comment": "Selenium's static practice form (GitHub Pages, no backend): one page with a text input, a textarea, a native <select>, checkboxes and radios, submitted with GET so the query string records every value. Exercises SELECT, a checkbox and a radio under <label>s, two typed values into different fields, and URL assertions on the submitted values.",
+  "start_url": "https://www.selenium.dev/selenium/web/web-form.html",
+  "goal": "Fill the web form: type the given text into the Text input, type the given message into the Textarea, choose 'Two' in the Dropdown (select), tick the 'Default checkbox' and pick the 'Default radio', then press Submit, so that the page says 'Form submitted' and 'Received!'.",
+  "notes": "Leave the password, datalist, file, colour, date and range fields as they are. The disabled and readonly inputs cannot be typed into. 'Checked checkbox' and 'Checked radio' are already selected on load; the ones to change are 'Default checkbox' and 'Default radio'.",
+  "data": {
+    "text_input": "Jev was here",
+    "textarea": "A short message typed by the test"
+  },
+  "checks": {
+    "select_two": "The Dropdown (select) shows 'Two' as the chosen option",
+    "default_checkbox_ticked": "The 'Default checkbox' is ticked",
+    "default_radio_picked": "The 'Default radio' is selected"
+  },
+  "outcomes": {
+    "form_submitted": { "when": "The page heading says 'Form submitted'. The text 'Received!' is shown", "verdict": "pass" },
+    "validation_error": { "when": "The form shows a validation error or a field is marked invalid after Submit", "verdict": "bug" }
+  },
+  "assert": [
+    { "url_matches": "**/submitted-form.html?*my-text=Jev+was+here*" },
+    { "url_matches": "**/submitted-form.html?*my-select=2*" },
+    { "url_matches": "**/submitted-form.html?*my-check=on&my-check=on*" },
+    { "text_contains": "Received!" }
+  ],
+  "budget": { "max_steps": 14, "max_seconds": 120 }
+}

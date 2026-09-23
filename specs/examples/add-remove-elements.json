@@ -1,0 +1,20 @@
+{
+  "id": "add-remove-elements",
+  "comment": "the-internet's Add/Remove Elements: the same button clicked twice on a page that changes each time (two identical actions that are not a repeat), then one of two identical Delete buttons. The pass is a count, which is soft for Jev, so the exact check is text_in on the container: its text equals 'Delete' only when exactly one button is left.",
+  "start_url": "https://the-internet.herokuapp.com/add_remove_elements/",
+  "goal": "Click 'Add Element' twice so that two 'Delete' buttons appear below it, then click one of the Delete buttons, so that exactly one Delete button remains.",
+  "notes": "Each click on Add Element adds one Delete button under the horizontal line. Clicking a Delete button removes only that button.",
+  "checks": {
+    "two_deletes": "Exactly two 'Delete' buttons are shown below 'Add Element'",
+    "one_delete": "Exactly one 'Delete' button is shown below 'Add Element'"
+  },
+  "outcomes": {
+    "one_delete_left": { "when": "Exactly one 'Delete' button is shown below the 'Add Element' button", "verdict": "pass", "requires": ["one_delete"] },
+    "add_did_nothing": { "when": "No 'Delete' button appeared after 'Add Element' was clicked", "verdict": "bug", "requires_action": true }
+  },
+  "assert": [
+    { "element_present": { "role": "button", "name": "Delete" } },
+    { "text_in": { "selector": "#elements", "equals": "Delete" } }
+  ],
+  "budget": { "max_steps": 10, "max_seconds": 90 }
+}
