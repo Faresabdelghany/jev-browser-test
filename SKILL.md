@@ -115,7 +115,9 @@ action landed and the page did not change: the classic dead control; the next st
 `DEFERRED:<outcome>` (true before any action, not counted), `LOW-CONF`, `STALE`, `EVIDENCE-ASKED`. With the
 default `screenshots: "key"` the terminal step, every flagged step and the step after a no-effect action have a
 `steps/NNN.png`; `--screenshots all` pictures every step on a rerun. The one reading rule: the checks recorded
-in step *n* describe the page **before** action *n*; action *n*'s effect shows in step *n+1*.
+in step *n* describe the page **before** action *n*; action *n*'s effect shows in step *n+1*. After a no-effect
+action the check values in step *n+1* can drift toward what the action should have done (Jev sees the action in
+its history); the element table, the page signature and the `NO-EFFECT` flag are the hard facts there.
 
 ### 4. Judge and report
 
@@ -156,11 +158,17 @@ which shows in one run that the spec is sound and the defect is the app's.
 
 Handed a run folder (`result.json`, `trace.json`, screenshots), the answer is in it: skip to steps 3–4.
 
-1. Read `result.json`, the step table, the pictures. **Do not launch a browser first.**
+1. Read `result.json`, the step table, the pictures. **Do not launch a browser first.** Two things the typed
+   reason does not tell you. After `control_had_no_effect`, read **every** `NO-EFFECT` flag in the table: the
+   reason names the last dead control, and the first one is often earlier and changes the ticket (a Finish that
+   does nothing behind an Add to cart that did nothing: the order was empty). And compare the spec as run
+   (`trace.spec`) with the spec on disk or the skill's example of it: a missing `expect`, a changed outcome or
+   `when` means the red may already be known, and the fix is in the spec, not the app.
 2. "Is it flaky?" is answered from the trace's flake signatures: `STALE` steps, `executed.ok: false`, `RETRIED`,
    `usage.reconnects`, a `reason.phase`, an `error` status. None present, plus a confident declared outcome or a
    typed reason with a suggestion → deterministic evidence; say so and do not rerun. Rerun once only when a
-   signature is present, the user asks, or after a spec fix you made.
+   signature is present, the user asks, or after a spec fix you made; a rerun for pictures (`--screenshots all`)
+   is that one rerun, so make it after the spec fix, not before it.
 3. To separate TEST_ISSUE from BUG cheaply, run a **control**: the same spec with a known-good account, or the
    sibling spec known to pass. One run, ~10 Jev calls. Prefer it to reading the app's source, which was not asked
    for and rarely changes the verdict.

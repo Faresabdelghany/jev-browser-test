@@ -87,12 +87,17 @@ look at (step number, screenshot, the specific question).
 
 When you are handed a run folder (`result.json`, `trace.json`, screenshots) the answer is in it. In order:
 
-1. Read `result.json`, then the step table, then the pictures. Do not launch a browser first.
+1. Read `result.json`, then the step table, then the pictures. Do not launch a browser first. Two things the
+   typed reason leaves out: after `control_had_no_effect`, read every `NO-EFFECT` flag in the table, because the
+   reason names the terminal dead control and the first one is often earlier and changes the ticket (an empty
+   order behind a Finish that does nothing); and compare the spec as run (`trace.spec`) with the spec on disk or
+   the skill's example of it, because a missing `expect` or a changed outcome means the red may already be known.
 2. "Is it flaky?" is answered from the trace's **flake signatures** before any rerun: `stale` steps,
    `executed.ok == false`, `retried`, `usage.reconnects > 0`, a `settle` that ended on `cap` at the decisive step,
    `reason.phase`, an `error` status. None present and a confident declared outcome or a typed reason with a
    suggestion → the run is deterministic evidence; say so and do not rerun. Rerun (once) only when a signature is
-   present, when the user explicitly asks for a rerun, or after a spec fix you made.
+   present, when the user explicitly asks for a rerun, or after a spec fix you made. A rerun for pictures
+   (`--screenshots all`) is that one rerun: combine it with the spec fix rather than spending both.
 3. The cheapest way to separate TEST_ISSUE from BUG is a **control run**: the same spec with a known-good account
    or the sibling spec that is known to pass (`shop-checkout.json` beside `shop-checkout-error-account.json`). One
    run, ~10 Jev calls, and it settles whether the flow or the app is at fault. Prefer it to fetching the app's
@@ -108,13 +113,14 @@ When you are handed a run folder (`result.json`, `trace.json`, screenshots) the 
 3. Flags column: `LOW-CONF`, `ACTION-FAILED`, `FORCED-CLICK`, `DISPATCHED-CLICK`, `REPEAT×n`, `NEVER:*`,
    `STALE` (the page changed while Jev decided; nothing was executed, the loop observed again),
    `NO-TARGET-ANSWER`, `INVALID-ANSWER` (a Jev answer failed validation; the reason is in `step.invalid_answer`),
-   `RETRIED` (the request was re-sent once), `ERROR`.
+   `RETRIED` (the request was re-sent once), `ERROR`, `NO-EFFECT` (the action landed and the page did not
+   change; when the run ended on `control_had_no_effect`, read every one of them, the first is rarely the last).
 4. The step **after** the last sensible action: its checks and screenshot show what the app actually did.
    With the default `screenshots: "key"` only the terminal and flagged steps have a picture; the step
    before a divergence usually has none, but its element table and probabilities are in the trace
    (`--step N`). Rerun with `--screenshots all` when a human needs to see that page.
 5. `--step N` for the divergence point: was the chosen element the right one? What else was offered?
-6. `final.png`.
+6. `steps/final.png`.
 
 Do not rerun a run just because it is red. Read it first; a rerun that passes tells you nothing about
 *why* the first one failed, and a `never_violated` with a clear error on screen is more informative the
@@ -142,10 +148,11 @@ Keep it short; the trace is the appendix. Use this shape (plain prose is fine fo
 
 **What happened:** <2–4 sentences: the story of the run (result.story), ending with where it diverged>
 **Evidence:** "<evidence.line>" at step <n> (probability <p>, path confidence <c>), screenshot steps/<nnn>.png
+**Evidence:** step <n>, <OPERATION> [<idx>] <role> "<name>" (target <t>), next observation unchanged, screenshot steps/<nnn>.png   ← undetermined: no line to quote
 **Expected:** <what a user should have seen>
 
 **Next step:** <fix in the app | spec change made and rerun result | what a human should check>
-**Fix:** <files changed, one line on the cause> — re-run: <status>, <n> actions (was <status>)   ← BUG only
+**Fix:** <files changed, one line on the cause> — re-run: <status>, <n> actions (was <status>)   ← BUG with the repository available
 Trace: runs/<id>/<ts>/trace.json (failing), runs/<id>/<ts2>/trace.json (after fix)
 ```
 

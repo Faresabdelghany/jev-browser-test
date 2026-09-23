@@ -1543,6 +1543,16 @@ class SummarizeTests(unittest.TestCase):
             self.assertEqual(summarize_main(["summarize_trace.py", tmp, "--result"]), 0)  # the embedded result serves
         self.assertIn("goal_reached", "".join(str(c.args[0]) for c in out.write.call_args_list if c.args))
 
+    def test_dump_step_names_a_missing_element_table(self) -> None:
+        from summarize_trace import dump_step
+        trace = {"steps": [
+            {"n": 1, "elements": [{"idx": 0, "role": "button", "name": "Finish"}]},
+            {"n": 2, "elements": []},   # a TYPE_TEXT or terminal step carries no table
+        ]}
+        self.assertIn('[0] button "Finish"', dump_step(trace, 1))
+        self.assertIn("no element table recorded", dump_step(trace, 2))  # not a heading followed by nothing
+        self.assertEqual(dump_step(trace, 3), "no step 3 in trace")
+
 
 class ReportTests(unittest.TestCase):
     def test_render_report_is_self_contained(self) -> None:

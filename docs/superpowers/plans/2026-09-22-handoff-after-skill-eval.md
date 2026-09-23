@@ -72,8 +72,40 @@ The new features were used unprompted (`requires_action`, `text_in`, `expect`, c
 exports with `GIT_COMMIT` set and cited in the measurements README. The eval workspaces are outside the repo
 (`~/Downloads/jev-browser-test-workspace/`); `evals/evals.json` and the triage fixture are committed.
 
+## Review of iteration 2 (2026-09-24) and the decision on iteration 3
+
+Fares delegated the review. The three with-skill outputs were read in full (reports, the agents' `user_notes.md`, the
+corrected spec) against the grades and against the skill at `b14d587`; the reviews are in `iteration-2/feedback.json`
+(`status: complete`). Outputs: nothing to change; the verdicts, evidence blocks, controls and rerunnable specs are what
+each prompt asked for. Of the agents' friction notes, every runner and doc gap they named was already fixed in
+`b14d587` except these, fixed in the same commit as this section (docs plus one script line, 88 unit tests, selftest OK):
+
+- Triage: after `control_had_no_effect`, read every `NO-EFFECT` flag; the reason names the last dead control and the
+  first one is often earlier (eval 1: an empty order behind a Finish that did nothing). SKILL.md triage-only mode
+  step 1, rubric triage step 1 and its flags list.
+- Triage: compare the spec as run (`trace.spec`) with the spec on disk or the skill's example (eval 1: the overnight
+  spec lacked the `expect` block the example carries). Same places.
+- A rerun for pictures (`--screenshots all`) is the one rerun; combine it with the spec fix. SKILL.md and rubric.
+- The report template has an `**Evidence:**` line for `undetermined` runs (no line to quote) and the `**Fix:**` line
+  is marked "BUG with the repository available".
+- Check values can drift after a no-effect action (Jev sees the action in its history); the element table, the page
+  signature and the flag are the hard facts. SKILL.md step 3.
+- `steps/final.png` named as such in the rubric, spec-format and trace-format.
+- `summarize_trace.py --step N` prints a sentence instead of an empty heading when the step carries no element table.
+
+**No iteration 3.** The three prompts are at ceiling (28/28 with the skill, both arms graded identically), the
+old skill's three misses were exactly the targeted behaviours, and the residual notes were clarifications no
+assertion would discriminate on; a rerun would cost ~400k tokens for the same numbers. A further iteration would need
+new, harder prompts (a multi-page flow with a modal, a private app behind `storage_state`, a spec the agent must
+write from a vague one-line request), which is a scope decision for Fares, not a follow-up of this review.
+
+Left as they were, on purpose: the observer's wrapper-span duplicate (Jev picked the select at 1.00), persistent suite
+workers (~0.5 s per run), `allowed-tools` limited to the skill's own scripts (a probe or `cp` prompts once; widening
+the pattern would be the surprise), `stuck_reason` answering `other` after a no-effect select (the declared
+`requires_action` outcome is the dependable signal, and the troubleshooting row says so).
+
 ## Suggested next steps (none required)
 
-- Review `iteration-2/review.html` (or the live viewer) and leave feedback; iteration 3 would target whatever it says.
-- Decide on the observer's wrapper-span rule and on persistent suite workers.
-- Re-import the skill into Claude Desktop (`git archive HEAD` zipped as `jev-browser-test.skill`; the workspace holds one).
+- Re-import the skill into Claude Desktop (`git archive HEAD` zipped as `jev-browser-test.skill`; the workspace holds
+  `jev-browser-test-b14d587.skill`, one commit behind this file).
+- Use the skill on a real application from the smoke specs; harder eval prompts only if that use turns up misses.

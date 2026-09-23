@@ -20,7 +20,7 @@ evidence, the file Claude reads first. The trace is the *evidence* behind it; th
   "reason": null,                                               // for undetermined: see below
   "evidence": { "line": "Your password is invalid!",            // the page line Jev selected in the adjudication request (verbatim), or null
                 "present": 0.94,                                // the adjudication's Noul over the outcome statement
-                "screenshot": "steps/005.png",                  // the sighting step's picture (forced for non-pass outcomes), else final.png
+                "screenshot": "steps/005.png",                  // the sighting step's picture (forced for non-pass outcomes), else steps/final.png
                 "checks": { "logged_in": 0.03, "login_error": 0.81 } },   // the checks at the sighting step
   "assertions": [ { "url_matches": "**/login", "ok": true, "actual": "https://.../login" } ],   // every assertion with what was found
   "outcomes_seen_earlier": [],                                  // non-terminal sightings: non-pass ones (fail_fast: false) and pass sightings that vanished on their recheck ({.., "unconfirmed": true})

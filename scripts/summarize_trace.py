@@ -207,7 +207,7 @@ def dump_step(trace: dict, n: int) -> str:
             table = "\n".join(
                 f"[{e['idx']}] {e['role']} \"{e.get('name', '')}\"" + (f" value=\"{e['value']}\"" if e.get("value") else "")
                 for e in elements
-            )
+            ) or "(no element table recorded for this step: only steps that chose an element carry one)"
             return f"{body}\n\nelements offered at step {n}:\n{table}"
     return f"no step {n} in trace"
 
