@@ -27,7 +27,7 @@ at the repo (`~/.claude/skills/jev-browser-test` is a symlink to `~/Downloads/je
 | `forgot-password` | the-internet | expected 3/3 | the demo answers "Internal Server Error": a real defect kept as an `expect` spec |
 | `login-logout` | the-internet | pass 3/3 | a Jev-typed, masked credential and a two-page flow: nothing to fix |
 | `table-sort-due` | the-internet | expected 3/3 (follow-up) | headers with no affordance at all: not in Jev's table; the ending flips between `low_confidence` and `stuck` on borderline confidence, so `expect` names the outcome only |
-| `hrm-add-employee` | OrangeHRM demo | pass 2/3 at the fix commit, the third a declared race | forms under loading overlays (runner fix 2: `covered_controls`), a Save that navigates late (fixes 3 and 4), a pre-filled Employee Id two workers share (`employee_id_taken`; run on one worker) |
+| `hrm-add-employee` | OrangeHRM demo | pass 3/3 at `9139e22` on one worker (on two workers, 2/3 and the Employee Id race) | forms under loading overlays (runner fix 2: `covered_controls`), a Save that navigates late (fixes 3 and 4), a pre-filled Employee Id two workers share (`employee_id_taken`; run on one worker) |
 | `toolshop-search-cart` | practicesoftwaretesting.com | pass 3/3 | search box + button, card links, toast, badge, `field_value` on the cart: nothing to fix |
 
 ## The four runner fixes

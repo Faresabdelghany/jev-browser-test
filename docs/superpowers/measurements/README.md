@@ -590,11 +590,15 @@ runner changes below touches a run that never hesitates.
   on the click, then a saving overlay: `COVERED:9`); the one confirmation look, 2.5 s later, landed on the next
   page's own loading overlay (`COVERED:15`, the employee's name not yet rendered) and read `employee_saved` at
   0.72–0.75. The record existed in every run (`empNumber` 470–472). The runner now looks again while the page keeps
-  changing between looks (`recheck_again`, twice at most, `CONFIRM_RECHECKS_MAX`), and the follow-up rerun on the
-  fixed runner passed the runs where the page moved. It also exposed a race in the app: two forms opened in the
+  changing between looks (`recheck_again`, twice at most, `CONFIRM_RECHECKS_MAX`; selftest 4h). It also exposed a race in the app: two forms opened in the
   same second on two workers were both pre-filled with Employee Id 0684 and the second Save was rejected with
   "Employee Id already exists", an ending the spec had no outcome for (`done_unverified`, `validation_error` 0.31).
   It is now the `employee_id_taken` bug outcome, and the spec says to run it on one worker.
+- **Follow-up at `9139e22`** (`2026-09-24-follow-up-hrm-table.{json,md}`: both specs × 3 on one worker from a clean
+  export): `hrm-add-employee` **pass 3/3**, 10 requests and 47.5k input tokens a run, "Jevtest Runner" 2/3 and
+  "Personal Details" 1/3 as the evidence line; `table-sort-due` **expected 3/3** (`low_confidence`, 4 requests a run).
+  The repeated confirmation look did not need to fire in these three runs (the 2.5 s pause reached the saved record);
+  two of the table runs again carried a 20 s cold start in `navigation_ms`.
 - **Four runner defects the new specs found**, all committed with offline scenarios: (1) three undecided steps ended a
   run `low_confidence` in ~2 s while a 5 s loader was visibly running (Jev split WAIT 0.47 / DONE 0.46): undecided
   steps now wait like a chosen WAIT, `settle_ms` × 1, 2, 4, ending when the page changes, and the count restarts when
