@@ -87,6 +87,9 @@ check and outcome questions): it confirms a sighting or a DONE made on the last 
 outcome under the same `fail_fast` rule, and records a pass first seen there as `pending_outcome` under
 `budget_exhausted` (no recheck happened, so it is not a pass; the next run gets one more step). Every
 runner-inserted WAIT (pending confirmation, low confidence, stale decision) goes through one `park()`
+(an undecided step passes it the WAIT ladder `settle_ms` × 1, 2, 4 and the observation's fingerprint, so it ends
+the moment the page changes, and its streak restarts when the page signature changes: measured live, three flat
+pauses ended a run while a 5 s loader was still running)
 helper; only the stale one skips the `settle_ms` pause, because the page is already moving and the
 event-based settle is what waits for it to stop.
 
@@ -118,6 +121,12 @@ and for a `blocked` right after a no-op action whose `blocked_reason` has no row
 / `stuck` / `low_confidence` / `budget_exhausted`, else the status row: for `done_unverified`, `assert_failed`,
 `unstable_page` and `error` the step's `blocked_reason` is about progress, not the verdict). `trace.outcome` /
 `trace.verdict` repeat the headline and `trace.result` the whole file, so a trace alone is enough.
+
+**Observation vs navigation.** `observe()` is one `page.evaluate`; a navigation landing during it (a slow Save's
+redirect arriving mid-read) throws "Execution context was destroyed". `run_test.observe_after_navigation` waits for
+the new document, settles and looks again, twice at most, counting `trace.observation_retries`; any other error
+still ends the run `error`. Live, an admin app's Save navigated during the confirmation look and the run ended
+`error` / suggested `flaky` for what was a pass.
 
 **Freshness guard.** Jev decides on an observation, but the page may move on while it decides. Before
 executing, `observe.fingerprint()` re-reads what the observation recorded, without re-tagging: url, title,
@@ -176,7 +185,9 @@ adjudication request per bug sighting.
 - **Richer state**: add fields to `build_state`. The state is an object with a descriptive name for every
   part (`goal`, `hints`, `step {n, max}`, `page {url, title}`, `elements` as records with `index`, `role`,
   `label`, `value`, `checked`, `context` and the `operations` each element can be the target of,
-  `truncated_elements`, `visible_text`, `available_data_values` as `{key, value}` with secrets masked, and
+  `truncated_elements`, `covered_controls` (controls on screen under another layer and therefore not in the table:
+  a form still under its loading overlay; live, Jev typed a first name into the sidebar's Search box because it was
+  the only free field), `visible_text`, `available_data_values` as `{key, value}` with secrets masked, and
   `recent_actions`: the last 10 history entries `{step, operation, target, value_key, ok, page_changed}`).
   `page_changed` compares the page signature the action was decided on with the next observation, so Jev
   can see that its own click did nothing. `policy.element_operations` is the single place that decides which

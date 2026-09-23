@@ -484,7 +484,7 @@ class BuildStateTests(unittest.TestCase):
         history = [{"step": i, "operation": "CLICK", "target": f"[{i}]", "value_key": None, "ok": True, "page_changed": True}
                    for i in range(1, 13)]
         state = build_state(spec, observation(self.ELEMENTS), 13, history)
-        self.assertEqual(list(state), ["goal", "hints", "step", "page", "elements", "truncated_elements",
+        self.assertEqual(list(state), ["goal", "hints", "step", "page", "elements", "truncated_elements", "covered_controls",
                                        "visible_text", "available_data_values", "recent_actions"])
         self.assertEqual(state["hints"], "dismiss the banner")
         self.assertEqual(state["step"], {"n": 13, "max": 25})
@@ -1552,6 +1552,49 @@ class SummarizeTests(unittest.TestCase):
         self.assertIn('[0] button "Finish"', dump_step(trace, 1))
         self.assertIn("no element table recorded", dump_step(trace, 2))  # not a heading followed by nothing
         self.assertEqual(dump_step(trace, 3), "no step 3 in trace")
+
+
+class UndecidedAndCoveredTests(unittest.TestCase):
+    def test_observe_after_navigation_retries_only_the_race(self) -> None:
+        from run_test import observe_after_navigation
+        spec = {"browser": {"navigation_timeout_ms": 10}}
+        page = mock.Mock()
+        calls, retried = {"n": 0}, []
+
+        def flaky() -> dict:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("Page.evaluate: Execution context was destroyed, most likely because of a navigation")
+            return {"ok": True}
+
+        with mock.patch("run_test.settle", return_value={"ended": "quiet", "ms": 1}) as settled:
+            self.assertEqual(observe_after_navigation(page, spec, flaky, lambda: retried.append(1)), {"ok": True})
+        self.assertEqual((calls["n"], len(retried), settled.call_count), (2, 1, 1))
+        page.wait_for_load_state.assert_called_once_with("domcontentloaded", timeout=10)
+
+        def closed() -> dict:
+            raise RuntimeError("Target page, context or browser has been closed")
+
+        with mock.patch("run_test.settle") as settled:
+            with self.assertRaises(RuntimeError):  # not the race: propagates at once
+                observe_after_navigation(page, spec, closed)
+        self.assertEqual(settled.call_count, 0)
+
+        def always() -> dict:
+            raise RuntimeError("Execution context was destroyed")
+
+        with mock.patch("run_test.settle", return_value={"ended": "quiet", "ms": 1}) as settled:
+            with self.assertRaises(RuntimeError):  # the race persisting beyond the retries propagates
+                observe_after_navigation(page, spec, always, retries=2)
+        self.assertEqual(settled.call_count, 2)
+
+    def test_covered_controls_reach_state_and_flags(self) -> None:
+        from summarize_trace import _flags
+        obs = observation([])
+        self.assertEqual(build_state(SPEC, obs, 1, [])["covered_controls"], 0)
+        self.assertEqual(build_state(SPEC, dict(obs, covered=3), 1, [])["covered_controls"], 3)
+        self.assertEqual(_flags({"covered_controls": 3}), "COVERED:3")
+        self.assertEqual(_flags({"covered_controls": 0}), "")
 
 
 class ReportTests(unittest.TestCase):

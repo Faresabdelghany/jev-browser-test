@@ -171,6 +171,7 @@ environment failure (or a spec file is missing / two files share an id).
   "expected": { "expect": {...}, "matched": true, ... },  // only for a spec with `expect` (the same record as result.expected)
   "browser": { "attached": false },      // or { attached: true, cdp_url, storage_state_ignored } when browser.cdp_url was used
   "passed_without_actions": true,        // only present if the start page already satisfied done_when
+  "observation_retries": 1,              // only when > 0: observations that raced a navigation ("Execution context was destroyed") and were retried on the new document
   "usage": { "jev_requests": 5, "input_tokens": 2100, "output_tokens": 300, "model": "jev-1.13.0",
              "reconnects": 0 },      // reconnects > 0: the kept-alive API connection dropped mid-run and was reopened
   "spec": { ... },                       // the spec as run, secrets replaced by "<secret>"
@@ -182,6 +183,7 @@ environment failure (or a spec file is missing / two files share an id).
                                            // "screenshot_error": "TimeoutError: ..." when a capture the policy wanted failed (3 s cap; a web font that never loads)
       "elements": [ { "idx": 3, "role": "button", "name": "Add to cart", "x": 116, "y": 151, "w": 79, "h": 21, ... } ],
       "truncated_elements": 0, "visible_text": "first 600 chars of the viewport-first text Jev saw...",
+      "covered_controls": 3,                                         // only when > 0: controls on screen but under another layer (a loading overlay, a dialog), counted, not offered; Jev sees the count in its state; flag COVERED:3
       "offered_operations": ["CLICK", "TYPE_TEXT", "WAIT", "DONE", "BLOCKED"],
       "operation": { "choice": "CLICK", "confidence": 0.91, "top_probabilities": { "CLICK": 0.9, "DONE": 0.05 } },
       "target": { "question": "click_target", "choice": "3", "element": 3, "label": "[3] button \"Add to cart\"",
@@ -202,6 +204,9 @@ environment failure (or a spec file is missing / two files share an id).
       "adjudication_merged": true,                                   // the confirming step: the evidence questions rode in this request (state.lines added)
       "assertions": [ ... ],                                         // on the confirming step: the assert block's results
       "low_confidence": false, "decision_confidence": 0.94, "repeat_count": 1,
+      //   an undecided step (low_confidence true) is not executed: "low_streak" counts consecutive undecided steps on one page signature (the run ends
+      //   low_confidence at thresholds.max_low_confidence_steps; a page change restarts it), and its executed is a runner WAIT with "wait_ms" (settle_ms x 1, 2, 4)
+      //   and "wait" like a chosen WAIT's, ending as soon as the page changes
       "page_changed": true,                                          // set once the next observation exists: did this step's action change the page signature?
       "never_violated": ["error_visible"],                           // only when a never check fired
       "invalid_answer": "operation: choice 'FLY' was not offered",   // only when an answer failed validation

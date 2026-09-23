@@ -112,7 +112,8 @@ verbatim), `confirmed_by` (`assertions` or `recheck`), `path_confidence`, `asser
 (the outcome read below 0.8), so the runner took the checking step and saw it there: correct, one request more.
 Open the step table only for `undetermined` or a surprising outcome. Flags worth knowing: `NO-EFFECT` (an
 action landed and the page did not change: the classic dead control; the next step's picture shows it),
-`DEFERRED:<outcome>` (true before any action, not counted), `LOW-CONF`, `STALE`, `EVIDENCE-ASKED`. With the
+`DEFERRED:<outcome>` (true before any action, not counted), `COVERED:<n>` (controls on screen but under a loading
+overlay or a dialog, so not offered: the form is still loading), `LOW-CONF`, `STALE`, `EVIDENCE-ASKED`. With the
 default `screenshots: "key"` the terminal step, every flagged step and the step after a no-effect action have a
 `steps/NNN.png`; `--screenshots all` pictures every step on a rerun. The one reading rule: the checks recorded
 in step *n* describe the page **before** action *n*; action *n*'s effect shows in step *n+1*. After a no-effect
@@ -235,6 +236,8 @@ request change nothing), so what *you* control is the number of round trips and 
 | `stuck` with confidence ≈ `min_confidence` and flat target probabilities | The control Jev needs is not in the table (a div with no role or cursor hint): a `setup` click or an ARIA role in the app. TEST_ISSUE, note the accessibility gap |
 | `budget_exhausted` with `stuck_reason: still_loading` | The page was still loading when the budget ran out. Rerun once; then raise `budget`, or suspect a loader that never completes |
 | `unstable_page` | The page never held still (`step.stale` says what moved). Raise `browser.quiet_ms` / `settle_ms` or `wait_for` the thing that keeps changing in `setup` |
+| `low_confidence` with WAIT and DONE split around 0.45 while a loader is visible | Jev could not tell "still loading" from "done". Undecided steps already wait like a WAIT (`settle_ms` × 1, 2, 4, ending when the page changes) and the count restarts when the page changes; if the run still ends before the loader does, raise `settle_ms`, and name the loader's end in the goal ("until the message X appears") |
+| Jev typed into a search or filter box while a form was still loading (`COVERED:<n>` on that step) | The form's own fields sat under a loading overlay, so the one free field got the text. Jev sees `covered_controls` in its state and a `notes` sentence naming the fields to wait for ("type only once First Name and Last Name are shown; the sidebar Search filters the menu") settles it; for a start page, `wait_for` the form in `setup` |
 | A suite reads `flaky` but every run is a clean declared outcome | The app varies by design; see Suites. A spec with two legitimate pass endings agrees on verdicts, so declare both as `pass` outcomes |
 | An expected-red spec keeps a nightly gate red | Declare its ending in `expect`; the suite then reads it `expected` and goes red only when the behaviour changes |
 | Choice rejected as too large | Lower `observation.max_elements` |

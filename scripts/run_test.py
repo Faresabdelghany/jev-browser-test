@@ -58,7 +58,7 @@ TERMINAL_STATUSES = {
     "blocked": "Jev chose BLOCKED: it saw no way to make progress",
     "never_violated": "a 'never' check became true (runs before the results contract; now status outcome)",
     "stuck": "the same action on the same page repeated max_repeat times",
-    "low_confidence": "max_low_confidence_steps consecutive low-confidence decisions (none of them executed): Jev could not choose between the offered options",
+    "low_confidence": "max_low_confidence_steps consecutive low-confidence decisions on an unchanged page (none of them executed): Jev could not choose between the offered options",
     "budget_exhausted": "max_steps or max_seconds reached (a pass first seen on the final look is not confirmed: result.reason.pending_outcome)",
     "unstable_page": "the page kept changing while Jev was deciding: max_stale consecutive decisions were stale and nothing was executed",
     "error": "the runner, browser or TypeSafe API failed",
@@ -330,6 +330,29 @@ def history_entry(n: int, operation: str, target: dict | None, value_key: str | 
     if not executed["ok"]:
         entry["error"] = (executed.get("error") or "")[:80]
     return entry
+
+
+NAVIGATION_RACE_MARKERS = ("Execution context was destroyed", "Cannot find context with specified id", "Frame was detached")
+
+
+def observe_after_navigation(page, spec: dict, observe_fn, on_retry=None, retries: int = 2):
+    """`observe_fn()` made to survive a navigation landing during the evaluate ("Execution context was destroyed":
+    a saved form's redirect arriving while the page is being read). Wait for the new document, settle, look again,
+    up to `retries` times, calling `on_retry()` each time; any other error, or the race persisting, propagates.
+    Measured live: a slow admin app's Save navigated during the confirmation look and ended the run `error`."""
+    for attempt in range(retries + 1):
+        try:
+            return observe_fn()
+        except Exception as e:  # noqa: BLE001 - only the navigation race is retried
+            if attempt == retries or not any(m in str(e) for m in NAVIGATION_RACE_MARKERS):
+                raise
+            if on_retry is not None:
+                on_retry()
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=spec["browser"]["navigation_timeout_ms"])
+            except Exception:  # noqa: BLE001 - settle() waits for the new document to hold still either way
+                pass
+            settle(page, spec)
 
 
 def wait_entry(n: int, operation: str, reason: str) -> dict:
@@ -689,7 +712,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     last_page_changed: bool | None = None  # of the last executed action, once the next observation exists
     wait_streak, last_wait_sig = 0, None  # lever F4: consecutive Jev WAITs on the same page signature
     after_no_effect = False  # the last executed action changed nothing: the next step shows that page (a key picture)
-    low_streak = 0
+    low_streak, last_low_sig = 0, None  # consecutive undecided (low-confidence) steps on one page signature
     stale_streak = 0
     # A pass outcome (or Jev's DONE) gets one settle-and-recheck before it counts: {name, action}
     pending: dict | None = None
@@ -782,18 +805,22 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
             step["blocked_reason"] = None
             note_invalid(step, f"blocked_reason: {type(e).__name__}: {str(e)[:200]}")
 
-    def park(step: dict, reason: str, entry: dict | None, sig: str, pause: bool = True) -> None:
+    def park(step: dict, reason: str, entry: dict | None, sig: str, pause: bool = True,
+             wait_ms: int | None = None, before: dict | None = None) -> None:
         """A step the runner refuses to act on (a pending confirmation, a low-confidence decision, a stale
         decision): recorded as a WAIT, pictured per the policy, `entry` (when given) appended to Jev's
-        recent_actions, then a real wait like the WAIT operation - settle_ms, then the event-based settle -
-        and the step is appended. Every runner-inserted WAIT goes through here, so they all wait the same."""
+        recent_actions, then a real wait like the WAIT operation - `wait_ms` (default settle_ms), ending as soon
+        as the page differs from `before` when a fingerprint is given, then the event-based settle - and the
+        step is appended. Every runner-inserted WAIT goes through here, so they all wait the same."""
         step["executed"] = {"action": "WAIT", "ok": True, "error": None, "reason": reason}
         capture(page, step)
         if entry is not None:
             record(entry, step, sig)
         t_b = time.perf_counter()
         if pause:
-            page.wait_for_timeout(spec["browser"]["settle_ms"])
+            ms = spec["browser"]["settle_ms"] if wait_ms is None else wait_ms
+            step["executed"]["wait_ms"] = ms
+            step["executed"]["wait"] = wait_for_change(page, before, ms)
         step["settle"] = settle(page, spec)
         step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
         trace["steps"].append(step)
@@ -849,8 +876,12 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
         return time.perf_counter()
 
     def look() -> dict:
-        """Observe the page with every secret value masked in what Jev and the trace will see."""
-        return mask_secrets(observe(page, obs_cfg["max_elements"], obs_cfg["max_text_chars"]), secret_values)
+        """Observe the page with every secret value masked in what Jev and the trace will see. A navigation landing
+        during the observation is waited out and the new page observed instead (`trace.observation_retries`)."""
+        def bump() -> None:
+            trace["observation_retries"] = trace.get("observation_retries", 0) + 1
+        return observe_after_navigation(
+            page, spec, lambda: mask_secrets(observe(page, obs_cfg["max_elements"], obs_cfg["max_text_chars"]), secret_values), bump)
 
     def final_page(checks: dict) -> dict:
         """trace.final for a run that ends without a fresh observation: url and title masked like a step's."""
@@ -950,6 +981,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     "truncated_elements": obs["truncated"],
                     "visible_text": obs["visible_text"][:600],
                 }
+                if obs.get("covered"):
+                    step["covered_controls"] = obs["covered"]  # controls on screen but under another layer: not offered
                 if after_no_effect:
                     step["after_no_effect"] = True  # this is the page the previous action failed to change
                 state = build_state(spec, obs, n, history)
@@ -1093,16 +1126,25 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                 step["decision_confidence"] = round(min(confs), 3)
 
                 if low:
-                    low_streak += 1
+                    # Undecided steps are counted on one page: a page that changes under them (a loader finishing,
+                    # a form appearing) restarts the count, and each undecided step waits like a chosen WAIT,
+                    # settle_ms x 1, 2, 4 (WAIT_BACKOFF_MAX), ending the moment the page changes. Measured live:
+                    # three flat settle_ms pauses (~2 s in all) ended a run low_confidence while a 5 s loader was
+                    # still visibly running and Jev split WAIT against DONE at 0.47 / 0.46.
+                    low_streak = low_streak + 1 if sig == last_low_sig else 1
+                    last_low_sig = sig
                     stale_streak = 0  # a refused decision is not a stale one: `max_stale` counts consecutive stale steps
+                    step["low_streak"] = low_streak
                     if low_streak >= th["max_low_confidence_steps"]:
                         ask_reason(step, state)
                         finish(page, step, "low_confidence", dict(STOP))
                         break
                     park(step, f"low confidence; {operation} not executed",
-                         wait_entry(n, "WAIT", "undecided between the offered options; nothing was executed"), sig)
+                         wait_entry(n, "WAIT", "undecided between the offered options; nothing was executed"), sig,
+                         wait_ms=spec["browser"]["settle_ms"] * min(2 ** (low_streak - 1), WAIT_BACKOFF_MAX),
+                         before=obs.get("fingerprint"))
                     continue
-                low_streak = 0
+                low_streak, last_low_sig = 0, None
 
                 # Freshness guard. Jev decided on the observation; the page may have moved on while it
                 # was deciding (a toast, a re-render, a redirect). Re-read identity and meaning of what the
@@ -1203,6 +1245,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                     "elements": obs["elements"], "truncated_elements": obs["truncated"],
                     "visible_text": obs["visible_text"][:600], "final_look": True, "offered_operations": [],
                 }
+                if obs.get("covered"):
+                    step["covered_controls"] = obs["covered"]
                 questions, meta = build_questions(spec, obs, last_operation, outcomes, ask_blocked=True)
                 last_look = {k: v for k, v in questions.items() if k in spec["checks"] or k in ("outcome", "blocked_reason")}
                 checks, outcome_answer = {}, None

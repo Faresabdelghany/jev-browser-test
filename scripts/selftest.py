@@ -358,6 +358,41 @@ def cdp_check(url: str, tmp: str) -> list[str]:
     return failures
 
 
+# A form under a loading overlay for 700 ms, and a fixed Search box the overlay does not cover: the observer must
+# count the covered controls (not offer them) while the overlay is up, and offer them once it is gone.
+COVERED_PAGE = """<!doctype html><html><head><title>Covered</title></head><body>
+<h1>Add Employee</h1>
+<form><label>First Name <input id="fn"></label> <label>Last Name <input id="ln"></label> <button type="button">Save</button></form>
+<input id="side" placeholder="Search" style="position:fixed;top:8px;right:8px">
+<div id="loader" style="position:fixed;left:0;top:40px;width:100%;height:200px;background:rgba(255,255,255,.6)"></div>
+<script>setTimeout(() => document.getElementById('loader').remove(), 700);</script>
+</body></html>"""
+
+
+def covered_check(url: str) -> list[str]:
+    """A form under a loading overlay: its controls are counted as covered and not offered; once the overlay is gone
+    they are offered and the count is zero. No Jev involved."""
+    from playwright.sync_api import sync_playwright
+    from observe import observe
+
+    failures = []
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page()
+        pg.goto(url)
+        first = observe(pg, 50, 500)
+        names = [e.get("name") for e in first["elements"]]
+        if first.get("covered") != 3 or any(n in names for n in ("First Name", "Last Name", "Save")) or "Search" not in names:
+            failures.append(f"covered form: expected covered=3 and only Search offered, got covered={first.get('covered')} names={names}")
+        pg.wait_for_timeout(1000)
+        second = observe(pg, 50, 500)
+        names = [e.get("name") for e in second["elements"]]
+        if second.get("covered") != 0 or not all(n in names for n in ("First Name", "Last Name", "Save")):
+            failures.append(f"overlay gone: expected covered=0 and the form offered, got covered={second.get('covered')} names={names}")
+        b.close()
+    return failures
+
+
 def observer_check(url: str) -> list[str]:
     """Observation + execution sanity on CONTROLS_PAGE. No Jev involved."""
     from playwright.sync_api import sync_playwright
@@ -510,7 +545,7 @@ class FakeJev:
     """Rule-based stand-in for Jev. Answers exactly the shapes the real API returns."""
 
     def __init__(self, mode: str = "normal", delay_ms: int = 0) -> None:
-        # normal | hedge_value | early_low_done | early_confident_done | done_after_add
+        # normal | hedge_value | early_low_done | early_confident_done | done_after_add | undecided_while_loading
         # | invalid_operation_once | invalid_operation_always | dead_click | blocked_after_dead_click
         self.mode = mode
         self.delay_ms = delay_ms  # a slow "model", so a page mutation can land between observation and decision
@@ -622,6 +657,9 @@ class FakeJev:
         if self.mode == "done_after_add" and any("Add to cart" in (a.get("target") or "") for a in recent):
             answers["operation"] = self._choice("DONE", ops, conf=0.9)      # right, but the page is still painting
             return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
+        if self.mode == "undecided_while_loading" and any(a.get("operation") == "CLICK" for a in recent):
+            answers["operation"] = self._choice("WAIT", ops, conf=0.3)      # live: WAIT 0.47 vs DONE 0.46 on a visible loader
+            return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
         clicks = questions.get("click_target", {}).get("criteria", {})
         types = questions.get("type_target", {}).get("criteria", {})
         results_shown = self._find(clicks, "Add to cart") is not None
@@ -666,7 +704,7 @@ class FakeJev:
         return {"jev_requests": self.requests, "input_tokens": 400 * self.requests, "output_tokens": 60 * self.requests, "model": "fake-jev"}
 
 
-STATE_KEYS = ["goal", "hints", "step", "page", "elements", "truncated_elements", "visible_text",
+STATE_KEYS = ["goal", "hints", "step", "page", "elements", "truncated_elements", "covered_controls", "visible_text",
               "available_data_values", "recent_actions"]
 
 
@@ -803,6 +841,10 @@ def main() -> int:
 
     # 0. observer: hidden-input checkboxes are seen, described with their row, and clickable
     failures += observer_check("file://" + controls)
+    covered_html = os.path.join(tmp, "covered.html")
+    with open(covered_html, "w", encoding="utf-8") as f:
+        f.write(COVERED_PAGE)
+    failures += covered_check("file://" + covered_html)
     # 0b. settle: ends on DOM quiet, on the cap, or on a visible autocomplete option
     failures += settle_check("file://" + settle_html)
 
@@ -1006,6 +1048,41 @@ def main() -> int:
         failures.append(f"blocked after a dead click: expected a no-op click then BLOCKED asked stuck_reason, got {trace['status']} {[(s.get('page_changed'), 'stuck_reason' in s) for s in steps]}")
     if reason != {"status": "blocked", "blocked_reason": "other", "stuck_reason": "control_had_no_effect", "suggested_verdict": "bug"}:
         failures.append(f"blocked right after a no-op with blocked_reason other should suggest bug from stuck_reason: {reason}")
+
+    # 4f. Jev undecided while a loader runs (WAIT at 0.3 after Start) and the pass never comes: each undecided step
+    #     waits like a chosen WAIT (settle_ms x 1, 2, 4, ending the moment the page changes) and the count restarts
+    #     when the page changes, so the run ends low_confidence only after max_low_confidence_steps undecided steps
+    #     on ONE page (live: three flat pauses, ~2 s, ended a run while a 5 s loader was still running).
+    spec = loading_spec("file://" + loading_html + "?ms=900")
+    spec["browser"]["settle_ms"], spec["browser"]["quiet_ms"] = 300, 20
+    spec["outcomes"] = {"loaded": {"when": "The text 'Goodbye' is displayed", "verdict": "pass"}}
+    out = os.path.join(tmp, "run-undecided-loading")
+    trace = run(spec, FakeJev("undecided_while_loading"), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    lows = [s for s in trace["steps"] if s.get("low_confidence")]
+    streaks = [s.get("low_streak") for s in lows]
+    ladder = [(s.get("executed") or {}).get("wait_ms") for s in lows[:-1]]
+    ends = [((s.get("executed") or {}).get("wait") or {}).get("ended") for s in lows]
+    if trace["status"] != "low_confidence":
+        failures.append(f"undecided while loading: expected low_confidence, got {trace['status']} ({trace.get('error')})")
+    if len(lows) < 4 or streaks[-3:] != [1, 2, 3]:
+        failures.append(f"the undecided count should restart when the page changes: streaks {streaks}")
+    if ladder[:2] != [300, 600] or "changed" not in ends:
+        failures.append(f"undecided steps should wait settle_ms x1, x2, ... and end when the page changes: {ladder} {ends}")
+
+    # 4g. the same indecision with a reachable pass: the waits outlive the 900 ms loader, "Hello World!" comes into
+    #     view and the run passes, the pass confirmed by its assertion.
+    spec = loading_spec("file://" + loading_html + "?ms=900")
+    spec["browser"]["settle_ms"], spec["browser"]["quiet_ms"] = 300, 20
+    out = os.path.join(tmp, "run-undecided-then-pass")
+    trace = run(spec, FakeJev("undecided_while_loading"), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    if trace["status"] != "passed" or trace["outcome"] != "loaded":
+        failures.append(f"undecided then pass: expected passed/loaded, got {trace['status']}/{trace['outcome']} ({trace.get('error')})")
+    if not any(s.get("low_confidence") for s in trace["steps"]):
+        failures.append("undecided then pass: expected at least one undecided step before the pass came into view")
 
     # 5. a low-confidence DONE is a WAIT, not a verdict -> the flow continues and passes
     spec = base_spec(url)

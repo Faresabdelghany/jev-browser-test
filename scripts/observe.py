@@ -115,6 +115,7 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
   const vw = window.innerWidth, vh = window.innerHeight;
   const candidates = [];
   const seen = new Set();
+  let covered = 0;  // controls on screen but under another layer (overlay, dialog, banner): counted, not offered
 
   // Returns true if the element was accepted into the table.
   const describe = (el, via) => {
@@ -140,7 +141,7 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
         // unless what is on top is the control's own styled box: its label, or a sibling in the same wrapper.
         const lbl = top.closest('label');
         const sibling = el.parentElement && (top.parentElement === el.parentElement || el.parentElement.contains(top));
-        if (!((lbl && lbl.control === el) || (formControl && sibling))) return false;
+        if (!((lbl && lbl.control === el) || (formControl && sibling))) { if (via !== 'cursor') covered++; return false; }
       }
     }
     let role = el.getAttribute('role');
@@ -292,6 +293,7 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     title: document.title,
     elements: kept,
     truncated: candidates.length - kept.length,
+    covered,
     visible_text: visibleText(maxTextChars),
     fingerprint: { url: location.href, title: document.title, text_head: visibleText(500), nodes },
     scroll: {
@@ -515,6 +517,8 @@ def render_table(obs: dict) -> str:
     lines = [f"[{e['idx']}] {element_label(e)}" for e in obs["elements"]]
     if obs.get("truncated"):
         lines.append(f"... {obs['truncated']} more interactive elements not shown (scroll to reveal)")
+    if obs.get("covered"):
+        lines.append(f"... {obs['covered']} controls on screen are under another layer (overlay, dialog, banner) and not offered")
     if not lines:
         lines.append("(no interactive elements visible)")
     return "\n".join(lines)

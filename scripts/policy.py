@@ -158,7 +158,10 @@ def build_state(spec: dict, obs: dict, step: int, history: list[dict]) -> dict:
 
     `elements` is the table as structured records, `available_data_values` the strings Jev may pick
     for TYPE_TEXT (secrets masked), `recent_actions` the last HISTORY_WINDOW entries of the runner's
-    history. Each history entry is a dict {step, operation, target, value_key, ok, page_changed}
+    history. `covered_controls` counts the controls on screen that sit under another layer (a loading
+    overlay, a dialog, a banner) and are therefore not in the table: a form whose fields are all covered is
+    still loading, and the sensible move is WAIT, not typing into the one field that is free.
+    Each history entry is a dict {step, operation, target, value_key, ok, page_changed}
     (runner-inserted waits carry a `reason` instead of a target). `page_changed` is filled in by the
     runner once the next observation exists; it is what lets Jev notice its own click did nothing.
     """
@@ -170,6 +173,7 @@ def build_state(spec: dict, obs: dict, step: int, history: list[dict]) -> dict:
         "page": {"url": obs["url"], "title": obs["title"]},
         "elements": [describe_element(spec, e) for e in obs["elements"]],
         "truncated_elements": obs.get("truncated", 0),
+        "covered_controls": obs.get("covered", 0),
         "visible_text": obs["visible_text"],
         "available_data_values": data_values(spec),
         "recent_actions": list(history[-HISTORY_WINDOW:]),

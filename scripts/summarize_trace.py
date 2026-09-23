@@ -79,6 +79,8 @@ def _flags(step: dict) -> str:
         f.append("NO-EFFECT")  # the action landed and the page Jev sees did not change (a dead control?); derived for older traces
     if step.get("outcome_deferred"):
         f.append("DEFERRED:" + ",".join(step["outcome_deferred"]))  # true of the page, but no action was taken yet (requires_action)
+    if step.get("covered_controls"):
+        f.append(f"COVERED:{step['covered_controls']}")  # controls on screen under another layer (a loading overlay, a dialog): not offered
     if step.get("adjudication_merged"):
         f.append("EVIDENCE-ASKED")  # the evidence questions rode in this confirmation request
     if step.get("stale"):

@@ -126,7 +126,7 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `thresholds.never_true` | 0–1 | 0.8 | A `never` check counts as violated at or above this |
 | `thresholds.outcome_true` | 0–1 | 0.8 | An outcome with a `when` is seen when the outcome Choice gives it at least this probability |
 | `thresholds.min_confidence` | 0–1 | 0.5 | If the operation, the target, or (for TYPE_TEXT) the `type_value` choice is below this, the decision is **not executed**: the step becomes a WAIT and is flagged `low_confidence` |
-| `thresholds.max_low_confidence_steps` | int | 3 | Consecutive undecided steps before stopping with `low_confidence` |
+| `thresholds.max_low_confidence_steps` | int | 3 | Consecutive undecided steps **on one page** before stopping with `low_confidence`. A page that changes under them (a loader finishing, a form appearing) restarts the count, and each undecided step waits like a chosen WAIT: `settle_ms` × 1, 2, 4, ending the moment the page changes (`step.low_streak`, `executed.wait`) |
 | `thresholds.max_repeat` | int | 3 | Same action on an unchanged page this many times → `stuck` |
 | `thresholds.max_stale` | int | 3 | Consecutive decisions invalidated because the page changed while Jev was deciding (nothing executed) → `unstable_page` |
 | `browser.headless` | bool | `true` | `--headed` on the CLI overrides |
