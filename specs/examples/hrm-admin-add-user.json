@@ -75,7 +75,7 @@
     },
     {
       "action": "wait_for",
-      "selector": "a[href*=\"/leave/\"]",
+      "selector": "a[href*=\"/admin/\"]",
       "timeout_ms": 45000
     }
   ],

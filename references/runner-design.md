@@ -274,6 +274,20 @@ instead of six times `button "Add to cart"` (measured on such a grid: target pro
 bar is not enough, the card with its title is; a group that nothing distinguishes gets no context. Each
 element records `via: "semantic" | "label" | "cursor"`.
 
+Three more things the table carries since `b92b24f`. **Below the first screen**: form controls and buttons whose box
+starts under the viewport are offered all the same, marked `below: true` (`(below the fold)` in their label), at most
+twelve, on top of the table's budget and without the occlusion test (nothing can cover what is not on screen); the
+click scrolls them into view. Links and plain clickables there stay out: a long article's links would flood the table.
+Measured: an Add Candidate form's Save at y=849 of an 800 px viewport was never offered, and Jev clicked the calendar
+icon beside the date field instead. **Icon-only controls** are named from their icon class (`bi-calendar`,
+`mdi-close`, `oxd-date-input-icon` → `calendar icon`, `date input icon`) when nothing else names them. **Layer
+controls**, the count that tells a dialog from a blank loader, take a control that only shares the layer's box as the
+layer's own only when it lies over the covered region: a fixed top bar painted above a full-page loader is the shell
+around a loading page, not a dialog (live: `COVERED:13(layer:5)` on a post-Save shell, the five being the top bar, so no
+deferral applied and the next tab was clicked while the save was in flight). SCROLL_DOWN / SCROLL_UP move the window by
+80% of the viewport and fall back to a wheel event at the viewport's centre when the window did not move (an app shell
+whose content scrolls inside an overflow container), recorded as `executed.scroll`.
+
 The controls the occlusion test rejects are counted as `covered` (Jev sees `covered_controls`) and tagged
 `data-jev-covered`, and the fingerprint re-reads how many of them are still covered: a loading overlay lifting
 off a form moves no tagged node and no text, yet it is the change every WAIT on such a page is waiting for, so
