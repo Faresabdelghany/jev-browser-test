@@ -128,6 +128,9 @@ CONTROLS_PAGE = """<!doctype html><html><head><title>Controls</title><style>
   <textarea aria-label="Notes">hello there</textarea>
   <div contenteditable="true" aria-label="Editor" style="border:1px solid #ccc;display:inline-block;min-width:80px">draft</div>
   <select aria-label="Grouped"><option>open-1</option><optgroup label="Closed" disabled><option>closed-1</option></optgroup></select>
+  <div class="grp"><div><label>Employee Id</label></div><div><input id="empid" value="0393"></div></div>
+  <span id="cc-lbl">Cost centre</span> <input id="cc" aria-labelledby="cc-lbl">
+  <div class="grp"><label>Range</label> <input id="r1"> <input id="r2"></div>
 </form>
 <details><summary>Show error</summary>Payment failed: card declined</details>
 <!-- a product grid of plain divs: three identical "Add to cart" buttons, two cards at the same price, and per card
@@ -449,6 +452,14 @@ def observer_check(url: str) -> list[str]:
             failures.append(f"a textarea should carry its content as value only: {by_name.get('Notes')}")
         if by_name.get("Editor", {}).get("value") != "draft" or by_name.get("Editor", {}).get("text") is not None or by_name.get("Editor", {}).get("role") != "textbox":
             failures.append(f"a contenteditable should be a textbox with its content as value: {by_name.get('Editor')}")
+        # A label beside its control in a wrapper, with no for/id (component libraries), names the control; so does
+        # aria-labelledby; one label over two controls names neither (they keep their empty name).
+        if by_name.get("Employee Id", {}).get("role") != "textbox" or by_name.get("Employee Id", {}).get("value") != "0393":
+            failures.append(f"an unlinked label in the same field wrapper should name the control: {by_name.get('Employee Id')}")
+        if by_name.get("Cost centre", {}).get("role") != "textbox":
+            failures.append(f"aria-labelledby should name the control: {by_name.get('Cost centre')}")
+        if any(e["name"] == "Range" for e in obs["elements"] if e["role"] == "textbox"):
+            failures.append("one label over two controls must not name either of them")
         grouped = by_name.get("Grouped", {}).get("options") or []
         if [o["disabled"] for o in grouped] != [False, True]:
             failures.append(f"options inside a disabled optgroup should be disabled: {grouped}")

@@ -231,7 +231,10 @@ the checkbox/radio it controls when the input itself is parked offscreen. Pass 3
 chain (cursor inherits) and skipping anything nested in a pass-1 control; this surfaces React-style
 clickables that carry no role (an avatar menu, a card, a table row). A `<label>` whose control is already
 in the table is skipped here: it adds nothing but a tempting no-op click (measured: with the structured
-state Jev clicked "Username" before typing into it). Anonymous controls get a `context`
+state Jev clicked "Username" before typing into it). A field with no accessible name takes the `<label>` that sits
+beside it in its wrapper when that wrapper holds exactly one control (labels with no `for`, the norm in component
+libraries; live, an unnamed Username filter lost to the sidebar's named Search box), or its `aria-labelledby` text;
+one label over two controls names neither. Anonymous controls get a `context`
 (the text of their row / list item / label) so `checkbox ""` in a table reads
 `checkbox "" in "SKU-1005 Gadget 6-pack Acme Ltd"`. Pass 4 does the same for **identical labels**: a group of
 elements sharing role and name with no context (one "Add to cart" per product card, one "Edit" per entry,

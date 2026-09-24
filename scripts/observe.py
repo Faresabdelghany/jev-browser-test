@@ -117,6 +117,24 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
   const seen = new Set();
   let covered = 0;  // controls on screen but under another layer (overlay, dialog, banner): counted, not offered
 
+  // A field with no accessible name whose <label> sits beside it in a wrapper, with no for/id linking the two
+  // (OrangeHRM's oxd-input-group, many React form kits): the nearest ancestor holding exactly this one control
+  // and a <label> names it. Live, a filter box reached Jev as `textbox ""` next to a named sidebar Search box,
+  // and the username went into the sidebar. One label over two controls (a date range) names neither, and the
+  // climb stops at a form, fieldset, table, list or dialog, which hold many fields.
+  const FIELDS = 'input:not([type="hidden"]), select, textarea, [contenteditable="true"], [role="textbox"], [role="combobox"], [role="searchbox"]';
+  const groupLabel = el => {
+    let g = el.parentElement;
+    for (let depth = 0; g && g !== document.body && depth < 5; depth++, g = g.parentElement) {
+      if (g.matches('form, fieldset, table, ul, ol, dialog, [role="dialog"]')) return '';
+      const n = g.querySelectorAll(FIELDS).length;
+      if (n > 1) return '';
+      const lab = g.querySelector('label');
+      if (lab && n === 1) return clean(lab.innerText).slice(0, 80);
+    }
+    return '';
+  };
+
   // Returns true if the element was accepted into the table.
   const describe = (el, via) => {
     if (seen.has(el)) return false;
@@ -166,12 +184,17 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     const text = editable ? '' : clean(el.innerText || el.textContent).slice(0, 80);
     let labelText = '';
     if (el.labels && el.labels.length) labelText = clean(el.labels[0].innerText);
+    if (!labelText) {  // aria-labelledby: the named elements' text, in order
+      const by = el.getAttribute('aria-labelledby');
+      if (by) labelText = clean(by.split(/\s+/).map(id => (document.getElementById(id) || {}).innerText || '').join(' '));
+    }
     const caption = tag === 'input' && BUTTON_INPUTS.includes(type) ? el.value : '';
-    const name = clean(
+    let name = clean(
       el.getAttribute('aria-label') || labelText || el.getAttribute('placeholder') ||
-      el.getAttribute('title') || el.getAttribute('alt') || caption ||
-      text || el.getAttribute('name') || el.id || ''
+      el.getAttribute('title') || el.getAttribute('alt') || caption || text || ''
     ).slice(0, 80);
+    if (!name && editable) name = groupLabel(el);  // a label beside the field beats its machine identifiers
+    if (!name) name = clean(el.getAttribute('name') || el.id || '').slice(0, 80);
     let context;
     if (!name || (role === 'checkbox' || role === 'radio' || role === 'switch')) {
       let h = el.parentElement;
