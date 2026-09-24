@@ -58,7 +58,8 @@ outcome seen (fail_fast → `outcome`; an outcome held back by `requires_action`
 instead) → a pending pass confirmed (`passed` / `assert_failed`) or not
 (`done_unverified` after Jev's DONE; carry on after an auto sighting) → a pass outcome seen (`auto_done` →
 WAIT, recheck next step) → invalid `operation` after the retry (`error`) → low-confidence streak → a marginal
-CLICK / TYPE_TEXT / SELECT while controls are covered (→ one WAIT per page, ending when the page changes) →
+CLICK / TYPE_TEXT / SELECT while controls sit under a blank layer (→ a WAIT with backoff, `deferral_limit` per page, each
+ending when the page changes) →
 freshness guard (stale → WAIT and re-observe; `max_stale` in a row → `unstable_page`) → DONE (→ WAIT,
 recheck next step) / BLOCKED chosen → repeat detection (`stuck`) → execute → settle → next step.
 
@@ -275,12 +276,23 @@ The controls the occlusion test rejects are counted as `covered` (Jev sees `cove
 off a form moves no tagged node and no text, yet it is the change every WAIT on such a page is waiting for, so
 the whole-page comparison (`wait_for_change`, DONE / BLOCKED / PRESS_ENTER) reads a different count as a change
 (selftest `covered_check`, scenario 4i: the deferral wait ended at 629 ms, the overlay's lifetime, instead of its
-1500 ms ceiling). A marginal CLICK, TYPE_TEXT or SELECT on such a page (below `thresholds.covered_action_confidence`)
-is deferred once: the page is busy, the form the value belongs in is still loading and the one free field, a sidebar
-filter, is not it, or the request that opens the confirmation dialog is still in flight and the tab Jev moves on to
-is not yet due (live: three Leave runs of three clicked the Leave List tab at 0.74 under the spinner that precedes the
-'Balance not sufficient' dialog, once the duplicate tab no longer split that choice); a layer that stays is a dialog,
-and the next decision on the same page is executed (scenarios 4i, 4j).
+1500 ms ceiling). The observer also tells a **blank layer** from one with controls of its own (`layer_controls`: the
+offered controls inside a covering element, around it, or within its box: a dialog's Ok over a backdrop, an open list's
+options, a banner's Accept over a page shade). A blank layer is a loading or saving overlay and the page is on its way
+(`blank_layer`, `page_busy`); a layer with controls is a dialog or a list, its controls are the controls, and the page
+is settled. A marginal CLICK, TYPE_TEXT or SELECT under a blank layer (below `thresholds.covered_action_confidence`,
+0.9) is deferred: the form the value belongs in is still loading and the one free field, a sidebar filter, is not it,
+or the request that opens the confirmation dialog is still in flight and the tab Jev moves on to is not yet due (live:
+three Leave runs of three clicked the Leave List tab at 0.74 under the spinner that precedes the 'Balance not
+sufficient' dialog, once the duplicate tab no longer split that choice). Each deferral is a WAIT of `settle_ms` × 1, 2,
+4, 4, 4 ending when the page changes, `deferral_limit` of them on one page signature (`max_low_confidence_steps` +
+`BUSY_EXTRA_LOOKS`, five), after which the next such decision is executed (`deferrals_exhausted`): a layer that stays
+that long is the page now. Under a layer with controls nothing is deferred. Measured: the deferral used to fire once
+per page, and in every slow-hour run the second identical decision was the same wrong one, the first name into the
+sidebar filter at 0.77–0.83 and the Leave List tab at 0.71 before the dialog had opened, while loaders of 5–17 s
+outlived the one wait (`measurements/2026-09-24-regression-6f9c5be-hrm.md`). Undecided decisions under a blank layer
+get the same two extra looks (`low_confidence_limit`), as the confirmation rechecks do (scenarios 4i, 4j, 4j2–4j4,
+selftest `covered_check`).
 
 Executing a click on a control that something sits on top of dispatches the click on the control itself
 (`executed.dispatched`), because a forced pointer click lands on the styled box and is swallowed; other
@@ -358,7 +370,8 @@ below `min_confidence` the decision is **not executed**, the step is recorded as
 the streak counter advances. This came from a real run where Jev split 0.68/0.32 over which value to type
 into a Password field and the old runner typed the wrong one. Two consequences: a low-confidence DONE is
 never terminal (a real run stopped at 0.36 mid-reload), and an undecided answer on an unchanged page ends
-the run after `max_low_confidence_steps` with a status that tells Claude exactly what to fix.
+the run after `max_low_confidence_steps` (two more under a blank layer, `low_confidence_limit`: the page is still
+loading, and each undecided look already waits with backoff) with a status that tells Claude exactly what to fix.
 
 A *confident* DONE with `done_when` unsatisfied gets one settle-and-recheck (a `settle_ms` pause, then
 `settle()`) before the verdict. Reloads and redirects are often still in flight when Jev declares

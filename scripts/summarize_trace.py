@@ -86,10 +86,15 @@ def _flags(step: dict) -> str:
     if step.get("outcome_deferred"):
         f.append("DEFERRED:" + ",".join(step["outcome_deferred"]))  # true of the page, but no action was taken yet (requires_action)
     if step.get("covered_controls"):
-        f.append(f"COVERED:{step['covered_controls']}")  # controls on screen under another layer (a loading overlay, a dialog): not offered
+        # controls on screen under another layer, not offered; (layer:m) when the layer has m controls of its own (a dialog, an
+        # open list), nothing when it is blank (a loading or saving overlay)
+        layer = f"(layer:{step['layer_controls']})" if step.get("layer_controls") else ""
+        f.append(f"COVERED:{step['covered_controls']}{layer}")
     if step.get("action_deferred"):
-        d = step["action_deferred"]  # a marginal action while that many controls were covered: one wait instead
+        d = step["action_deferred"]  # a marginal action while that many controls were under a blank layer: a wait instead
         f.append(f"DEFERRED-{d.get('operation')}:{d.get('covered')}")
+    if step.get("deferrals_exhausted"):
+        f.append(f"DEFER-LIMIT:{step['deferrals_exhausted']}")  # executed on a page still under its blank layer, after that many deferrals
     if step.get("announcements"):
         # what the page announced (a toast, a live message) between the previous observation and this one; the first message shown
         first = step["announcements"][0].get("text") or ""

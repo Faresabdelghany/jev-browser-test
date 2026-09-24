@@ -395,17 +395,26 @@ def cdp_check(url: str, tmp: str) -> list[str]:
     return failures
 
 
-# A form under a loading overlay for 700 ms, and a fixed Search box the overlay does not cover: the observer must
-# count the covered controls (not offer them) while the overlay is up, and offer them once it is gone.
-# ?stay=1 keeps the overlay for good (a modal that is the page now); First Name echoes what was typed into it, so
-# a spec can name the typing's visible effect.
+# A form under a loading overlay for 700 ms (?ms=<n>), and a fixed Search box the overlay does not cover: the observer
+# must count the covered controls (not offer them) while the overlay is up, and offer them once it is gone.
+# ?stay=1 keeps the overlay for good (a blank layer that never lifts); ?dialog=1 keeps it and gives it an Ok button
+# (a dialog: a layer with a control of its own, which writes Confirmed into the layer when clicked). First Name echoes
+# what was typed into it, so a spec can name the typing's visible effect.
 COVERED_PAGE = """<!doctype html><html><head><title>Covered</title></head><body>
 <h1>Add Employee</h1>
 <form><label>First Name <input id="fn" oninput="document.getElementById('echo').textContent = 'Typed: ' + this.value"></label> <label>Last Name <input id="ln"></label> <button type="button">Save</button></form>
 <div id="echo"></div>
 <input id="side" placeholder="Search" style="position:fixed;top:8px;right:8px">
 <div id="loader" style="position:fixed;left:0;top:40px;width:100%;height:200px;background:rgba(255,255,255,.6)"></div>
-<script>if (!location.search.includes('stay=1')) setTimeout(() => document.getElementById('loader').remove(), 700);</script>
+<script>
+ const q = new URLSearchParams(location.search);
+ const l = document.getElementById('loader');
+ if (q.get('dialog') === '1') {
+   const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Ok';
+   b.onclick = () => { l.appendChild(document.createTextNode(' Confirmed')); };
+   l.appendChild(document.createTextNode('Balance not sufficient ')); l.appendChild(b);
+ } else if (q.get('stay') !== '1') setTimeout(() => l.remove(), parseInt(q.get('ms') || '700', 10));
+</script>
 </body></html>"""
 
 
@@ -509,6 +518,15 @@ def covered_check(url: str) -> list[str]:
         names = [e.get("name") for e in second["elements"]]
         if second.get("covered") != 0 or not all(n in names for n in ("First Name", "Last Name", "Save")):
             failures.append(f"overlay gone: expected covered=0 and the form offered, got covered={second.get('covered')} names={names}")
+        # the layer's own controls: a loading overlay has none (a blank layer), a dialog over the same form has its Ok
+        if first.get("layer_controls") != 0:
+            failures.append(f"covered form: a loading overlay is a blank layer, expected layer_controls=0, got {first.get('layer_controls')}")
+        pg.goto(url + "?dialog=1")
+        dialog = observe(pg, 50, 500)
+        names = [e.get("name") for e in dialog["elements"]]
+        if dialog.get("covered") != 3 or "Ok" not in names or dialog.get("layer_controls") != 1:
+            failures.append(f"dialog over the form: expected covered=3, Ok offered and layer_controls=1, got covered={dialog.get('covered')} "
+                            f"layer_controls={dialog.get('layer_controls')} names={names}")
         b.close()
     return failures
 
@@ -720,6 +738,8 @@ class FakeJev:
             return "We use cookies"  # true until the banner's Accept button is clicked
         if "typed:" in s:
             return "Typed: Jevtest"  # the covered fixture echoes what went into First Name
+        if "confirmed" in s:
+            return "Confirmed"  # the covered fixture's dialog writes it when its Ok is clicked
         if "employee list" in s:
             return "Employee List"  # the slow site's module page
         if "saved successfully" in s:
@@ -830,6 +850,28 @@ class FakeJev:
                 answers["operation"] = self._choice("TYPE_TEXT", ops, conf=0.65)
                 answers["type_target"] = self._choice(self._find(types, '"Search"'), types, conf=1.0)
                 answers["type_value"] = self._choice("first_name", questions["type_value"]["criteria"], conf=0.7)
+            else:
+                answers["operation"] = self._choice("DONE", ops, conf=0.9)
+            return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
+        if self.mode == "undecided_while_covered":
+            # Live: three undecided looks on a form under its loader ended a run low_confidence one look before the
+            # fields rendered. Undecided (WAIT at 0.3) while controls are covered; types into First Name once offered.
+            first_name = self._find(types, '"First Name"')
+            if first_name and "TYPE_TEXT" in ops and not any(a.get("value_key") == "first_name" for a in recent):
+                answers["operation"] = self._choice("TYPE_TEXT", ops, conf=0.9)
+                answers["type_target"] = self._choice(first_name, types, conf=0.95)
+                answers["type_value"] = self._choice("first_name", questions["type_value"]["criteria"], conf=0.95)
+            elif state.get("covered_controls"):
+                answers["operation"] = self._choice("WAIT", ops, conf=0.3)
+            else:
+                answers["operation"] = self._choice("DONE", ops, conf=0.9)
+            return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
+        if self.mode == "click_ok_marginal":
+            # A dialog's Ok picked at 0.65 while the form behind it is covered: the layer has a control of its own.
+            ok = self._find(clicks, '"Ok"')
+            if ok and not any(a.get("operation") == "CLICK" for a in recent):
+                answers["operation"] = self._choice("CLICK", ops, conf=0.65)
+                answers["click_target"] = self._choice(ok, clicks, conf=0.95)
             else:
                 answers["operation"] = self._choice("DONE", ops, conf=0.9)
             return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
@@ -1303,18 +1345,78 @@ def main() -> int:
     if "DEFERRED-TYPE_TEXT:3" not in summarize(trace, out):
         failures.append("type while covered: the summary should flag DEFERRED-TYPE_TEXT:3")
 
-    # 4j. the layer never lifts (?stay=1: a modal that is the page now): the deferral fires once per page, and the
-    #     same marginal typing on the same page is then executed (into Search, the only field there is).
-    stay_spec = dict(covered_spec, start_url="file://" + covered_html + "?stay=1")
+    # 4j. the layer never lifts (?stay=1: a blank layer that stays): the deferral fires deferral_limit times on the one
+    #     page, waiting settle_ms x 1, 2, 4, 4, 4, and the same marginal typing is then executed (into Search, the only
+    #     field there is), the step marked deferrals_exhausted.
+    stay_spec = dict(covered_spec, start_url="file://" + covered_html + "?stay=1", browser=dict(covered_spec["browser"], settle_ms=200))
     out = os.path.join(tmp, "run-type-while-covered-stays")
     trace = run(stay_spec, FakeJev("type_while_covered"), out, screenshots=False)
     print(summarize(trace, out))
     print()
     steps = trace["steps"]
-    if len(steps) < 2 or (steps[0].get("action_deferred") or {}).get("covered") != 3 or (steps[1].get("executed") or {}).get("action") != "TYPE_TEXT" \
-            or '"Search"' not in (steps[1].get("target") or {}).get("label", "") or steps[1].get("action_deferred"):
-        failures.append(f"layer stays: the typing should be deferred once and then executed into Search: "
-                        f"{[(s.get('action_deferred'), (s.get('executed') or {}).get('action'), (s.get('target') or {}).get('label')) for s in steps]}")
+    deferred = [s for s in steps if s.get("action_deferred")]
+    ladder = [(s.get("executed") or {}).get("wait_ms") for s in deferred]
+    if len(deferred) != 5 or ladder != [200, 400, 800, 800, 800] or [s.get("deferrals") for s in deferred] != [1, 2, 3, 4, 5]:
+        failures.append(f"layer stays: the typing should be deferred five times, waiting settle_ms x1, x2, x4, x4, x4: {ladder} "
+                        f"{[s.get('deferrals') for s in deferred]}")
+    if len(steps) < 6 or (steps[5].get("executed") or {}).get("action") != "TYPE_TEXT" or '"Search"' not in (steps[5].get("target") or {}).get("label", "") \
+            or steps[5].get("deferrals_exhausted") != 5 or steps[5].get("action_deferred"):
+        failures.append(f"layer stays: the sixth decision should be executed into Search and marked deferrals_exhausted=5: "
+                        f"{[(s.get('action_deferred'), (s.get('executed') or {}).get('action'), (s.get('target') or {}).get('label'), s.get('deferrals_exhausted')) for s in steps]}")
+
+    # 4j2. an overlay that outlasts one wait (?ms=2400, settle_ms 400): the marginal typing is deferred again and again,
+    #      waiting settle_ms x1, x2, x4, the third wait ending the moment the overlay goes, and the next decision types
+    #      into First Name (live: the deferral fired once per page, and the second identical decision typed the first
+    #      name into the sidebar's filter while the form was still loading, three runs of three).
+    slow_spec = dict(covered_spec, start_url="file://" + covered_html + "?ms=2400", browser=dict(covered_spec["browser"], settle_ms=400))
+    out = os.path.join(tmp, "run-type-while-covered-slow")
+    trace = run(slow_spec, FakeJev("type_while_covered"), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    steps = trace["steps"]
+    deferred = [s for s in steps if s.get("action_deferred")]
+    ladder = [(s.get("executed") or {}).get("wait_ms") for s in deferred]
+    ends = [((s.get("executed") or {}).get("wait") or {}).get("ended") for s in deferred]
+    if trace["status"] != "passed" or trace["outcome"] != "typed":
+        failures.append(f"slow overlay: expected passed/typed, got {trace['status']}/{trace.get('outcome')} ({trace.get('error')})")
+    if ladder != [400, 800, 1600] or ends[-1:] != ["changed"] or [s.get("deferrals") for s in deferred] != [1, 2, 3]:
+        failures.append(f"slow overlay: the typing should be deferred three times, x1, x2, x4, the last wait ending when the overlay goes: {ladder} {ends}")
+    after = steps[len(deferred)] if len(steps) > len(deferred) else {}
+    if (after.get("executed") or {}).get("action") != "TYPE_TEXT" or '"First Name"' not in (after.get("target") or {}).get("label", ""):
+        failures.append(f"slow overlay: the decision after the deferrals should type into First Name: {after.get('target')}")
+
+    # 4j3. undecided while the form is under its loader (WAIT at 0.3, ?ms=3000, settle_ms 300): the undecided looks on a
+    #      blank layer are bounded by max_low_confidence_steps + BUSY_EXTRA_LOOKS, not max_low_confidence_steps alone
+    #      (live: three looks ended a run one look before the fields rendered), so the fourth wait outlives the overlay
+    #      and the run types into First Name and passes.
+    undecided_spec = dict(covered_spec, start_url="file://" + covered_html + "?ms=3000", browser=dict(covered_spec["browser"], settle_ms=300))
+    out = os.path.join(tmp, "run-undecided-while-covered")
+    trace = run(undecided_spec, FakeJev("undecided_while_covered"), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    lows = [s for s in trace["steps"] if s.get("low_confidence")]
+    if trace["status"] != "passed" or trace["outcome"] != "typed":
+        failures.append(f"undecided while covered: expected passed/typed, got {trace['status']}/{trace.get('outcome')} ({trace.get('error')})")
+    if [s.get("low_streak") for s in lows] != [1, 2, 3, 4]:
+        failures.append(f"undecided while covered: expected four undecided looks on the covered form, the fourth outliving the overlay: "
+                        f"{[(s.get('low_streak'), (s.get('executed') or {}).get('wait')) for s in lows]}")
+
+    # 4j4. a dialog over the form (?dialog=1: the layer has an Ok button of its own): Jev's marginal click on Ok (0.65)
+    #      is executed at once, not deferred; the layer's controls are the controls.
+    dialog_spec = dict(covered_spec)
+    dialog_spec.update({"start_url": "file://" + covered_html + "?dialog=1", "goal": "Click Ok in the dialog so that the page says Confirmed",
+                        "outcomes": {"confirmed": {"when": "The page says Confirmed", "verdict": "pass"}},
+                        "assert": [{"text_contains": "Confirmed"}]})
+    out = os.path.join(tmp, "run-click-ok-under-dialog")
+    trace = run(dialog_spec, FakeJev("click_ok_marginal"), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    steps = trace["steps"]
+    if trace["status"] != "passed" or trace["outcome"] != "confirmed":
+        failures.append(f"dialog layer: expected passed/confirmed, got {trace['status']}/{trace.get('outcome')} ({trace.get('error')})")
+    if not steps or steps[0].get("action_deferred") or (steps[0].get("executed") or {}).get("action") != "CLICK" or steps[0].get("covered_controls") != 3:
+        failures.append(f"dialog layer: the marginal click on the layer's own Ok should be executed at once on the covered page: "
+                        f"{[(s.get('action_deferred'), (s.get('executed') or {}).get('action'), s.get('covered_controls')) for s in steps[:2]]}")
 
     # 4k. `after` on an outcome: "the cookie banner is shown" is true of the start page, but the outcome counts only
     #     after a click on Accept cookies; step 1 records it as deferred (like requires_action) and the run goes on

@@ -219,16 +219,35 @@ def run_setup(page, spec: dict, results: list[dict] | None = None) -> list[dict]
 
 WAIT_BACKOFF_MAX = 4  # lever F4: consecutive WAITs on an unchanged page pause settle_ms x 1, 2, 4, 4, ... (never more than x4)
 CONFIRM_RECHECKS_MAX = 2  # a confirmation look at a page that changed during the pause and shows no pass looks again, this many times at most
-CONFIRM_RECHECKS_BUSY_EXTRA = 2  # ... and this many more while the page is busy (covered controls, an empty document): a slow app renders in stages
+BUSY_EXTRA_LOOKS = 2  # ... and this many more while the page is busy (a blank layer over controls, an empty document): a slow app renders in stages;
+# the same two more for undecided decisions under a blank layer (low_confidence_limit), and the deferral bound (deferral_limit)
 
 
 def recheck_limit(busy: bool) -> int:
     """How many confirmation looks may park again: CONFIRM_RECHECKS_MAX on a page with controls and nothing over them,
-    two more while the page is busy. Live: a slow demo's Save went covered form, empty shell, then the record's page
-    under its own loading overlay with the fields not yet filled, three busy looks in a row, and the bound of two
-    ended the run assert_failed one look before the fields rendered. A dialog that stays is still found: it is busy
-    and unchanged, so it costs the extra looks and then ends done_unverified as before."""
-    return CONFIRM_RECHECKS_MAX + (CONFIRM_RECHECKS_BUSY_EXTRA if busy else 0)
+    BUSY_EXTRA_LOOKS more while the page is busy. Live: a slow demo's Save went covered form, empty shell, then the
+    record's page under its own loading overlay with the fields not yet filled, three busy looks in a row, and the
+    bound of two ended the run assert_failed one look before the fields rendered. A dialog that stays is not busy
+    (its controls are the layer's own): it costs the plain looks and ends done_unverified."""
+    return CONFIRM_RECHECKS_MAX + (BUSY_EXTRA_LOOKS if busy else 0)
+
+
+def low_confidence_limit(th: dict, blank: bool) -> int:
+    """How many consecutive undecided (low-confidence) decisions on one page end the run `low_confidence`: the spec's
+    max_low_confidence_steps on a settled page, BUSY_EXTRA_LOOKS more while a blank layer covers controls (the page is
+    still loading or saving, and each undecided look already waits with backoff). Live: three undecided looks on a
+    form under its loader, 2.5 + 5 + 10 s, ended a run one look before the fields rendered in a slow hour."""
+    return th["max_low_confidence_steps"] + (BUSY_EXTRA_LOOKS if blank else 0)
+
+
+def deferral_limit(th: dict) -> int:
+    """How many times a marginal action under a blank layer is deferred on one page (each a wait with backoff, settle_ms
+    x 1, 2, 4, 4, 4, ending when the page changes) before the next such decision is executed anyway: a layer that
+    stays that long with Jev still picking a free control is taken at its word (deferrals_exhausted on the step). The
+    same count as undecided looks under a blank layer. Live: the deferral fired once per page, and the second identical
+    marginal decision typed the first name into the sidebar's filter, or left the Assign form for the Leave List tab,
+    while the loader was still up."""
+    return th["max_low_confidence_steps"] + BUSY_EXTRA_LOOKS
 WAIT_POLL_MS = 100  # a WAIT re-reads the page's fingerprint this often and ends as soon as the page has changed
 NO_EFFECT_ACTIONS = {"CLICK", "TYPE_TEXT", "SELECT", "PRESS_ENTER"}  # an executed one of these that changed nothing is flagged
 NAVIGATION_PENDING_MARKER = "waiting for scheduled navigations to finish"  # Playwright's call log after "click action done"
@@ -256,12 +275,20 @@ def await_navigation(page, spec: dict, before: dict | None, spent_ms: int) -> di
     return {"ended": waited["ended"], "ms": spent_ms + waited["ms"], "action_timeout_ms": spent_ms}
 
 
+def blank_layer(obs: dict) -> bool:
+    """Do controls on this page sit under a layer that has no controls of its own? That is a loading or saving overlay
+    (the page is on its way), as against a dialog, an open list or a banner over the page, whose own controls are
+    offered (`layer_controls`, counted by the observer) and are the controls to use. An observation without the count
+    (an older trace) reads as blank."""
+    return obs.get("covered", 0) > 0 and not obs.get("layer_controls")
+
+
 def page_busy(obs: dict) -> bool:
-    """Is this page still on its way? Controls under another layer (a loading or saving overlay), or no controls at
+    """Is this page still on its way? Controls under a blank layer (a loading or saving overlay), or no controls at
     all (a single-page app's empty shell after a navigation, before it renders). Live: the Personal Details page of a
     slow demo was an empty document for two looks, same signature, and the assertions were run on it. A settled page
-    has controls and nothing covers them."""
-    return obs.get("covered", 0) > 0 or not obs.get("elements")
+    has controls and nothing blank covers them; a dialog over the page is settled, its controls are the controls."""
+    return blank_layer(obs) or not obs.get("elements")
 
 
 def assertions_can_wait(checked: list[dict], busy: bool, page_changed: bool, rechecks: int) -> bool:
@@ -788,7 +815,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     wait_streak, last_wait_sig = 0, None  # lever F4: consecutive Jev WAITs on the same page signature
     after_no_effect = False  # the last executed action changed nothing: the next step shows that page (a key picture)
     low_streak, last_low_sig = 0, None  # consecutive undecided (low-confidence) steps on one page signature
-    deferred_sig: str | None = None  # the page signature a marginal action was deferred on while controls were covered
+    defer_streak, last_defer_sig = 0, None  # consecutive deferrals of a marginal action on one page signature under a blank layer
     announced_raw: list[dict] = []  # messages the page reported through ANNOUNCE_FUNCTION since the last observation
     all_announcements: list[dict] = []  # every announcement of the run, each with the step it preceded
     stale_streak = 0
@@ -1105,6 +1132,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 }
                 if obs.get("covered"):
                     step["covered_controls"] = obs["covered"]  # controls on screen but under another layer: not offered
+                    step["layer_controls"] = obs.get("layer_controls", 0)  # the layer's own controls among the offered: 0 is a blank layer
                 if announced:
                     step["announcements"] = announced  # flag ANNOUNCED; in Jev's state for this and the next two steps
                 if after_no_effect:
@@ -1292,7 +1320,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     last_low_sig = sig
                     stale_streak = 0  # a refused decision is not a stale one: `max_stale` counts consecutive stale steps
                     step["low_streak"] = low_streak
-                    if low_streak >= th["max_low_confidence_steps"]:
+                    if low_streak >= low_confidence_limit(th, blank_layer(obs)):
                         ask_reason(step, state)
                         finish(page, step, "low_confidence", dict(STOP))
                         break
@@ -1303,21 +1331,28 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     continue
                 low_streak, last_low_sig = 0, None
 
-                if (obs.get("covered") and sig != deferred_sig
-                        and defer_action(operation, obs["covered"], min(confs), th["covered_action_confidence"])):
-                    # A marginal action while controls sit under another layer: the page is busy (a form still loading,
+                if defer_action(operation, obs.get("covered", 0), min(confs), th["covered_action_confidence"], obs.get("layer_controls", 0)):
+                    # A marginal action while controls sit under a blank layer: the page is busy (a form still loading,
                     # a request in flight before a dialog opens) and the free control Jev picked is probably not the one
                     # (live: the first name went into the sidebar's menu filter in every PIM run; a Leave flow clicked
-                    # the next tab at 0.74 before the confirmation dialog had opened, three runs of three). Wait once,
-                    # ending the moment the page changes; on the same page the next decision is executed, whatever it
-                    # is (a layer that stays is a dialog, and its controls are the controls).
-                    deferred_sig = sig
-                    step["action_deferred"] = {"operation": operation, "covered": obs["covered"]}
-                    park(step, f"{operation} deferred: {obs['covered']} controls are under another layer; waiting for the page",
-                         wait_entry(n, "WAIT", f"{operation} deferred: {obs['covered']} controls were under another layer (the page "
-                                               f"still loading or a request in flight?); the page was given time to finish"), sig,
-                         wait_ms=spec["browser"]["settle_ms"], before=obs.get("fingerprint"))
-                    continue
+                    # the next tab at 0.71-0.74 before the confirmation dialog had opened). Wait, settle_ms x 1, 2, 4, 4,
+                    # 4 (WAIT_BACKOFF_MAX), each wait ending the moment the page changes, deferral_limit times on one
+                    # page; the next such decision on the same page is then executed, whatever it is (a layer that stays
+                    # that long is the page now). A layer with controls of its own (a dialog, an open list) defers
+                    # nothing: defer_action reads layer_controls. Measured: the once-per-page deferral (2.5 s) lost to a
+                    # loader of 5-17 s in every slow-hour run, and the second decision was the same wrong one.
+                    defer_streak = defer_streak + 1 if sig == last_defer_sig else 1
+                    last_defer_sig = sig
+                    if defer_streak <= deferral_limit(th):
+                        step["action_deferred"] = {"operation": operation, "covered": obs["covered"]}
+                        step["deferrals"] = defer_streak
+                        park(step, f"{operation} deferred: {obs['covered']} controls are under a blank layer; waiting for the page "
+                                   f"({defer_streak}/{deferral_limit(th)})",
+                             wait_entry(n, "WAIT", f"{operation} deferred: {obs['covered']} controls were under another layer (the page "
+                                                   f"still loading or a request in flight?); the page was given time to finish"), sig,
+                             wait_ms=spec["browser"]["settle_ms"] * min(2 ** (defer_streak - 1), WAIT_BACKOFF_MAX), before=obs.get("fingerprint"))
+                        continue
+                    step["deferrals_exhausted"] = deferral_limit(th)  # executed on a page still under its layer, after the last deferral
 
                 # Freshness guard. Jev decided on the observation; the page may have moved on while it
                 # was deciding (a toast, a re-render, a redirect). Re-read identity and meaning of what the
@@ -1421,6 +1456,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 }
                 if obs.get("covered"):
                     step["covered_controls"] = obs["covered"]
+                    step["layer_controls"] = obs.get("layer_controls", 0)
                 if announced:
                     step["announcements"] = announced
                 recent_ann = recent_announcements(all_announcements, n)

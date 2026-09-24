@@ -57,17 +57,18 @@ JS_HELPERS = r"""
     return cs.display !== 'none' && cs.visibility !== 'hidden' && cs.pointerEvents !== 'none';
   };
   // Is `el` (with box r) under another layer? What is on top must be unrelated to it: not the control's own <label>
-  // (a styled checkbox) and not a sibling box in its wrapper (a hidden input under its painted box).
+  // (a styled checkbox) and not a sibling box in its wrapper (a hidden input under its painted box). Returns the
+  // element on top (the layer: a loading overlay, a backdrop, an open list) or null.
   const coveredAt = (el, r) => {
     const cx = Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2));
     const cy = Math.min(window.innerHeight - 1, Math.max(0, r.top + r.height / 2));
     const top = document.elementFromPoint(cx, cy);
-    if (!top || top === el || el.contains(top) || top.contains(el)) return false;
+    if (!top || top === el || el.contains(top) || top.contains(el)) return null;
     const tag = el.tagName.toLowerCase();
     const formControl = tag === 'input' || tag === 'select' || tag === 'textarea';
     const lbl = top.closest('label');
     const sibling = el.parentElement && (top.parentElement === el.parentElement || el.parentElement.contains(top));
-    return !((lbl && lbl.control === el) || (formControl && sibling));
+    return ((lbl && lbl.control === el) || (formControl && sibling)) ? null : top;
   };
   // How many of the controls the observation found covered (tagged data-jev-covered) are still covered: a loading
   // overlay lifting off a form changes no tagged node and no text, but it is the change a WAIT on such a page waits for.
@@ -142,6 +143,7 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
   const seen = new Set();
   let covered = 0;  // controls on screen but under another layer (overlay, dialog, banner): counted, not offered
   const coveredEls = [];  // those controls, tagged data-jev-covered so the fingerprint can tell when they come free
+  const coverers = [];  // the layers found on top of them (a loading overlay, a backdrop, an open list), each once
 
   // A field with no accessible name whose <label> sits beside it in a wrapper, with no for/id linking the two
   // (OrangeHRM's oxd-input-group, many React form kits): the nearest ancestor holding exactly this one control
@@ -176,9 +178,10 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     // opacity:0 on a form control with a real box is the "hidden input behind a styled box" pattern
     // (antd/MUI/Bootstrap checkboxes, file inputs under an Upload button) -> still the thing to click.
     if (cs.opacity === '0' && !formControl) return false;
-    if (!wholeDocument && coveredAt(el, r)) {
+    const top = wholeDocument ? null : coveredAt(el, r);
+    if (top) {
       // covered by something else (modal, banner, overlay) -> a human could not click it either
-      if (via !== 'cursor') { covered++; coveredEls.push(el); }
+      if (via !== 'cursor') { covered++; coveredEls.push(el); if (!coverers.includes(top)) coverers.push(top); }
       return false;
     }
     let role = el.getAttribute('role');
@@ -329,6 +332,17 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     }
     if (best) group.forEach((c, i) => { c.context = best[i]; });
   }
+  // The layers' own controls among the offered ones: inside a layer, around it, or within its box (a dialog's buttons
+  // over a backdrop, an open list's options, a banner's Accept over a page shade). A layer with none is blank: a
+  // loading or saving overlay, and the page is on its way (run_test.blank_layer). Live: a form's loader left the
+  // sidebar's filter as the one free field, and a dialog's Ok was the one thing to click; the count tells them apart.
+  const within = (el, layer) => {
+    const b = layer.getBoundingClientRect(), r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    return cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom;
+  };
+  const layerControls = coverers.length
+    ? kept.filter(c => coverers.some(t => t === c.el || t.contains(c.el) || c.el.contains(t) || within(c.el, t))).length : 0;
   const nodes = {};
   kept.forEach((c, i) => {
     if (!wholeDocument) { c.el.setAttribute('data-jev-idx', String(i)); nodes[String(i)] = nodeTuple(c.el); }
@@ -343,6 +357,7 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     elements: kept,
     truncated: candidates.length - kept.length,
     covered,
+    layer_controls: layerControls,  // offered controls that belong to the covering layers; 0 with covered > 0 is a blank layer
     visible_text: visibleText(maxTextChars),
     fingerprint: { url: location.href, title: document.title, text_head: visibleText(500), nodes, covered },
     scroll: {

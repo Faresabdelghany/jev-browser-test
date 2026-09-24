@@ -108,13 +108,15 @@ DEFAULTS = {
         "max_low_confidence_steps": 3,
         "max_repeat": 3,
         "max_stale": 3,  # consecutive decisions invalidated by the page changing -> unstable_page
-        # A CLICK / TYPE_TEXT / SELECT decided below this while controls sit under another layer (covered_controls > 0:
-        # a form still loading, a request in flight) is deferred once per page: one wait ending when the page changes,
-        # then Jev decides again. Live, the first name went into the sidebar's menu filter at 0.54-0.67 in every PIM
-        # run while the form's fields were covered (the right fields read 0.84-0.99), and a Leave flow clicked the
-        # Leave List tab at 0.74 while the spinner before the 'Balance not sufficient' dialog covered the form, three
-        # runs of three. 0 turns the deferral off.
-        "covered_action_confidence": 0.8,
+        # A CLICK / TYPE_TEXT / SELECT decided below this while controls sit under a blank layer (covered_controls > 0
+        # and the layer has no controls of its own: a form still loading, a request in flight) is deferred: a wait
+        # ending when the page changes, settle_ms x 1, 2, 4, 4, 4 on one page (run_test.deferral_limit), then Jev
+        # decides again. A layer with controls of its own (a dialog, an open list) defers nothing. Live, the first name
+        # went into the sidebar's menu filter at 0.54-0.90 in every PIM run while the form's fields were covered (the
+        # right fields read 0.84-0.99), and a Leave flow clicked the Leave List tab at 0.71-0.74 while the spinner
+        # before the 'Balance not sufficient' dialog covered the form; was 0.8, and the deferral fired once per page.
+        # 0 turns the deferral off.
+        "covered_action_confidence": 0.9,
     },
     "browser": {
         "headless": True,

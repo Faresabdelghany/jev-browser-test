@@ -155,8 +155,10 @@ was gone before the runner looked), `story`, and for `undetermined` the `reason`
 Open the step table only for `undetermined` or a surprising outcome. Flags worth knowing: `NO-EFFECT` (an
 action landed and the page did not change: the classic dead control; the next step's picture shows it),
 `DEFERRED:<outcome>` (true of the page, but its `requires_action` / `after` condition has not happened yet: not
-counted), `COVERED:<n>` (controls on screen but under a loading overlay or a dialog, so not offered: the form is still
-loading), `DEFERRED-<OP>:<n>` (a marginal click or typing on such a page turned into one wait), `ANNOUNCED:"…"` (a toast or
+counted), `COVERED:<n>` (controls on screen but under another layer, so not offered; plain, the layer is blank and the
+form is still loading; `(layer:<m>)`, the layer has controls of its own, a dialog or an open list), `DEFERRED-<OP>:<n>` (a
+marginal click or typing under a blank layer turned into a wait, again with backoff while the layer stays, five on one
+page; `DEFER-LIMIT:5` when it then went ahead), `ANNOUNCED:"…"` (a toast or
 live message appeared between the previous observation and this one; Jev saw it in its state for this and the next
 two steps, faded or not), `SLOW-NAV:<s>` (the click landed; the page it asked for answered after the action timeout: a
 slow host, not a failure), `RECHECK:<n>` / `ASSERT-PENDING:<n>` (a pass in sight on a page still busy, looked at again),

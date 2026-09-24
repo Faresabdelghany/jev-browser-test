@@ -1608,6 +1608,8 @@ class UndecidedAndCoveredTests(unittest.TestCase):
         self.assertEqual(build_state(SPEC, obs, 1, [])["covered_controls"], 0)
         self.assertEqual(build_state(SPEC, dict(obs, covered=3), 1, [])["covered_controls"], 3)
         self.assertEqual(_flags({"covered_controls": 3}), "COVERED:3")
+        self.assertEqual(_flags({"covered_controls": 3, "layer_controls": 0}), "COVERED:3", "a blank layer: a loader")
+        self.assertEqual(_flags({"covered_controls": 3, "layer_controls": 2}), "COVERED:3(layer:2)", "the layer has two controls of its own: a dialog")
         self.assertEqual(_flags({"covered_controls": 0}), "")
 
 
@@ -1851,7 +1853,7 @@ class DeferActionTests(unittest.TestCase):
 
     def test_threshold_default_and_bounds(self) -> None:
         from spec import validate
-        self.assertEqual(DEFAULTS["thresholds"]["covered_action_confidence"], 0.8)
+        self.assertEqual(DEFAULTS["thresholds"]["covered_action_confidence"], 0.9, "was 0.8: the sidebar filter took the first name at up to 0.90 under a loader")
         self.assertEqual(validate(_merge(SPEC, {"thresholds": {"covered_action_confidence": 0.0}})), [])
         self.assertEqual(validate(_merge(SPEC, {"thresholds": {"covered_action_confidence": 1}})), [])
         self.assertTrue(any("covered_action_confidence" in p for p in validate(_merge(SPEC, {"thresholds": {"covered_action_confidence": 1.5}}))))
@@ -1864,6 +1866,9 @@ class DeferActionTests(unittest.TestCase):
             self.assertFalse(defer_action(op, covered=0, confidence=0.65, threshold=0.8), "nothing is covered: the page is not busy")
             self.assertFalse(defer_action(op, covered=9, confidence=0.8, threshold=0.8), "a confident action is executed")
             self.assertFalse(defer_action(op, covered=9, confidence=0.65, threshold=0.0), "threshold 0 turns it off")
+            self.assertFalse(defer_action(op, covered=9, confidence=0.65, threshold=0.8, layer_controls=2),
+                             "the layer has controls of its own (a dialog, an open list): its controls are the controls")
+            self.assertTrue(defer_action(op, covered=9, confidence=0.65, threshold=0.8, layer_controls=0), "a blank layer: a loader")
         for op in ("WAIT", "DONE", "BLOCKED", "SCROLL_DOWN", "PRESS_ENTER"):
             self.assertFalse(defer_action(op, covered=9, confidence=0.65, threshold=0.8), op)
 
@@ -1871,6 +1876,7 @@ class DeferActionTests(unittest.TestCase):
         from summarize_trace import _flags
         self.assertEqual(_flags({"action_deferred": {"operation": "TYPE_TEXT", "covered": 9}}), "DEFERRED-TYPE_TEXT:9")
         self.assertEqual(_flags({"action_deferred": {"operation": "CLICK", "covered": 7}}), "DEFERRED-CLICK:7")
+        self.assertEqual(_flags({"deferrals_exhausted": 5}), "DEFER-LIMIT:5", "the action executed after the last deferral on a page")
 
 
 class AnnouncementTests(unittest.TestCase):
@@ -2178,8 +2184,8 @@ class AssertionsCanWaitTests(unittest.TestCase):
     assertion is the verdict at once."""
 
     def test_recheck_limit(self) -> None:
-        from run_test import CONFIRM_RECHECKS_BUSY_EXTRA, CONFIRM_RECHECKS_MAX, recheck_limit
-        self.assertEqual((CONFIRM_RECHECKS_MAX, CONFIRM_RECHECKS_BUSY_EXTRA), (2, 2))
+        from run_test import BUSY_EXTRA_LOOKS, CONFIRM_RECHECKS_MAX, recheck_limit
+        self.assertEqual((CONFIRM_RECHECKS_MAX, BUSY_EXTRA_LOOKS), (2, 2))
         self.assertEqual(recheck_limit(False), 2)
         self.assertEqual(recheck_limit(True), 4)
 
@@ -2189,6 +2195,24 @@ class AssertionsCanWaitTests(unittest.TestCase):
         self.assertTrue(page_busy({"covered": 0, "elements": []}), "an empty shell after a navigation, before the app renders")
         self.assertTrue(page_busy({}))
         self.assertFalse(page_busy({"covered": 0, "elements": [{"idx": 0}]}), "controls, nothing over them: settled")
+        self.assertTrue(page_busy({"covered": 9, "layer_controls": 0, "elements": [{"idx": 0}]}), "a blank layer over the form: loading or saving")
+        self.assertFalse(page_busy({"covered": 9, "layer_controls": 2, "elements": [{"idx": 0}]}),
+                         "a dialog or an open list over the form: its controls are the controls, the page is settled")
+
+    def test_blank_layer(self) -> None:
+        from run_test import blank_layer
+        self.assertTrue(blank_layer({"covered": 3, "layer_controls": 0}), "a loading overlay: no controls of its own")
+        self.assertTrue(blank_layer({"covered": 3}), "an observation without the count reads as blank")
+        self.assertFalse(blank_layer({"covered": 3, "layer_controls": 1}), "a dialog with an Ok button")
+        self.assertFalse(blank_layer({"covered": 0, "layer_controls": 0}), "nothing covered")
+        self.assertFalse(blank_layer({"covered": 0, "elements": []}), "an empty document is busy, but there is no layer")
+
+    def test_low_confidence_and_deferral_limits(self) -> None:
+        from run_test import BUSY_EXTRA_LOOKS, deferral_limit, low_confidence_limit
+        th = {"max_low_confidence_steps": 3}
+        self.assertEqual(low_confidence_limit(th, False), 3, "a settled page: the spec's bound")
+        self.assertEqual(low_confidence_limit(th, True), 3 + BUSY_EXTRA_LOOKS, "under a blank layer: two more looks, like the confirmation rechecks")
+        self.assertEqual(deferral_limit(th), 3 + BUSY_EXTRA_LOOKS, "a marginal action under a blank layer waits that many times, then goes")
 
     def test_wait_while_the_page_is_busy_and_an_assertion_fails(self) -> None:
         from run_test import CONFIRM_RECHECKS_MAX, assertions_can_wait
