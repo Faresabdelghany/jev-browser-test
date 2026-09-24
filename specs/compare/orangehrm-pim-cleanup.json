@@ -1,0 +1,85 @@
+{
+  "id": "orangehrm-pim-cleanup",
+  "comment": "Housekeeping for the comparison, not one of the two flows under test: removes the employee(s) named Jevtest Jevcmp${RUN_STAMP} that a run of orangehrm-pim-add-and-find created on the shared demo, so that the next run of that spec again finds exactly one record. Login and the route to the Employee List are deterministic setup; Jev searches the name, ticks the result row(s), clicks Delete Selected and confirms.",
+  "start_url": "https://opensource-demo.orangehrmlive.com/web/index.php/auth/login",
+  "goal": "In the Employee Information filters type the employee's full name into the Employee Name box, wait for the suggestion showing that name and click it, then click Search. Tick the checkbox of every result row for that employee, click 'Delete Selected' and confirm with 'Yes, Delete', so that the Employee List says 'No Records Found'.",
+  "notes": "The Employee Name box (placeholder 'Type for hints...') shows a dropdown while you type: a row reading 'Searching....' is a placeholder, not a suggestion; wait for the suggestion with the employee's full name and click that, then click the Search button below the filters. The checkbox in the table header selects every result row; 'Delete Selected' appears above the table once a row is ticked, and a confirmation dialog asks 'Are You Sure?' with a 'Yes, Delete' button. If the list shows all employees again after deleting, search for the name once more to confirm none is left.",
+  "data": {
+    "employee_name": "Jevtest Jevcmp${RUN_STAMP}"
+  },
+  "setup": [
+    {
+      "action": "wait_for",
+      "selector": "input[name=username]",
+      "timeout_ms": 30000
+    },
+    {
+      "action": "fill",
+      "selector": "input[name=username]",
+      "value": "Admin"
+    },
+    {
+      "action": "fill",
+      "selector": "input[name=password]",
+      "value": "admin123"
+    },
+    {
+      "action": "click",
+      "selector": "button[type=submit]"
+    },
+    {
+      "action": "wait_for",
+      "url": "**/dashboard/**",
+      "timeout_ms": 30000
+    },
+    {
+      "action": "goto",
+      "url": "https://opensource-demo.orangehrmlive.com/web/index.php/pim/viewEmployeeList"
+    },
+    {
+      "action": "wait_for",
+      "selector": "input[placeholder='Type for hints...']",
+      "timeout_ms": 30000
+    }
+  ],
+  "checks": {
+    "suggestion_shown": "A dropdown suggestion under the Employee Name box reads 'Jevtest Jevcmp${RUN_STAMP}'",
+    "rows_for_employee": "The results table shows one or more rows with Jevtest and Jevcmp${RUN_STAMP}",
+    "confirm_dialog": "A dialog asks 'Are You Sure?' with a 'Yes, Delete' button",
+    "still_loading": "A spinner or loading indicator is shown and the table has not rendered yet"
+  },
+  "outcomes": {
+    "deleted": {
+      "when": "A green toast says 'Successfully Deleted'.",
+      "verdict": "pass",
+      "requires_action": true,
+      "note": "OrangeHRM keeps the previous '(N) Record Found' label over the emptied table after a delete, so the toast is the anchor, not 'No Records Found'"
+    },
+    "none_left": {
+      "when": "The results table has no employee row. No row reads Jevtest Jevcmp${RUN_STAMP}.",
+      "verdict": "pass",
+      "requires_action": true
+    },
+    "app_error": {
+      "when": "An error page or a message says something went wrong, an unexpected error occurred, or the service is unavailable.",
+      "verdict": "bug"
+    }
+  },
+  "assert": [
+    {
+      "url_matches": "**/pim/viewEmployeeList"
+    },
+    {
+      "text_contains": "No Records Found"
+    }
+  ],
+  "budget": {
+    "max_steps": 25,
+    "max_seconds": 240
+  },
+  "browser": {
+    "settle_ms": 1500,
+    "quiet_ms": 300,
+    "navigation_timeout_ms": 60000
+  }
+}

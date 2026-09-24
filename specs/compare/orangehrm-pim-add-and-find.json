@@ -1,0 +1,112 @@
+{
+  "id": "orangehrm-pim-add-and-find",
+  "comment": "Flow 2 of the comparison: create an employee in PIM and find exactly that one record in the Employee List. Login is not the subject here, so it is a deterministic setup step with the demo credentials the login page prints. The rest is one Jev-driven goal: sidebar PIM, Add Employee, first and last name, Save, Personal Details, Employee List, type the full name into Employee Name, pick the real suggestion (not the 'Searching....' placeholder row), Search, '(1) Record Found'. The demo is shared and slow: settle_ms raised, budget widened. Assumptions: the demo does not already hold an employee named Jevtest Jevcmp${RUN_STAMP} (a collision is declared as a needs_human outcome, not a bug), and the auto-generated Employee Id may race another visitor (also declared).",
+  "start_url": "https://opensource-demo.orangehrmlive.com/web/index.php/auth/login",
+  "goal": "Open PIM from the left sidebar and click Add Employee. Type the first name and the last name, then click Save, so that the Personal Details page shows the employee's name. Then open Employee List, type the employee's full name into the Employee Name box, wait for the suggestion showing that name and click it, then click Search, so that the list says '(1) Record Found' and the results table shows the one record for that employee.",
+  "notes": "Forms render behind a spinner for a moment after each route change: act only once the form's own fields are shown. On Add Employee type only into First Name and Last Name once both are shown; leave Middle Name and Employee Id as they are; the sidebar Search box filters the menu and is not part of the flow. Clicking Save takes a few seconds to answer on this demo: while the Add Employee form is still shown with the typed names and no message, choose WAIT; open Employee List only once the Personal Details page shows the employee's name. In the Employee List the Employee Name box (placeholder 'Type for hints...') shows a dropdown while you type: a row reading 'Searching....' is a placeholder, not a suggestion; wait until the suggestion with the employee's full name appears and click that, then click the Search button below the filters. The record count is shown above the results table.",
+  "data": {
+    "first_name": "Jevtest",
+    "last_name": "Jevcmp${RUN_STAMP}",
+    "employee_name": "Jevtest Jevcmp${RUN_STAMP}"
+  },
+  "setup": [
+    {
+      "action": "wait_for",
+      "selector": "input[name=username]",
+      "timeout_ms": 30000
+    },
+    {
+      "action": "fill",
+      "selector": "input[name=username]",
+      "value": "Admin"
+    },
+    {
+      "action": "fill",
+      "selector": "input[name=password]",
+      "value": "admin123"
+    },
+    {
+      "action": "click",
+      "selector": "button[type=submit]"
+    },
+    {
+      "action": "wait_for",
+      "url": "**/dashboard/**",
+      "timeout_ms": 30000
+    },
+    {
+      "action": "wait_for",
+      "selector": "a.oxd-main-menu-item:has-text('PIM')",
+      "timeout_ms": 30000
+    }
+  ],
+  "checks": {
+    "add_employee_form": "The Add Employee form is shown with First Name, Middle Name and Last Name fields and a Save button",
+    "personal_details_saved": "The Personal Details page is shown with the name Jevtest Jevcmp${RUN_STAMP}",
+    "employee_list_shown": "The Employee Information filters are shown with an Employee Name box and a Search button",
+    "suggestion_shown": "A dropdown suggestion under the Employee Name box reads 'Jevtest Jevcmp${RUN_STAMP}'",
+    "still_loading": "A spinner or loading indicator is shown and the form's fields have not rendered yet"
+  },
+  "outcomes": {
+    "one_record_found": {
+      "when": "The Employee List says '(1) Record Found'. The results table shows a row with Jevtest and Jevcmp${RUN_STAMP}.",
+      "verdict": "pass"
+    },
+    "no_records_found": {
+      "when": "The Employee List says 'No Records Found' after a search for Jevtest Jevcmp${RUN_STAMP}.",
+      "verdict": "bug",
+      "requires_action": true,
+      "note": "the employee was just saved and should be found by name"
+    },
+    "several_records_found": {
+      "when": "The Employee List says '(2) Records Found', '(3) Records Found' or another count above one.",
+      "verdict": "needs_human",
+      "requires_action": true,
+      "note": "the shared demo already held an employee with this name; the test data collided, not the app"
+    },
+    "employee_id_taken": {
+      "when": "A red validation message under the Employee Id field says 'Employee Id already exists'.",
+      "verdict": "needs_human",
+      "note": "the auto-generated Employee Id raced another visitor of the shared demo"
+    },
+    "save_rejected": {
+      "when": "A red 'Required' or validation message is shown under First Name or Last Name on the Add Employee form after Save was clicked.",
+      "verdict": "test_issue",
+      "requires_action": true,
+      "note": "a name was not typed before Save"
+    },
+    "app_error": {
+      "when": "An error page or a message says something went wrong, an unexpected error occurred, or the service is unavailable.",
+      "verdict": "bug"
+    }
+  },
+  "assert": [
+    {
+      "url_matches": "**/pim/viewEmployeeList"
+    },
+    {
+      "text_contains": "(1) Record Found"
+    },
+    {
+      "text_in": {
+        "selector": ".oxd-table-body",
+        "contains": "Jevtest"
+      }
+    },
+    {
+      "text_in": {
+        "selector": ".oxd-table-body",
+        "contains": "Jevcmp${RUN_STAMP}"
+      }
+    }
+  ],
+  "budget": {
+    "max_steps": 40,
+    "max_seconds": 360
+  },
+  "browser": {
+    "settle_ms": 1500,
+    "quiet_ms": 300,
+    "navigation_timeout_ms": 60000
+  }
+}

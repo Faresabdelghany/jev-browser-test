@@ -1,0 +1,46 @@
+{
+  "id": "orangehrm-login",
+  "comment": "Flow 1 of the comparison: OrangeHRM's demo login driven by Jev end to end. The credentials are the ones the login page itself prints, so they are written plainly; the password still goes through secrets to exercise masking. The page is an empty shell before the single-page app renders, so setup waits for the Username field. text_in on the topbar breadcrumb, because 'Dashboard' also appears as a sidebar entry on every page after login.",
+  "start_url": "https://opensource-demo.orangehrmlive.com/web/index.php/auth/login",
+  "goal": "Log in with the given username and password so that the Dashboard opens: the topbar heading reads 'Dashboard' and the left sidebar lists 'PIM'.",
+  "notes": "The Username and Password fields sit in the login card in the middle of the page; the Login button submits them. After a route change the app shows a spinner for a moment before the page renders: wait for the page to finish loading rather than acting on an empty page.",
+  "data": { "username": "Admin", "password": "admin123" },
+  "secrets": ["password"],
+  "setup": [
+    { "action": "wait_for", "selector": "input[name=username]", "timeout_ms": 30000 }
+  ],
+  "checks": {
+    "login_form_shown": "The login card shows a Username field, a Password field and a Login button",
+    "dashboard_heading": "The topbar heading reads 'Dashboard'",
+    "sidebar_lists_pim": "The left sidebar menu lists an entry named 'PIM'",
+    "still_loading": "A spinner or loading indicator is shown and the page content has not rendered yet"
+  },
+  "outcomes": {
+    "dashboard_open": {
+      "when": "The topbar heading reads 'Dashboard'. The left sidebar menu lists 'PIM'.",
+      "verdict": "pass"
+    },
+    "login_rejected": {
+      "when": "The login card shows the message 'Invalid credentials'.",
+      "verdict": "bug",
+      "note": "the credentials are the ones the login page itself prints"
+    },
+    "field_required": {
+      "when": "A red 'Required' message is shown under the Username or the Password field after Login was clicked.",
+      "verdict": "test_issue",
+      "requires_action": true,
+      "note": "a value was not typed before Login was clicked"
+    },
+    "app_error": {
+      "when": "An error page or a message says something went wrong, an unexpected error occurred, or the service is unavailable.",
+      "verdict": "bug"
+    }
+  },
+  "assert": [
+    { "url_matches": "**/dashboard/index" },
+    { "text_in": { "selector": ".oxd-topbar-header-breadcrumb", "contains": "Dashboard" } },
+    { "element_present": { "role": "link", "name": "PIM" } }
+  ],
+  "budget": { "max_steps": 12, "max_seconds": 150 },
+  "browser": { "settle_ms": 1500, "quiet_ms": 300, "navigation_timeout_ms": 60000 }
+}

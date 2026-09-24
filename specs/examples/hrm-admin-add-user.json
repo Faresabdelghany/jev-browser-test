@@ -1,0 +1,144 @@
+{
+  "id": "hrm-admin-add-user",
+  "comment": "OrangeHRM demo, Admin > User Management: setup logs in and seeds an employee 'Jevtest User${RUN_STAMP}' with plain Playwright, then Jev opens Admin, clicks Add on the System Users list, picks the ESS role and the Enabled status from custom dropdowns, the employee through the autocomplete, types a unique username and a password twice, saves, and the System Users list that opens again shows the new row (the demo holds a handful of users, all on one page; the Username filter is the fallback). Passwords go through secrets (masked in the trace) although the account is a throwaway on a public demo. ${RUN_STAMP} (a fresh value the runner makes up every run) keeps the username and the seeded employee unique on the demo. The autocomplete first shows a 'Searching....' placeholder row for about a second; the first run clicked it at 0.51 confidence, which closed the list and left the field 'Invalid', so the notes name it and min_confidence is 0.6.",
+  "start_url": "https://opensource-demo.orangehrmlive.com/web/index.php/auth/login",
+  "goal": "Open Admin from the sidebar, click the Add button above the System Users table, choose the user role 'ESS' from the User Role dropdown, type the given employee name, wait for the suggestion with that name and choose it, choose 'Enabled' from the Status dropdown, type the given username, password and confirm password, and click Save, so that the System Users list opens again and its table shows a row with the username 'jev${RUN_STAMP}', the role ESS and the employee 'Jevtest User${RUN_STAMP}'. Only if that row is not in the table, type the given username into the Username filter (the first box of the System Users panel, left of the User Role dropdown) and click Search.",
+  "notes": "The left sidebar lists the modules (Admin, PIM, Leave, Time, ...); its Search box only filters the menu entries: never type into it. Forms in this app load behind a spinner for a moment after a route change: type only once the fields are shown. Admin opens on User Management > Users: a filter form with a Search button, and below it the System Users table with an Add button above it. The Add User form has User Role, Employee Name, Status, Username, Password and Confirm Password; type the same password into Password and Confirm Password. Fields labelled 'Type for hints...' are autocompletes: type the given text, wait for the suggestion list, then click the suggestion that reads the full name before doing anything else; a value only typed and not chosen is rejected as 'Invalid'. While the suggestions load, the list shows a single row reading 'Searching....': that is a placeholder, never click it; wait until the row with the full name appears (about a second), then click that row. If the field shows a red 'Invalid', type the name again and wait for the suggestion. Dropdowns showing '-- Select --' open on click and list their options; click the option named in the data. Save takes a few seconds behind a spinner; then the System Users list opens again with all users in its table (the demo has only a handful), the new one among them. The sidebar's Search box filters the menu, never type a username there; the Username filter is the first box inside the System Users panel, above the table.",
+  "data": {
+    "employee_name": "Jevtest User${RUN_STAMP}",
+    "username": "jev${RUN_STAMP}",
+    "password": "Jevtest1234!",
+    "confirm_password": "Jevtest1234!",
+    "user_role": "ESS",
+    "status": "Enabled"
+  },
+  "secrets": [
+    "password",
+    "confirm_password"
+  ],
+  "setup": [
+    {
+      "action": "fill",
+      "selector": "input[name=\"username\"]",
+      "value": "Admin"
+    },
+    {
+      "action": "fill",
+      "selector": "input[name=\"password\"]",
+      "value": "admin123"
+    },
+    {
+      "action": "click",
+      "selector": "button[type=\"submit\"]"
+    },
+    {
+      "action": "wait_for",
+      "url": "**/dashboard/**",
+      "timeout_ms": 45000
+    },
+    {
+      "action": "wait_for",
+      "selector": "a[href*=\"/pim/\"]",
+      "timeout_ms": 30000
+    },
+    {
+      "action": "goto",
+      "url": "https://opensource-demo.orangehrmlive.com/web/index.php/pim/addEmployee"
+    },
+    {
+      "action": "wait_for",
+      "selector": "input.orangehrm-firstname",
+      "timeout_ms": 45000
+    },
+    {
+      "action": "fill",
+      "selector": "input.orangehrm-firstname",
+      "value": "Jevtest"
+    },
+    {
+      "action": "fill",
+      "selector": "input.orangehrm-lastname",
+      "value": "User${RUN_STAMP}"
+    },
+    {
+      "action": "click",
+      "selector": "button[type=\"submit\"]"
+    },
+    {
+      "action": "wait_for",
+      "url": "**/pim/viewPersonalDetails/**",
+      "timeout_ms": 45000
+    },
+    {
+      "action": "goto",
+      "url": "https://opensource-demo.orangehrmlive.com/web/index.php/dashboard/index"
+    },
+    {
+      "action": "wait_for",
+      "selector": "a[href*=\"/leave/\"]",
+      "timeout_ms": 45000
+    }
+  ],
+  "checks": {
+    "on_add_user": "The page heading says 'Add User' and shows User Role, Employee Name, Status, Username and Password fields",
+    "on_users_list": "The page heading says 'System Users' and shows a filter form with a Search button and a table of users"
+  },
+  "outcomes": {
+    "user_listed": {
+      "when": "The System Users table shows a row with the username 'jev${RUN_STAMP}' and the employee name 'Jevtest User${RUN_STAMP}'",
+      "verdict": "pass",
+      "requires_action": true
+    },
+    "username_taken": {
+      "when": "A red message under the Username field says 'Already exists'",
+      "verdict": "test_issue",
+      "requires_action": true,
+      "note": "the demo already held this username (the stamp collided): rerun, a fresh stamp is made up every run"
+    },
+    "validation_error": {
+      "when": "A red 'Required', 'Invalid', 'Should have' or 'Passwords do not match' message is shown under a field of the Add User form after Save",
+      "verdict": "bug",
+      "requires_action": true,
+      "note": "every field was given a valid value; the trace shows which one the app rejected"
+    },
+    "no_records": {
+      "when": "The System Users page says 'No Records Found' after a search with the Username filter set to 'jev${RUN_STAMP}'",
+      "verdict": "bug",
+      "requires_action": true,
+      "note": "Save succeeded (the list page opened) but the user is not found by username"
+    },
+    "app_error": {
+      "when": "An error page, a stack trace or 'something went wrong' text is shown",
+      "verdict": "bug"
+    }
+  },
+  "assert": [
+    {
+      "url_matches": "**/admin/viewSystemUsers*"
+    },
+    {
+      "text_in": {
+        "selector": ".oxd-table-body",
+        "contains": "jev${RUN_STAMP}"
+      }
+    },
+    {
+      "text_in": {
+        "selector": ".oxd-table-body",
+        "contains": "Jevtest User${RUN_STAMP}"
+      }
+    }
+  ],
+  "browser": {
+    "settle_ms": 2500,
+    "quiet_ms": 200,
+    "navigation_timeout_ms": 45000
+  },
+  "budget": {
+    "max_steps": 34,
+    "max_seconds": 420
+  },
+  "thresholds": {
+    "min_confidence": 0.6
+  }
+}

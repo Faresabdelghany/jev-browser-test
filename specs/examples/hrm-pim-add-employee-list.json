@@ -1,0 +1,100 @@
+{
+  "id": "hrm-pim-add-employee-list",
+  "comment": "OrangeHRM demo, the PIM module end to end: Jev opens PIM, adds an employee, sees the Personal Details page, then opens Employee List, searches the name through the autocomplete and finds the new row. ${RUN_STAMP} (a fresh value the runner makes up every run) keeps the last name unique across runs so the search returns exactly one record. Login in setup. Same slow single-page app as hrm-add-employee: settle_ms 2500, one worker.",
+  "start_url": "https://opensource-demo.orangehrmlive.com/web/index.php/auth/login",
+  "goal": "Open PIM from the sidebar, click Add Employee, type the given first name and last name, click Save and confirm the Personal Details page of the new employee shows the name 'Jevtest Runner${RUN_STAMP}'; then click Employee List, type the given employee name in the Employee Name box, choose the matching suggestion, click Search, so that the results table shows exactly one record: the employee 'Jevtest Runner${RUN_STAMP}'.",
+  "notes": "The left sidebar lists the modules (Admin, PIM, Leave, Time, ...); its Search box only filters the menu entries: never type into it. Forms in this app load behind a spinner for a moment after a route change: type only once the fields are shown. PIM's top row has Employee List, Add Employee and Reports. On the Add Employee form leave Middle Name and the Employee Id as they are and do not turn on 'Create Login Details'; a spinner shows after Save before Personal Details appears. Fields labelled 'Type for hints...' are autocompletes: type the given text, wait for the suggestion list, then click the suggestion that reads the full name before doing anything else; a value only typed and not chosen is rejected as 'Invalid'. While the suggestions load, the list shows a single row reading 'Searching....': that is a placeholder, never click it; wait until the row with the full name appears (about a second), then click that row. If the field shows a red 'Invalid', type the name again and wait for the suggestion. On Employee List the results table and a '(n) Record(s) Found' line appear below the filters after Search.",
+  "data": {
+    "first_name": "Jevtest",
+    "last_name": "Runner${RUN_STAMP}",
+    "employee_name": "Jevtest Runner${RUN_STAMP}"
+  },
+  "setup": [
+    {
+      "action": "fill",
+      "selector": "input[name=\"username\"]",
+      "value": "Admin"
+    },
+    {
+      "action": "fill",
+      "selector": "input[name=\"password\"]",
+      "value": "admin123"
+    },
+    {
+      "action": "click",
+      "selector": "button[type=\"submit\"]"
+    },
+    {
+      "action": "wait_for",
+      "url": "**/dashboard/**",
+      "timeout_ms": 45000
+    },
+    {
+      "action": "wait_for",
+      "selector": "a[href*=\"/pim/\"]",
+      "timeout_ms": 30000
+    }
+  ],
+  "checks": {
+    "on_add_form": "The page heading says 'Add Employee' and shows First Name, Middle Name and Last Name fields",
+    "on_details": "The page heading says 'Personal Details' and the name 'Jevtest Runner${RUN_STAMP}' is shown",
+    "on_list": "The page shows the Employee Information filters (Employee Name, Employee Id) and a Search button"
+  },
+  "outcomes": {
+    "employee_listed": {
+      "when": "The Employee Information results table shows a row for 'Jevtest' 'Runner${RUN_STAMP}'. A line says '(1) Record Found'",
+      "verdict": "pass"
+    },
+    "no_records": {
+      "when": "The Employee List says 'No Records Found' after a search",
+      "verdict": "bug",
+      "requires_action": true,
+      "note": "the employee was just saved and its Personal Details page was shown"
+    },
+    "employee_id_taken": {
+      "when": "A red message under the Employee Id field says 'Employee Id already exists'",
+      "verdict": "bug",
+      "requires_action": true,
+      "note": "the form pre-fills the next free id; two forms opened in the same second collide: run on one worker"
+    },
+    "validation_error": {
+      "when": "A red 'Required' or 'Invalid' message is shown under a field of the Add Employee form after Save",
+      "verdict": "bug",
+      "requires_action": true,
+      "note": "both names were provided"
+    },
+    "invalid_search_name": {
+      "when": "A red 'Invalid' message is shown under the Employee Name filter on Employee List",
+      "verdict": "test_issue",
+      "requires_action": true,
+      "note": "the suggestion was not chosen before Search; a spec wording problem, not the app"
+    },
+    "app_error": {
+      "when": "An error page, a stack trace or 'something went wrong' text is shown",
+      "verdict": "bug"
+    }
+  },
+  "assert": [
+    {
+      "url_matches": "**/pim/viewEmployeeList*"
+    },
+    {
+      "text_in": {
+        "selector": ".oxd-table-body",
+        "contains": "Runner${RUN_STAMP}"
+      }
+    },
+    {
+      "text_contains": "(1) Record Found"
+    }
+  ],
+  "browser": {
+    "settle_ms": 2500,
+    "quiet_ms": 200,
+    "navigation_timeout_ms": 45000
+  },
+  "budget": {
+    "max_steps": 26,
+    "max_seconds": 330
+  }
+}
