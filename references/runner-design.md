@@ -54,9 +54,11 @@ secrets out of any model that does not need them, and turns a missing value into
 ## Stop conditions (in the order they are evaluated each step)
 
 time budget → observe → ask Jev (re-ask once if the `operation` answer fails validation) → a non-pass
-outcome seen (fail_fast → `outcome`) → a pending pass confirmed (`passed` / `assert_failed`) or not
+outcome seen (fail_fast → `outcome`; an outcome held back by `requires_action` / `after` is recorded as deferred
+instead) → a pending pass confirmed (`passed` / `assert_failed`) or not
 (`done_unverified` after Jev's DONE; carry on after an auto sighting) → a pass outcome seen (`auto_done` →
-WAIT, recheck next step) → invalid `operation` after the retry (`error`) → low-confidence streak →
+WAIT, recheck next step) → invalid `operation` after the retry (`error`) → low-confidence streak → a marginal
+TYPE_TEXT while controls are covered (→ one WAIT per page, ending when the page changes) →
 freshness guard (stale → WAIT and re-observe; `max_stale` in a row → `unstable_page`) → DONE (→ WAIT,
 recheck next step) / BLOCKED chosen → repeat detection (`stuck`) → execute → settle → next step.
 
@@ -244,6 +246,15 @@ instead of six times `button "Add to cart"` (measured on such a grid: target pro
 0.18, three refused decisions, `low_confidence`, and a story a human could not read either). A shared price
 bar is not enough, the card with its title is; a group that nothing distinguishes gets no context. Each
 element records `via: "semantic" | "label" | "cursor"`.
+
+The controls the occlusion test rejects are counted as `covered` (Jev sees `covered_controls`) and tagged
+`data-jev-covered`, and the fingerprint re-reads how many of them are still covered: a loading overlay lifting
+off a form moves no tagged node and no text, yet it is the change every WAIT on such a page is waiting for, so
+the whole-page comparison (`wait_for_change`, DONE / BLOCKED / PRESS_ENTER) reads a different count as a change
+(selftest `covered_check`, scenario 4i: the deferral wait ended at 629 ms, the overlay's lifetime, instead of its
+1500 ms ceiling). A marginal TYPE_TEXT on such a page (below `thresholds.covered_type_confidence`) is deferred once:
+the form the value belongs in is still loading and the one free field, a sidebar filter, is not it; a layer that
+stays is a dialog, and the next decision on the same page is executed (scenarios 4i, 4j).
 
 Executing a click on a control that something sits on top of dispatches the click on the control itself
 (`executed.dispatched`), because a forced pointer click lands on the styled box and is swallowed; other

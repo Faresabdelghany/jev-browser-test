@@ -200,7 +200,8 @@ environment failure (or a spec file is missing / two files share an id).
       "pending_outcome": "item_added",                               // a pass was seen here; executed is a WAIT "confirming outcome ..." and the next step decides
       "outcome_unconfirmed": "item_added",                           // the recheck did not see it again: a transient sighting, the run went on
       "final_look": true,                                            // the one step after the budget ran out: asked only the checks, the outcome and blocked_reason
-      "outcome_deferred": ["not_reordered"],                         // an outcome with requires_action was true of the page before any action: recorded, not a verdict
+      "outcome_deferred": ["not_reordered"],                         // an outcome true of the page whose requires_action (no action yet) or after (the named action not executed yet) holds it back: recorded, not a verdict
+      "type_deferred": 9,                                            // a TYPE_TEXT below thresholds.covered_type_confidence while 9 controls were covered: not executed, executed is a runner WAIT ending when the page changes (once per page signature); flag TYPE-DEFERRED:9
       "no_effect": true,                                             // this step's executed CLICK/TYPE_TEXT/SELECT/PRESS_ENTER changed nothing (page_changed false): flag NO-EFFECT
       "after_no_effect": true,                                       // this observation is the page the previous action failed to change (a key-mode picture)
       "adjudication_merged": true,                                   // the confirming step: the evidence questions rode in this request (state.lines added)

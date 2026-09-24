@@ -34,6 +34,9 @@ def is_reserved_question(name: str) -> bool:
 
 
 OUTCOME_NONE = "none_yet"  # the outcome Choice's "nothing listed is visible yet" option; not a valid outcome name
+# `after` on an outcome: {"click": "Search"} counts the outcome only once an executed CLICK targeted a control whose
+# label contains "Search" (case-insensitive); "type" -> TYPE_TEXT, "select" -> SELECT; several keys all have to hold
+AFTER_OPERATIONS = {"click": "CLICK", "type": "TYPE_TEXT", "select": "SELECT"}
 UNDETERMINED = "undetermined"  # result.outcome when the run ended in no declared outcome
 VERDICTS = ("pass", "bug", "test_issue", "needs_human")
 # every status a run can end in (run_test.TERMINAL_STATUSES has the meanings); `expect.status` is validated against it
@@ -105,6 +108,11 @@ DEFAULTS = {
         "max_low_confidence_steps": 3,
         "max_repeat": 3,
         "max_stale": 3,  # consecutive decisions invalidated by the page changing -> unstable_page
+        # A TYPE_TEXT decided below this while controls sit under another layer (covered_controls > 0: a form still
+        # loading) is deferred once per page: one wait ending when the page changes, then Jev decides again. Live,
+        # the first name went into the sidebar's menu filter at 0.54-0.67 in every PIM run while the form's fields
+        # were covered; the confident typings into the right fields read 0.84-0.99. 0 turns the deferral off.
+        "covered_type_confidence": 0.8,
     },
     "browser": {
         "headless": True,
@@ -265,6 +273,11 @@ def validate(spec: dict) -> list[str]:
             errors.append(f"outcome '{name}': 'note' must be a string")
         if "requires_action" in o and not isinstance(o["requires_action"], bool):
             errors.append(f"outcome '{name}': 'requires_action' must be true or false")
+        after = o.get("after")
+        if after is not None and not (isinstance(after, dict) and after and set(after) <= set(AFTER_OPERATIONS)
+                                      and all(isinstance(v, str) and v.strip() for v in after.values())):
+            errors.append(f"outcome '{name}': 'after' must be an object with some of {sorted(AFTER_OPERATIONS)} naming the "
+                          f"control an executed action must have targeted, e.g. {{\"click\": \"Search\"}}")
     has_pass_outcome = any(isinstance(o, dict) and o.get("verdict") == "pass" for o in outcomes.values())
     if outcomes and not has_pass_outcome:
         errors.append("'outcomes' must declare an outcome with verdict \"pass\" (done_when / never are shorthand for "
@@ -356,7 +369,7 @@ def validate(spec: dict) -> list[str]:
     if cdp is not None and not (isinstance(cdp, str) and cdp.startswith(("http://", "https://", "ws://", "wss://"))):
         errors.append("'browser.cdp_url' must be an http(s):// or ws(s):// URL of a browser's remote-debugging endpoint")
     t = spec.get("thresholds", {})
-    for k in ("check_true", "never_true", "outcome_true", "min_confidence"):
+    for k in ("check_true", "never_true", "outcome_true", "min_confidence", "covered_type_confidence"):
         v = t.get(k, 0.5)
         if not (isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= v <= 1.0):
             errors.append(f"'thresholds.{k}' must be a number between 0 and 1")

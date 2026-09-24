@@ -36,8 +36,8 @@ from observe import (
 )
 from policy import (
     ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, build_adjudication, build_questions, build_reason_questions, build_state,
-    evidence_line_keys, is_field, quoted_pick, read_checks, read_choice, read_outcome, resolve_target, seen_outcomes,
-    suggested_verdict, validate_choice,
+    defer_typing, deferred_outcomes, evidence_line_keys, is_field, quoted_pick, read_checks, read_choice, read_outcome,
+    resolve_target, seen_outcomes, suggested_verdict, validate_choice,
 )
 from spec import (HEADED_ENV, UNDETERMINED, effective_outcomes, load_dotenv, load_spec, match_expect, resolve_headless,
                   spec_warnings, validate)
@@ -717,6 +717,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     wait_streak, last_wait_sig = 0, None  # lever F4: consecutive Jev WAITs on the same page signature
     after_no_effect = False  # the last executed action changed nothing: the next step shows that page (a key picture)
     low_streak, last_low_sig = 0, None  # consecutive undecided (low-confidence) steps on one page signature
+    type_deferred_sig: str | None = None  # the page signature a marginal TYPE_TEXT under a covering layer was deferred on
     stale_streak = 0
     # A pass outcome (or Jev's DONE) gets one settle-and-recheck before it counts: {name, action}
     pending: dict | None = None
@@ -767,7 +768,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         """The steps worth a picture in "key" mode: something went wrong or the runner refused to act."""
         return bool(step.get("never_violated") or step.get("low_confidence") or step.get("stale")
                     or step.get("outcome_seen") or step.get("pending_outcome") or step.get("outcome_unconfirmed")
-                    or step.get("repeat_count", 0) >= 2 or step.get("after_no_effect") or step.get("outcome_deferred"))
+                    or step.get("repeat_count", 0) >= 2 or step.get("after_no_effect") or step.get("outcome_deferred")
+                    or step.get("type_deferred"))
 
     def capture(page, step: dict, terminal: bool = False) -> None:
         """Screenshot policy. Taken after Jev's answer and before execution, so the picture is the page
@@ -855,12 +857,11 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]), secret_values, prefetched)
 
     def accepted(seen: list[dict], step: dict) -> list[dict]:
-        """Outcomes with `requires_action` do not count before the first executed action: a statement such as
-        "nothing changed" is true of the untouched start page too, and only pass outcomes were guarded until now
-        (`passed_without_actions`). Deferred sightings are recorded on the step and the run goes on."""
-        if any("reason" not in h for h in history):
-            return seen
-        deferred = [s["name"] for s in seen if outcomes[s["name"]].get("requires_action")]
+        """Outcomes with `requires_action` do not count before the first executed action (a statement such as
+        "nothing changed" is true of the untouched start page too), and an outcome with `after` not before the
+        actions it names have been executed ("only after a click on Search"): policy.deferred_outcomes. Deferred
+        sightings are recorded on the step (`outcome_deferred`) and the run goes on."""
+        deferred = deferred_outcomes(seen, outcomes, history)
         if deferred:
             step["outcome_deferred"] = deferred
         return [s for s in seen if s["name"] not in deferred]
@@ -1168,6 +1169,20 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                          before=obs.get("fingerprint"))
                     continue
                 low_streak, last_low_sig = 0, None
+
+                if (obs.get("covered") and sig != type_deferred_sig
+                        and defer_typing(operation, obs["covered"], min(confs), th["covered_type_confidence"])):
+                    # A marginal typing while controls sit under another layer: the form is probably still loading and
+                    # the one free field is not it (live: the first name went into the sidebar's menu filter in every
+                    # PIM run). Wait once, ending the moment the page changes; on the same page the next decision is
+                    # executed, whatever it is (a layer that stays is a dialog, and its field is the field).
+                    type_deferred_sig = sig
+                    step["type_deferred"] = obs["covered"]
+                    park(step, f"typing deferred: {obs['covered']} controls are under another layer; waiting for the form",
+                         wait_entry(n, "WAIT", f"typing deferred: {obs['covered']} controls were under another layer (a form "
+                                               f"still loading?); the page was given time to finish"), sig,
+                         wait_ms=spec["browser"]["settle_ms"], before=obs.get("fingerprint"))
+                    continue
 
                 # Freshness guard. Jev decided on the observation; the page may have moved on while it
                 # was deciding (a toast, a re-render, a redirect). Re-read identity and meaning of what the

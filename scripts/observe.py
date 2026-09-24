@@ -56,6 +56,30 @@ JS_HELPERS = r"""
     const cs = getComputedStyle(el);
     return cs.display !== 'none' && cs.visibility !== 'hidden' && cs.pointerEvents !== 'none';
   };
+  // Is `el` (with box r) under another layer? What is on top must be unrelated to it: not the control's own <label>
+  // (a styled checkbox) and not a sibling box in its wrapper (a hidden input under its painted box).
+  const coveredAt = (el, r) => {
+    const cx = Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2));
+    const cy = Math.min(window.innerHeight - 1, Math.max(0, r.top + r.height / 2));
+    const top = document.elementFromPoint(cx, cy);
+    if (!top || top === el || el.contains(top) || top.contains(el)) return false;
+    const tag = el.tagName.toLowerCase();
+    const formControl = tag === 'input' || tag === 'select' || tag === 'textarea';
+    const lbl = top.closest('label');
+    const sibling = el.parentElement && (top.parentElement === el.parentElement || el.parentElement.contains(top));
+    return !((lbl && lbl.control === el) || (formControl && sibling));
+  };
+  // How many of the controls the observation found covered (tagged data-jev-covered) are still covered: a loading
+  // overlay lifting off a form changes no tagged node and no text, but it is the change a WAIT on such a page waits for.
+  const coveredNow = () => {
+    let n = 0;
+    for (const el of document.querySelectorAll('[data-jev-covered]')) {
+      if (!el.isConnected) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width >= 2 && r.height >= 2 && coveredAt(el, r)) n++;
+    }
+    return n;
+  };
   // [connected, visible, value, checked, disabled, hash of the surrounding form/dialog/row/item text].
   // A <label> offered for its offscreen checkbox stands for the control: value/checked/disabled are read
   // from the control, so the box being checked or disabled during the decision makes the label stale.
@@ -104,7 +128,8 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
   // wherever it sits, with no viewport or hit-test gates and no cursor:pointer scan, and without touching
   // the numbering Jev saw. The default is the table Jev chooses from: viewport, hit-tested, cursor scan.
   const { maxElements, maxTextChars, wholeDocument } = args;
-  if (!wholeDocument) document.querySelectorAll('[data-jev-idx]').forEach(e => e.removeAttribute('data-jev-idx'));
+  if (!wholeDocument) document.querySelectorAll('[data-jev-idx], [data-jev-covered]').forEach(e => {
+    e.removeAttribute('data-jev-idx'); e.removeAttribute('data-jev-covered'); });
   const SEL = [
     'a[href]', 'button', 'input', 'select', 'textarea', 'summary',
     '[role="button"]', '[role="link"]', '[role="tab"]', '[role="menuitem"]', '[role="menuitemcheckbox"]',
@@ -116,6 +141,7 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
   const candidates = [];
   const seen = new Set();
   let covered = 0;  // controls on screen but under another layer (overlay, dialog, banner): counted, not offered
+  const coveredEls = [];  // those controls, tagged data-jev-covered so the fingerprint can tell when they come free
 
   // A field with no accessible name whose <label> sits beside it in a wrapper, with no for/id linking the two
   // (OrangeHRM's oxd-input-group, many React form kits): the nearest ancestor holding exactly this one control
@@ -150,17 +176,10 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     // opacity:0 on a form control with a real box is the "hidden input behind a styled box" pattern
     // (antd/MUI/Bootstrap checkboxes, file inputs under an Upload button) -> still the thing to click.
     if (cs.opacity === '0' && !formControl) return false;
-    if (!wholeDocument) {
-      const cx = Math.min(vw - 1, Math.max(0, r.left + r.width / 2));
-      const cy = Math.min(vh - 1, Math.max(0, r.top + r.height / 2));
-      const top = document.elementFromPoint(cx, cy);
-      if (top && top !== el && !el.contains(top) && !top.contains(el)) {
-        // covered by something else (modal, banner, overlay) -> a human could not click it either,
-        // unless what is on top is the control's own styled box: its label, or a sibling in the same wrapper.
-        const lbl = top.closest('label');
-        const sibling = el.parentElement && (top.parentElement === el.parentElement || el.parentElement.contains(top));
-        if (!((lbl && lbl.control === el) || (formControl && sibling))) { if (via !== 'cursor') covered++; return false; }
-      }
+    if (!wholeDocument && coveredAt(el, r)) {
+      // covered by something else (modal, banner, overlay) -> a human could not click it either
+      if (via !== 'cursor') { covered++; coveredEls.push(el); }
+      return false;
     }
     let role = el.getAttribute('role');
     if (!role) {
@@ -311,6 +330,7 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     c.idx = i;
     delete c.el;
   });
+  if (!wholeDocument) coveredEls.forEach((el, i) => el.setAttribute('data-jev-covered', String(i)));
   return {
     url: location.href,
     title: document.title,
@@ -318,7 +338,7 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     truncated: candidates.length - kept.length,
     covered,
     visible_text: visibleText(maxTextChars),
-    fingerprint: { url: location.href, title: document.title, text_head: visibleText(500), nodes },
+    fingerprint: { url: location.href, title: document.title, text_head: visibleText(500), nodes, covered },
     scroll: {
       y: Math.round(window.scrollY),
       viewport: vh,
@@ -374,7 +394,7 @@ LINES_JS = "(maxLines) => {\n" + JS_HELPERS + r"""
 FINGERPRINT_JS = "() => {\n" + JS_HELPERS + r"""
   const nodes = {};
   for (const el of document.querySelectorAll('[data-jev-idx]')) nodes[el.getAttribute('data-jev-idx')] = nodeTuple(el);
-  return { url: location.href, title: document.title, text_head: visibleText(500), nodes };
+  return { url: location.href, title: document.title, text_head: visibleText(500), nodes, covered: coveredNow() };
 }
 """
 
@@ -485,8 +505,10 @@ def compare_fingerprint(before: dict, after: dict, operation: str, target_idx=No
 
     Scroll and WAIT never go stale. CLICK / TYPE_TEXT / SELECT compare the url and only the target node's
     tuple: unrelated content may change (a clock, a notification count) without invalidating a click on a
-    still-identical control. DONE / BLOCKED / PRESS_ENTER and anything else compare url, title, the text head
-    and every node tuple, because those decisions are about the whole page.
+    still-identical control. DONE / BLOCKED / PRESS_ENTER and anything else compare url, title, the text head,
+    how many of the observation's covered controls are still covered (a loading overlay lifting off a form is
+    the change a WAIT on such a page is waiting for, and it moves no tagged node) and every node tuple, because
+    those decisions are about the whole page. `wait_for_change` uses this whole-page form.
     """
     if operation in GUARD_SKIPPED:
         return None
@@ -505,6 +527,9 @@ def compare_fingerprint(before: dict, after: dict, operation: str, target_idx=No
         return "title changed"
     if before.get("text_head") != after.get("text_head"):
         return "visible text changed"
+    if before.get("covered") is not None and after.get("covered") is not None and before["covered"] != after["covered"]:
+        # a loading overlay lifted off a form (or a dialog closed): nothing tagged changed, the page did
+        return f"covered controls changed: {before['covered']} -> {after['covered']}"
     for key, tup in b_nodes.items():
         if key not in a_nodes:
             return f"element [{key}] is no longer on the page"

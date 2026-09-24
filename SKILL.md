@@ -73,6 +73,9 @@ Read `references/spec-format.md` the first time, then write `specs/<id>.json`:
   sentence** (". " between sentences): that is what gets quoted as the evidence line. Put **`requires_action:
   true`** on any bug outcome that describes "nothing happened" (the list is still unsorted, the dialog is still
   open): such a statement is true of the untouched start page too, and the flag defers it until an action ran.
+  When the ending only means something after a particular action, say which with **`after`**: `"after": {"click":
+  "Search"}` holds a 'No Records Found' outcome until a click on Search has been executed (also `type`, `select`;
+  several keys all have to hold), where `requires` on the filter checks was too weak.
 - **assert** — exact checks in code on the final page, free and non-model: `url_matches`, `text_contains`,
   `text_in` (text inside a CSS-selected element: the notification, the badge, never the whole page when the
   page's copy mentions the same words), `text_order` (a sorted list), `field_value`, `element_present/absent`.
@@ -128,8 +131,10 @@ verbatim), `confirmed_by` (`assertions` or `recheck`), `path_confidence`, `asser
 (the outcome read below 0.8), so the runner took the checking step and saw it there: correct, one request more.
 Open the step table only for `undetermined` or a surprising outcome. Flags worth knowing: `NO-EFFECT` (an
 action landed and the page did not change: the classic dead control; the next step's picture shows it),
-`DEFERRED:<outcome>` (true before any action, not counted), `COVERED:<n>` (controls on screen but under a loading
-overlay or a dialog, so not offered: the form is still loading), `LOW-CONF`, `STALE`, `EVIDENCE-ASKED`. With the
+`DEFERRED:<outcome>` (true of the page, but its `requires_action` / `after` condition has not happened yet: not
+counted), `COVERED:<n>` (controls on screen but under a loading overlay or a dialog, so not offered: the form is still
+loading), `TYPE-DEFERRED:<n>` (a marginal typing on such a page turned into one wait), `LOW-CONF`, `STALE`,
+`EVIDENCE-ASKED`. With the
 default `screenshots: "key"` the terminal step, every flagged step and the step after a no-effect action have a
 `steps/NNN.png`; `--screenshots all` pictures every step on a rerun. The one reading rule: the checks recorded
 in step *n* describe the page **before** action *n*; action *n*'s effect shows in step *n+1*. After a no-effect
@@ -254,7 +259,8 @@ request change nothing), so what *you* control is the number of round trips and 
 | `budget_exhausted` with `stuck_reason: still_loading` | The page was still loading when the budget ran out. Rerun once; then raise `budget`, or suspect a loader that never completes |
 | `unstable_page` | The page never held still (`step.stale` says what moved). Raise `browser.quiet_ms` / `settle_ms` or `wait_for` the thing that keeps changing in `setup` |
 | `low_confidence` with WAIT and DONE split around 0.45 while a loader is visible | Jev could not tell "still loading" from "done". Undecided steps already wait like a WAIT (`settle_ms` × 1, 2, 4, ending when the page changes) and the count restarts when the page changes; if the run still ends before the loader does, raise `settle_ms`, and name the loader's end in the goal ("until the message X appears") |
-| Jev typed into a search or filter box while a form was still loading (`COVERED:<n>` on that step) | The form's own fields sat under a loading overlay, so the one free field got the text. Jev sees `covered_controls` in its state and a `notes` sentence naming the fields to wait for ("type only once First Name and Last Name are shown; the sidebar Search filters the menu") settles it; for a start page, `wait_for` the form in `setup` |
+| Jev typed into a search or filter box while a form was still loading (`COVERED:<n>` on that step) | The form's own fields sat under a loading overlay, so the one free field got the text. A marginal typing there (below `thresholds.covered_type_confidence`, 0.8) is deferred once by the runner (`TYPE-DEFERRED:<n>`: one wait, ending when the overlay lifts); a confident one is executed, so if it still happens add a `notes` sentence naming the fields to wait for ("type only once First Name and Last Name are shown; the sidebar Search filters the menu"); for a start page, `wait_for` the form in `setup` |
+| A bug outcome fires before the action that gives it meaning (`No Records Found` on an unfiltered list before Search) | `requires` on checks is a probability, not an event. Put `"after": {"click": "Search"}` on the outcome: it is deferred (`DEFERRED:<name>`) until a click on Search has been executed |
 | A suite reads `flaky` but every run is a clean declared outcome | The app varies by design; see Suites. A spec with two legitimate pass endings agrees on verdicts, so declare both as `pass` outcomes |
 | An expected-red spec keeps a nightly gate red | Declare its ending in `expect`; the suite then reads it `expected` and goes red only when the behaviour changes |
 | Choice rejected as too large | Lower `observation.max_elements` |

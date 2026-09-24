@@ -366,12 +366,15 @@ def cdp_check(url: str, tmp: str) -> list[str]:
 
 # A form under a loading overlay for 700 ms, and a fixed Search box the overlay does not cover: the observer must
 # count the covered controls (not offer them) while the overlay is up, and offer them once it is gone.
+# ?stay=1 keeps the overlay for good (a modal that is the page now); First Name echoes what was typed into it, so
+# a spec can name the typing's visible effect.
 COVERED_PAGE = """<!doctype html><html><head><title>Covered</title></head><body>
 <h1>Add Employee</h1>
-<form><label>First Name <input id="fn"></label> <label>Last Name <input id="ln"></label> <button type="button">Save</button></form>
+<form><label>First Name <input id="fn" oninput="document.getElementById('echo').textContent = 'Typed: ' + this.value"></label> <label>Last Name <input id="ln"></label> <button type="button">Save</button></form>
+<div id="echo"></div>
 <input id="side" placeholder="Search" style="position:fixed;top:8px;right:8px">
 <div id="loader" style="position:fixed;left:0;top:40px;width:100%;height:200px;background:rgba(255,255,255,.6)"></div>
-<script>setTimeout(() => document.getElementById('loader').remove(), 700);</script>
+<script>if (!location.search.includes('stay=1')) setTimeout(() => document.getElementById('loader').remove(), 700);</script>
 </body></html>"""
 
 
@@ -379,7 +382,7 @@ def covered_check(url: str) -> list[str]:
     """A form under a loading overlay: its controls are counted as covered and not offered; once the overlay is gone
     they are offered and the count is zero. No Jev involved."""
     from playwright.sync_api import sync_playwright
-    from observe import observe
+    from observe import compare_fingerprint, fingerprint, observe
 
     failures = []
     with sync_playwright() as p:
@@ -390,7 +393,13 @@ def covered_check(url: str) -> list[str]:
         names = [e.get("name") for e in first["elements"]]
         if first.get("covered") != 3 or any(n in names for n in ("First Name", "Last Name", "Save")) or "Search" not in names:
             failures.append(f"covered form: expected covered=3 and only Search offered, got covered={first.get('covered')} names={names}")
+        if first["fingerprint"].get("covered") != 3 or fingerprint(pg).get("covered") != 3:
+            failures.append(f"covered form: the fingerprint should count the 3 covered controls at observe time and when re-read: "
+                            f"{first['fingerprint'].get('covered')} / {fingerprint(pg).get('covered')}")
         pg.wait_for_timeout(1000)
+        if fingerprint(pg).get("covered") != 0 or compare_fingerprint(first["fingerprint"], fingerprint(pg), "DONE") != "covered controls changed: 3 -> 0":
+            failures.append(f"overlay gone: the re-read fingerprint should count 0 covered controls and read as a whole-page change: "
+                            f"{fingerprint(pg).get('covered')} {compare_fingerprint(first['fingerprint'], fingerprint(pg), 'DONE')}")
         second = observe(pg, 50, 500)
         names = [e.get("name") for e in second["elements"]]
         if second.get("covered") != 0 or not all(n in names for n in ("First Name", "Last Name", "Save")):
@@ -598,6 +607,8 @@ class FakeJev:
             return "Hello World!"
         if "cookie" in s:
             return "We use cookies"  # true until the banner's Accept button is clicked
+        if "typed:" in s:
+            return "Typed: Jevtest"  # the covered fixture echoes what went into First Name
         return None
 
     def _outcome(self, criteria: dict, text: str) -> str:
@@ -682,6 +693,22 @@ class FakeJev:
         results_shown = self._find(clicks, "Add to cart") is not None
         typed_before = any(a["operation"] == "TYPE_TEXT" for a in recent)
         search_box_visible = any(e["label"] == "Search products" for e in state["elements"])
+
+        if self.mode == "type_while_covered":
+            # Live: with the form's fields under a loading overlay the sidebar's Search box was the only field offered,
+            # and Jev typed the first name into it at 0.54-0.67. Once the fields are shown it types into First Name.
+            first_name = self._find(types, '"First Name"')
+            if first_name and "TYPE_TEXT" in ops and not any(a.get("value_key") == "first_name" for a in recent):
+                answers["operation"] = self._choice("TYPE_TEXT", ops, conf=0.9)
+                answers["type_target"] = self._choice(first_name, types, conf=0.95)
+                answers["type_value"] = self._choice("first_name", questions["type_value"]["criteria"], conf=0.95)
+            elif self._find(types, '"Search"') and "TYPE_TEXT" in ops and not typed_before:
+                answers["operation"] = self._choice("TYPE_TEXT", ops, conf=0.65)
+                answers["type_target"] = self._choice(self._find(types, '"Search"'), types, conf=1.0)
+                answers["type_value"] = self._choice("first_name", questions["type_value"]["criteria"], conf=0.7)
+            else:
+                answers["operation"] = self._choice("DONE", ops, conf=0.9)
+            return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
 
         if self.mode == "blocked_after_dead_click" and any(a.get("page_changed") is False for a in recent):
             op, target = "BLOCKED", None   # gave up right after the dead click: "something else" is in the way
@@ -821,8 +848,8 @@ def outcome_spec(url: str) -> dict:
 
 
 RESULT_KEYS = ["spec_id", "outcome", "verdict", "note", "probability", "confidence", "seen_at_step", "first_seen_at_step",
-               "confirmed", "confirmed_by", "path_confidence", "reason", "evidence", "assertions", "outcomes_seen_earlier", "story", "status",
-               "duration_ms", "usage", "trace"]
+               "confirmed", "confirmed_by", "path_confidence", "reason", "evidence", "assertions", "outcomes_seen_earlier", "story",
+               "run_stamp", "status", "duration_ms", "usage", "trace"]
 
 
 def result_shape_check(trace: dict, out: str) -> list[str]:
@@ -1116,6 +1143,67 @@ def main() -> int:
         failures.append(f"DONE during a staged loader: expected passed/loaded, got {trace['status']}/{trace['outcome']} ({trace.get('error')})")
     if len(again) != 1 or again[0].get("recheck_again") != 1 or (again[0].get("executed") or {}).get("wait_ms") != 600:
         failures.append(f"the confirmation should look again once, pausing settle_ms x2: {[(s.get('recheck_again'), (s.get('executed') or {}).get('wait_ms')) for s in again]}")
+
+    # 4i. typing while the form is covered: Jev's marginal TYPE_TEXT (0.65) into the one free box, the sidebar-like
+    #     Search, while three controls sit under a loading overlay is deferred once (a runner WAIT ending when the
+    #     overlay goes), and the next decision types into First Name; the deferral is in the trace and in Jev's history.
+    covered_spec = base_spec("file://" + covered_html)
+    covered_spec.update({"goal": "Type the given first name into First Name so that the page says Typed: Jevtest",
+                         "data": {"first_name": "Jevtest"}, "secrets": [], "checks": {}, "done_when": [], "never": [],
+                         "outcomes": {"typed": {"when": "The page says Typed: Jevtest", "verdict": "pass"}},
+                         "assert": [{"text_contains": "Typed: Jevtest"}]})
+    covered_spec["browser"]["settle_ms"], covered_spec["browser"]["quiet_ms"] = 1500, 50
+    jev = FakeJev("type_while_covered")
+    out = os.path.join(tmp, "run-type-while-covered")
+    trace = run(covered_spec, jev, out, screenshots="key")
+    print(summarize(trace, out))
+    print()
+    steps = trace["steps"]
+    first, second = (steps + [{}, {}])[:2]
+    if trace["status"] != "passed" or trace["outcome"] != "typed":
+        failures.append(f"type while covered: expected passed/typed, got {trace['status']}/{trace.get('outcome')} ({trace.get('error')})")
+    if first.get("type_deferred") != 3 or (first.get("executed") or {}).get("action") != "WAIT" or first.get("low_confidence"):
+        failures.append(f"type while covered: the marginal typing on the covered page should be deferred as a WAIT, not refused as low confidence: "
+                        f"{first.get('type_deferred')} {first.get('executed')} low={first.get('low_confidence')}")
+    if ((first.get("executed") or {}).get("wait") or {}).get("ended") != "changed":
+        failures.append(f"type while covered: the deferral wait should end the moment the overlay goes: {(first.get('executed') or {}).get('wait')}")
+    if (second.get("executed") or {}).get("action") != "TYPE_TEXT" or '"First Name"' not in (second.get("target") or {}).get("label", "") or second.get("covered_controls"):
+        failures.append(f"type while covered: the next decision should type into First Name on the uncovered page: {second.get('target')} covered={second.get('covered_controls')}")
+    if not first.get("screenshot"):
+        failures.append("type while covered: a deferred typing is a key step and gets a picture")
+    recent = step_states(jev)[1]["recent_actions"] if len(step_states(jev)) > 1 else []
+    if not (recent and recent[-1].get("operation") == "WAIT" and "deferred" in (recent[-1].get("reason") or "")):
+        failures.append(f"type while covered: Jev's history should say the typing was deferred: {recent}")
+    if "TYPE-DEFERRED:3" not in summarize(trace, out):
+        failures.append("type while covered: the summary should flag TYPE-DEFERRED:3")
+
+    # 4j. the layer never lifts (?stay=1: a modal that is the page now): the deferral fires once per page, and the
+    #     same marginal typing on the same page is then executed (into Search, the only field there is).
+    stay_spec = dict(covered_spec, start_url="file://" + covered_html + "?stay=1")
+    out = os.path.join(tmp, "run-type-while-covered-stays")
+    trace = run(stay_spec, FakeJev("type_while_covered"), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    steps = trace["steps"]
+    if len(steps) < 2 or steps[0].get("type_deferred") != 3 or (steps[1].get("executed") or {}).get("action") != "TYPE_TEXT" \
+            or '"Search"' not in (steps[1].get("target") or {}).get("label", "") or steps[1].get("type_deferred"):
+        failures.append(f"layer stays: the typing should be deferred once and then executed into Search: "
+                        f"{[(s.get('type_deferred'), (s.get('executed') or {}).get('action'), (s.get('target') or {}).get('label')) for s in steps]}")
+
+    # 4k. `after` on an outcome: "the cookie banner is shown" is true of the start page, but the outcome counts only
+    #     after a click on Accept cookies; step 1 records it as deferred (like requires_action) and the run goes on
+    #     to pass once the banner is gone.
+    spec = outcome_spec(url)
+    spec["outcomes"]["banner_shown"] = {"when": "The cookie banner is shown", "verdict": "bug", "after": {"click": "Accept cookies"}}
+    out = os.path.join(tmp, "run-after-click")
+    trace = run(spec, FakeJev(), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    if trace["status"] != "passed" or trace["steps"][0].get("outcome_deferred") != ["banner_shown"]:
+        failures.append(f"after: the banner outcome should be deferred on step 1 and the run pass: {trace['status']} {trace['steps'][0].get('outcome_deferred')}")
+    if any(s.get("outcome_deferred") for s in trace["steps"][1:]) or any(s.get("outcome_seen") for s in trace["steps"]):
+        failures.append(f"after: once Accept was clicked the banner is gone, so nothing is deferred or seen later: "
+                        f"{[(s.get('outcome_deferred'), s.get('outcome_seen')) for s in trace['steps']]}")
 
     # 5. a low-confidence DONE is a WAIT, not a verdict -> the flow continues and passes
     spec = base_spec(url)

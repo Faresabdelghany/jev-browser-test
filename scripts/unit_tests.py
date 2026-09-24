@@ -798,6 +798,19 @@ class FingerprintCompareTests(unittest.TestCase):
             self.assertEqual(compare_fingerprint(before, self.fp(nodes={"2": [True, True, "", None, False, "dddd"]}), op),
                              "element [2] appeared")
 
+    def test_covered_controls_coming_free_is_a_whole_page_change(self) -> None:
+        """A loading overlay lifting off a form changes no tagged node and no text, yet it is the change every WAIT
+        on such a page is waiting for: the fingerprint carries how many of the observation's covered controls are
+        still covered, and the whole-page comparison reads a different count as a change. A target comparison
+        (the target itself was offered, so it was not covered) ignores it."""
+        from observe import compare_fingerprint
+        before = self.fp(covered=3)
+        for op in ("DONE", "BLOCKED", "PRESS_ENTER"):
+            self.assertIsNone(compare_fingerprint(before, self.fp(covered=3), op))
+            self.assertEqual(compare_fingerprint(before, self.fp(covered=0), op), "covered controls changed: 3 -> 0")
+        self.assertIsNone(compare_fingerprint(before, self.fp(covered=0), "CLICK", 0))
+        self.assertIsNone(compare_fingerprint(self.fp(), self.fp(), "DONE"), "older fingerprints without the field still compare")
+
     def test_max_stale_is_validated(self) -> None:
         from spec import validate
         self.assertEqual(DEFAULTS["thresholds"]["max_stale"], 3)
@@ -1778,6 +1791,82 @@ class RunStampTests(unittest.TestCase):
         result = build_result(trace, spec, {"ok": {"verdict": "pass"}}, {"outcome": {"name": "ok", "verdict": "pass"}}, "out")
         self.assertEqual(result["run_stamp"], "abc12345")
         self.assertEqual(redacted_spec(spec)["run_stamp"], "abc12345")
+
+
+class AfterOutcomeTests(unittest.TestCase):
+    """`after` on an outcome: it counts only once a named action has been executed ("only after a click on Search"),
+    where `requires_action` (any action) and `requires` (checks on the filters) were too weak: live, 'No Records
+    Found' fired on an unfiltered list before Search was clicked."""
+
+    def problems(self, **outcome_fields) -> list[str]:
+        from spec import validate
+        spec = _merge(SPEC, {"outcomes": {"ok": {"when": "The page says done", "verdict": "pass"},
+                                          "empty": {"when": "The list says No Records Found", "verdict": "bug", **outcome_fields}}})
+        return [p for p in validate(spec) if "after" in p]
+
+    def test_after_validates_as_an_object_of_click_type_select_strings(self) -> None:
+        self.assertEqual(self.problems(after={"click": "Search"}), [])
+        self.assertEqual(self.problems(after={"click": "Search", "type": "Employee Name"}), [])
+        for bad in ("Search", {}, {"click": ""}, {"click": 3}, {"hover": "Search"}, ["click", "Search"]):
+            self.assertTrue(self.problems(after=bad), bad)
+
+    def test_after_satisfied_needs_an_executed_action_whose_target_names_the_text(self) -> None:
+        from policy import after_satisfied
+        click = {"step": 3, "operation": "CLICK", "target": '[12] button "Search"', "value_key": None, "ok": True, "page_changed": True}
+        typed = {"step": 2, "operation": "TYPE_TEXT", "target": '[7] textbox "Type for hints..." in "Employee Name"',
+                 "value_key": "employee_name", "ok": True, "page_changed": True}
+        wait = {"step": 4, "operation": "WAIT", "reason": "checking the result before finishing", "ok": True, "page_changed": None}
+        failed = {"step": 5, "operation": "CLICK", "target": '[12] button "Search"', "value_key": None, "ok": False, "page_changed": None}
+        self.assertFalse(after_satisfied({"click": "Search"}, []))
+        self.assertTrue(after_satisfied({"click": "Search"}, [typed, click]))
+        self.assertTrue(after_satisfied({"click": "search"}, [click]), "case-insensitive")
+        self.assertFalse(after_satisfied({"click": "Reset"}, [click]))
+        self.assertFalse(after_satisfied({"click": "Search"}, [wait, failed]), "a runner wait and a failed action do not count")
+        self.assertTrue(after_satisfied({"type": "Employee Name"}, [typed]))
+        self.assertFalse(after_satisfied({"type": "Employee Name"}, [click]), "the operation must match too")
+        self.assertTrue(after_satisfied({"click": "Search", "type": "Employee Name"}, [typed, click]))
+        self.assertFalse(after_satisfied({"click": "Search", "type": "Employee Name"}, [click]), "every named action is needed")
+        self.assertFalse(after_satisfied({"select": "Status"}, [click]))
+
+    def test_deferred_outcomes_combines_requires_action_and_after(self) -> None:
+        from policy import deferred_outcomes
+        outcomes = {"nothing_happened": {"verdict": "bug", "requires_action": True},
+                    "empty": {"verdict": "bug", "after": {"click": "Search"}},
+                    "plain": {"verdict": "bug"}}
+        seen = [{"name": n, "verdict": "bug"} for n in outcomes]
+        click_reset = {"step": 1, "operation": "CLICK", "target": '[1] button "Reset"', "value_key": None, "ok": True, "page_changed": True}
+        click_search = {"step": 2, "operation": "CLICK", "target": '[2] button "Search"', "value_key": None, "ok": True, "page_changed": True}
+        wait = {"step": 1, "operation": "WAIT", "reason": "undecided", "ok": True, "page_changed": None}
+        self.assertEqual(deferred_outcomes(seen, outcomes, []), ["nothing_happened", "empty"])
+        self.assertEqual(deferred_outcomes(seen, outcomes, [wait]), ["nothing_happened", "empty"], "a runner wait is not an action")
+        self.assertEqual(deferred_outcomes(seen, outcomes, [click_reset]), ["empty"])
+        self.assertEqual(deferred_outcomes(seen, outcomes, [click_reset, click_search]), [])
+
+
+class DeferTypingTests(unittest.TestCase):
+    """A marginal TYPE_TEXT while controls sit under another layer (a loading overlay) is one wait, not a typing:
+    live, the first name went into the sidebar's menu filter in every PIM run because the form's own fields were
+    still covered and the filter was the only free box."""
+
+    def test_threshold_default_and_bounds(self) -> None:
+        from spec import validate
+        self.assertEqual(DEFAULTS["thresholds"]["covered_type_confidence"], 0.8)
+        self.assertEqual(validate(_merge(SPEC, {"thresholds": {"covered_type_confidence": 0.0}})), [])
+        self.assertEqual(validate(_merge(SPEC, {"thresholds": {"covered_type_confidence": 1}})), [])
+        self.assertTrue(any("covered_type_confidence" in p for p in validate(_merge(SPEC, {"thresholds": {"covered_type_confidence": 1.5}}))))
+        self.assertTrue(any("covered_type_confidence" in p for p in validate(_merge(SPEC, {"thresholds": {"covered_type_confidence": "0.8"}}))))
+
+    def test_defer_typing_only_for_a_marginal_type_text_on_a_covered_page(self) -> None:
+        from policy import defer_typing
+        self.assertTrue(defer_typing("TYPE_TEXT", covered=9, confidence=0.65, threshold=0.8))
+        self.assertFalse(defer_typing("TYPE_TEXT", covered=0, confidence=0.65, threshold=0.8), "nothing is covered: the free field is the field")
+        self.assertFalse(defer_typing("TYPE_TEXT", covered=9, confidence=0.8, threshold=0.8), "a confident typing is executed")
+        self.assertFalse(defer_typing("CLICK", covered=9, confidence=0.65, threshold=0.8), "only typing is deferred")
+        self.assertFalse(defer_typing("TYPE_TEXT", covered=9, confidence=0.65, threshold=0.0), "threshold 0 turns it off")
+
+    def test_type_deferred_reaches_the_summary_flags(self) -> None:
+        from summarize_trace import _flags
+        self.assertEqual(_flags({"type_deferred": 9}), "TYPE-DEFERRED:9")
 
 
 class _FixedRand:

@@ -66,6 +66,12 @@ The same flow, saying which endings Claude will accept back and what must be exa
   deferred sighting is recorded on the step (`outcome_deferred`, flag `DEFERRED:<name>`, a picture in key mode)
   and the run goes on. Use it on every bug outcome that describes "nothing happened"; leave it off when the
   outcome is legitimately decided on the start page (a menu entry missing on load).
+  **`after`** names the action an outcome only means something after: `"after": {"click": "Search"}` defers it
+  until an executed CLICK targeted a control whose label contains "Search" (case-insensitive; `type` for TYPE_TEXT,
+  `select` for SELECT; several keys all have to have happened). Measured live: a Leave List's 'No Records Found'
+  outcome fired on the unfiltered list before Search was clicked although the filter checks in its `requires` read
+  0.82 and 0.88, because a check is a probability about the page, not a record of what was done. Deferred sightings
+  are recorded like `requires_action`'s (`outcome_deferred`, flag `DEFERRED:<name>`).
 - **`assert`** — exact expectations checked **in code** on the final observation, free and non-model, the
   "DONE is never proof" verifier: `url_matches` (Playwright's URL glob, the same dialect as `setup.wait_for.url`:
   `**` anything, `*` anything but `/`, `{a,b}` either, everything else literal, `?` included), `text_contains`
@@ -114,7 +120,7 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `checks` | object | `{}` | `name -> statement` evaluated as a Noul (0–1) against the page at every step |
 | `done_when` | list | `[]` | Check names that must all be ≥ `thresholds.check_true` for the synthesized `goal_reached` pass outcome. Required when no `outcomes` are declared; ignored when they are |
 | `never` | list | `[]` | Check names that end the run as the synthesized `never_<check>` outcome (verdict `bug`) at `thresholds.never_true`. Ignored when `outcomes` are declared |
-| `outcomes` | object | `{}` | `name -> {when, verdict, requires?, requires_action?, note?}`: the endings the run may return, see above. Names are identifiers; `none_yet` and the reserved question names are not allowed |
+| `outcomes` | object | `{}` | `name -> {when, verdict, requires?, requires_action?, after?, note?}`: the endings the run may return, see above. Names are identifiers; `none_yet` and the reserved question names are not allowed |
 | `assert` | list | `[]` | Exact expectations checked in code on the final page before a pass counts, see above (`url_matches`, `text_contains`, `text_in`, `text_order`, `field_value`, `element_present`, `element_absent`) |
 | `expect` | object | none | The result an expected-red spec should end in (`outcome`, `status`, `verdict`, `blocked_reason`, `stuck_reason`, `suggested_verdict`), see above. Exit 0 and suite verdict `expected` when it matches |
 | `auto_done` | bool | `true` | Start the confirmation as soon as a pass outcome is seen, even if Jev has not chosen DONE (false: only Jev's DONE starts it) |
@@ -127,6 +133,7 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `thresholds.never_true` | 0–1 | 0.8 | A `never` check counts as violated at or above this |
 | `thresholds.outcome_true` | 0–1 | 0.8 | An outcome with a `when` is seen when the outcome Choice gives it at least this probability |
 | `thresholds.min_confidence` | 0–1 | 0.5 | If the operation, the target, or (for TYPE_TEXT) the `type_value` choice is below this, the decision is **not executed**: the step becomes a WAIT and is flagged `low_confidence` |
+| `thresholds.covered_type_confidence` | 0–1 | 0.8 | A TYPE_TEXT decided below this while controls sit under another layer (`covered_controls` > 0: a form still loading behind an overlay) is **deferred once per page**: the step becomes a WAIT (`type_deferred`, flag `TYPE-DEFERRED:<n>`) ending the moment the page changes (the overlay lifting counts), and Jev decides again on the uncovered page; on the same page the next decision is executed whatever it is (a layer that stays is a dialog, and its field is the field). Live: the first name went into the sidebar's menu filter at 0.54–0.67 in every PIM run while the form's fields were covered; typings into the right fields read 0.84–0.99. `0` turns it off |
 | `thresholds.max_low_confidence_steps` | int | 3 | Consecutive undecided steps **on one page** before stopping with `low_confidence`. A page that changes under them (a loader finishing, a form appearing) restarts the count, and each undecided step waits like a chosen WAIT: `settle_ms` × 1, 2, 4, ending the moment the page changes (`step.low_streak`, `executed.wait`) |
 | `thresholds.max_repeat` | int | 3 | Same action on an unchanged page this many times → `stuck` |
 | `thresholds.max_stale` | int | 3 | Consecutive decisions invalidated because the page changed while Jev was deciding (nothing executed) → `unstable_page` |

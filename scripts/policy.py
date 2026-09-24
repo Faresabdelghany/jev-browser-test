@@ -24,7 +24,7 @@ import re
 from jev_client import choice, noul
 from observe import element_label
 from rules import CHECK, NEXT_ACTION, TARGET, VALUE
-from spec import OUTCOME_NONE, effective_outcomes
+from spec import AFTER_OPERATIONS, OUTCOME_NONE, effective_outcomes
 
 CLICK_ROLES = {
     "link", "button", "submit", "reset", "image", "tab", "menuitem", "menuitemcheckbox", "menuitemradio",
@@ -325,6 +325,39 @@ def seen_outcomes(outcomes: dict, checks: dict, outcome_answer: dict | None, out
         seen.append({"name": name, "verdict": o["verdict"], "probability": round(float(p), 3),
                      "confidence": outcome_answer.get("confidence") if (o.get("when") and outcome_answer) else None})
     return seen
+
+
+def after_satisfied(after: dict, history: list[dict]) -> bool:
+    """Has every action `after` names been executed? `{"click": "Search"}` needs a history entry (not a runner wait,
+    `ok` true) whose operation is CLICK and whose target label contains "Search", case-insensitive; "type" and
+    "select" likewise. All keys must hold. Live: 'No Records Found' fired on an unfiltered list before Search was
+    clicked although the filter checks in `requires` read 0.82 / 0.88; "only after a click on Search" says it."""
+    actions = [h for h in history if "reason" not in h and h.get("ok") and h.get("target")]
+    for key, text in after.items():
+        op = AFTER_OPERATIONS[key]
+        if not any(h.get("operation") == op and text.lower() in str(h["target"]).lower() for h in actions):
+            return False
+    return True
+
+
+def deferred_outcomes(seen: list[dict], outcomes: dict, history: list[dict]) -> list[str]:
+    """The seen outcomes that do not count yet, in order: one with `requires_action` before any executed action
+    (a statement such as "nothing changed" is true of the untouched start page too), and one whose `after` actions
+    have not all been executed. The caller records them on the step (`outcome_deferred`) and goes on."""
+    acted = any("reason" not in h for h in history)
+    deferred = []
+    for s in seen:
+        o = outcomes[s["name"]]
+        if (o.get("requires_action") and not acted) or (o.get("after") and not after_satisfied(o["after"], history)):
+            deferred.append(s["name"])
+    return deferred
+
+
+def defer_typing(operation: str, covered: int, confidence: float, threshold: float) -> bool:
+    """Is this a marginal TYPE_TEXT on a page where controls sit under another layer? Then the loop defers it once:
+    the form the value belongs in is probably still loading, and the one free field (a sidebar filter) is not it.
+    A confident typing (>= threshold) is executed; so is any typing once nothing is covered."""
+    return operation == "TYPE_TEXT" and covered > 0 and confidence < threshold
 
 
 def suggested_verdict(status: str, typed: list[str | None]) -> str | None:
