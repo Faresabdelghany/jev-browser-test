@@ -233,7 +233,10 @@ def dump_step(trace: dict, n: int) -> str:
             elements = s.pop("elements", [])
             body = json.dumps(s, indent=2, ensure_ascii=False)
             table = "\n".join(
-                f"[{e['idx']}] {e['role']} \"{e.get('name', '')}\"" + (f" value=\"{e['value']}\"" if e.get("value") else "")
+                f"[{e['idx']}] {e['role']} \"{e.get('name', '')}\""
+                + (f" <{e.get('tag', '?')}> at ({e.get('x', '?')},{e.get('y', '?')})" if not e.get("name") else "")  # an unnamed element: what and where
+                + (f" value=\"{e['value']}\"" if e.get("value") else "")
+                + (" (below the fold)" if e.get("below") else "")
                 for e in elements
             ) or "(no element table recorded for this step: only steps that chose an element carry one)"
             return f"{body}\n\nelements offered at step {n}:\n{table}"

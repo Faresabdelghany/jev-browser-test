@@ -112,6 +112,8 @@ CONTROLS_PAGE = """<!doctype html><html><head><title>Controls</title><style>
  .mui-box input{position:absolute;inset:0;width:100%;height:100%;opacity:0;margin:0;cursor:pointer}
  .sr-only{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0)}
 </style></head><body>
+<!-- an icon-only control: no text, no label; its class names say what it is -->
+<span id="cal" style="cursor:pointer;display:inline-block;width:20px;height:20px"><i class="oxd-icon bi-calendar oxd-date-input-icon"></i></span>
 <table><tbody>
 <tr class="ant-table-row"><td><label class="ant-checkbox-wrapper"><span class="ant-checkbox"><input class="ant-checkbox-input" type="checkbox"><span class="ant-checkbox-inner"></span></span></label></td>
     <td><a href="#c1">SKU-1004</a></td><td>Widget 12-pack</td><td>Warehouse A</td></tr>
@@ -157,6 +159,12 @@ CONTROLS_PAGE = """<!doctype html><html><head><title>Controls</title><style>
 <a href="#logout">Logout</a>
 <div role="alert">Session expired</div>
 <label>Coupon <input id="coupon" value="SAVE10"></label>
+<!-- below the first screen at 1280x800: a button and a textarea Jev must still be able to reach, and a link it must not be offered -->
+<div style="height:1400px"></div>
+<label>Comments <textarea id="comments"></textarea></label>
+<button id="submit-order" type="button" onclick="document.getElementById('placed').textContent='Order placed'">Submit order</button>
+<a href="#terms" id="terms-link">Terms of sale</a>
+<div id="placed"></div>
 </body></html>
 """
 
@@ -193,7 +201,8 @@ SETTLE_PAGE = """<!doctype html><html><head><title>Settle</title></head><body>
    const ul = document.getElementById('synclist'); ul.innerHTML = '';
    for (const c of ['blue', 'black', 'red']) if (c.startsWith(document.getElementById('sync').value)) {
      const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = c; ul.appendChild(li); } }
-</script></body></html>"""
+</script>
+</body></html>"""
 
 
 # A page that confirms by toast: Save inserts a toast (aria-live, a "toast" class with a --success tone) 60 ms after
@@ -426,17 +435,34 @@ def cdp_check(url: str, tmp: str) -> list[str]:
 # must count the covered controls (not offer them) while the overlay is up, and offer them once it is gone.
 # ?stay=1 keeps the overlay for good (a blank layer that never lifts); ?dialog=1 keeps it and gives it an Ok button
 # (a dialog: a layer with a control of its own, which writes Confirmed into the layer when clicked). First Name echoes
-# what was typed into it, so a spec can name the typing's visible effect.
+# what was typed into it, so a spec can name the typing's visible effect. ?header=1 keeps a full-page loader and paints a
+# fixed top bar with links above it (a single-page app's shell while its content loads): the bar's links are not the
+# layer's own controls, so the layer is blank. ?sibling=1 keeps a backdrop over the form and opens a dialog beside it in
+# the DOM (not inside it) with an Ok: the dialog's Ok is the layer's control although the backdrop does not contain it.
 COVERED_PAGE = """<!doctype html><html><head><title>Covered</title></head><body>
 <h1>Add Employee</h1>
 <form><label>First Name <input id="fn" oninput="document.getElementById('echo').textContent = 'Typed: ' + this.value"></label> <label>Last Name <input id="ln"></label> <button type="button">Save</button></form>
 <div id="echo"></div>
-<input id="side" placeholder="Search" style="position:fixed;top:8px;right:8px">
+<div id="sidewrap"><input id="side" placeholder="Search" style="position:fixed;top:8px;right:8px"></div>
 <div id="loader" style="position:fixed;left:0;top:40px;width:100%;height:200px;background:rgba(255,255,255,.6)"></div>
 <script>
  const q = new URLSearchParams(location.search);
  const l = document.getElementById('loader');
- if (q.get('dialog') === '1') {
+ if (q.get('header') === '1') {
+   l.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;background:rgba(255,255,255,.6);z-index:1';
+   const bar = document.createElement('nav');
+   bar.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:24px;background:#eee;z-index:2';
+   bar.innerHTML = '<a href="#u">Upgrade</a> <a href="#h">Help</a> <a href="#c">Candidates</a>';
+   document.body.appendChild(bar);
+   document.getElementById('side').style.top = '32px';  // under the loader, not under the bar
+ } else if (q.get('sibling') === '1') {
+   const d = document.createElement('div'); d.id = 'dialog';
+   d.style.cssText = 'position:fixed;left:200px;top:60px;width:300px;height:120px;background:#fff;border:1px solid #333;z-index:2';
+   const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Ok';
+   b.onclick = () => { d.appendChild(document.createTextNode(' Confirmed')); };
+   d.appendChild(document.createTextNode('Balance not sufficient ')); d.appendChild(b);
+   document.body.appendChild(d);
+ } else if (q.get('dialog') === '1') {
    const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Ok';
    b.onclick = () => { l.appendChild(document.createTextNode(' Confirmed')); };
    l.appendChild(document.createTextNode('Balance not sufficient ')); l.appendChild(b);
@@ -556,6 +582,22 @@ def covered_check(url: str) -> list[str]:
         if dialog.get("covered") != 3 or "Ok" not in names or dialog.get("layer_controls") != 1:
             failures.append(f"dialog over the form: expected covered=3, Ok offered and layer_controls=1, got covered={dialog.get('covered')} "
                             f"layer_controls={dialog.get('layer_controls')} names={names}")
+        # A fixed top bar painted above a full-page loader is not the layer's own controls: the bar's links sit outside the
+        # covered region, so the layer is blank and a marginal action is deferred. Live (a Recruitment save's post-Save shell):
+        # COVERED:13(layer:5), the five being the app's top bar, and the Candidates tab was clicked while the save was in flight.
+        pg.goto(url + "?header=1")
+        header = observe(pg, 50, 500)
+        names = [e.get("name") for e in header["elements"]]
+        if header.get("covered") != 4 or not all(n in names for n in ("Upgrade", "Help", "Candidates")) or header.get("layer_controls") != 0:
+            failures.append(f"fixed bar above a full-page loader: expected covered=4, the bar's links offered and layer_controls=0, got "
+                            f"covered={header.get('covered')} layer_controls={header.get('layer_controls')} names={names}")
+        # A dialog beside its backdrop in the DOM: its Ok lies over the covered form, so it is the layer's control all the same.
+        pg.goto(url + "?sibling=1")
+        sib = observe(pg, 50, 500)
+        names = [e.get("name") for e in sib["elements"]]
+        if sib.get("covered") != 3 or "Ok" not in names or sib.get("layer_controls") != 1:
+            failures.append(f"dialog beside its backdrop: expected covered=3, Ok offered and layer_controls=1, got covered={sib.get('covered')} "
+                            f"layer_controls={sib.get('layer_controls')} names={names}")
         b.close()
     return failures
 
@@ -563,7 +605,7 @@ def covered_check(url: str) -> list[str]:
 def observer_check(url: str) -> list[str]:
     """Observation + execution sanity on CONTROLS_PAGE. No Jev involved."""
     from playwright.sync_api import sync_playwright
-    from observe import observe
+    from observe import element_label, observe
     from run_test import execute
     from spec import DEFAULTS, _merge
 
@@ -673,12 +715,13 @@ def observer_check(url: str) -> list[str]:
             failures.append(f"a datalist input should be flagged (the settle must not wait for DOM options): {by_name.get('Pick')}")
 
         # The assertion oracle is the whole document: the Logout link, the alert and the Coupon field sit 2,200 px
-        # below the fold, so they are absent from the table Jev chooses from (a 1280x800 viewport) and present to
-        # check_assertions; comparisons use the real values and `actual` is masked.
+        # below the fold. The link is absent from the table Jev chooses from (a 1280x800 viewport); the Coupon field, a
+        # form control, is offered there marked `below`; both are present to check_assertions, whose comparisons use
+        # the real values while `actual` is masked.
         from run_test import adjudicate, check_assertions
         names = {e["name"] for e in masked["elements"]}
-        if "Logout" in names or "Coupon" in names:
-            failures.append("below-the-fold controls should not be in the table Jev chooses from")
+        if "Logout" in names or not any(e["name"] == "Coupon" and e.get("below") for e in masked["elements"]):
+            failures.append("a below-the-fold link must stay out of Jev's table and a below-the-fold field must be offered marked below")
         got = check_assertions({"assert": [
             {"element_present": {"role": "link", "name": "Logout"}}, {"element_absent": {"role": "alert"}},
             {"field_value": {"label": "Coupon", "equals": "SAVE10"}}, {"field_value": {"label": "Username", "equals": "hunter2-not-real"}},
@@ -716,6 +759,30 @@ def observer_check(url: str) -> list[str]:
         rec = adjudicate(pg, Broken(), "edited", "The editor holds a note", [])
         if rec.get("line") is not None or "ValueError" not in (rec.get("error") or ""):
             failures.append(f"a failing adjudication is recorded, never raised: {rec}")
+        # An icon-only control is named from its class (bi-calendar -> "calendar icon") instead of reaching Jev as clickable "".
+        if not any(e["name"] == "calendar icon" for e in obs["elements"]):
+            failures.append(f"an icon-only control should be named from its icon class: {[e['name'] for e in obs['elements'] if e['role'] == 'clickable']}")
+        # Controls below the first screen: a form control and a button are offered, marked below, without a hit test (nothing
+        # can cover what is not on screen); a link there is not (a long article's links would flood the table). Live: an Add
+        # Candidate form's Save sat at y=849 of an 800 px viewport, was never offered, and Jev clicked a calendar icon instead.
+        below = {e["name"]: e for e in obs["elements"] if e.get("below")}
+        if not {"Comments", "Submit order", "Coupon"} <= set(below) or not all(e["y"] >= 800 for e in below.values()):
+            failures.append(f"below-the-fold form controls and buttons should be offered and marked, links not: {[(n, e['y']) for n, e in below.items()]}")
+        if any(e["name"] == "Terms of sale" for e in obs["elements"]):
+            failures.append("a link below the fold must not be offered")
+        if "Submit order" in below:
+            e = below["Submit order"]
+            if "(below the fold)" not in element_label(e):
+                failures.append(f"the label of a below-the-fold control should say so: {element_label(e)}")
+            res = execute(pg, sp, "CLICK", {"element": e["idx"], "choice": str(e["idx"]), "label": e["name"], "confidence": 1.0}, None)
+            if not res["ok"] or pg.evaluate("() => document.getElementById('placed').textContent") != "Order placed":
+                failures.append(f"a click on a below-the-fold button should scroll to it and land: {res.get('error')}")
+        # SCROLL_DOWN moves the window; on a page whose content scrolls inside an overflow container it falls back to a wheel
+        pg.goto(url)
+        pg.evaluate("() => { document.documentElement.style.overflow = 'hidden'; document.body.style.cssText = 'height:100vh;overflow:auto;margin:0'; }")
+        res = execute(pg, sp, "SCROLL_DOWN", None, None)
+        if not res["ok"] or (res.get("scroll") or {}).get("scrolled") != "wheel" or pg.evaluate("() => document.body.scrollTop") <= 0:
+            failures.append(f"SCROLL_DOWN should fall back to a wheel when the window does not move: {res.get('scroll')} body.scrollTop={pg.evaluate('() => document.body.scrollTop')}")
         b.close()
     print(f"observer check: {len(obs['elements'])} elements, checkboxes={len(boxes)}, states={states}, change_events={changes}")
     print()

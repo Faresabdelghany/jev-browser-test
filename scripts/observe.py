@@ -160,6 +160,8 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
   const coveredEls = [];  // those controls, tagged data-jev-covered so the fingerprint can tell when they come free
   const coverers = [];  // the layers found on top of them (a loading overlay, a backdrop, an open list), each once
   let loadingOptions = 0;  // autocomplete rows that only say the suggestions are loading: counted, not offered
+  const BELOW_MAX = 12;  // form controls and buttons below the first screen that are offered all the same (marked below)
+  let below = 0;
 
   // A field with no accessible name whose <label> sits beside it in a wrapper, with no for/id linking the two
   // (OrangeHRM's oxd-input-group, many React form kits): the nearest ancestor holding exactly this one control
@@ -179,6 +181,25 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     return '';
   };
 
+  // An icon-only control (a calendar glyph beside a date field, a magnifier) has no text and no label; its class names
+  // say what it is: bi-calendar, fa-search, mdi-close, oxd-date-input-icon -> "calendar icon", "date input icon". The
+  // first class token, on the element or its first children, that yields a word. Live: an unnamed `clickable ""` beside
+  // Date of Application took the click meant for a Save that was not on screen, and the trace alone said what it was.
+  const ICON_SKIP = new Set(['icon', 'icons', 'svg', 'inline', 'fw', 'lg', 'sm', 'xs', 'xl', '2x', 'solid', 'regular', 'light', 'brands', 'outlined', 'round', 'sharp']);
+  const ICON_RE = /^(?:bi|fa[srlbd]?|mdi|ri|pi|ti|icon|oxd|lucide|glyphicon|material-icons)-(.+)$/;
+  const iconName = el => {
+    for (const n of [el, ...Array.from(el.children).slice(0, 2)]) {
+      const cls = typeof n.className === 'string' ? n.className : (n.getAttribute('class') || '');
+      for (const tok of cls.split(/\s+/)) {
+        const m = ICON_RE.exec(tok);
+        if (!m) continue;
+        const w = m[1].replace(/-?icon$/, '').replace(/^icon-?/, '').replace(/-/g, ' ').trim();
+        if (w && !ICON_SKIP.has(w)) return (w + ' icon').slice(0, 40);
+      }
+    }
+    return '';
+  };
+
   // Returns true if the element was accepted into the table.
   const describe = (el, via) => {
     if (seen.has(el)) return false;
@@ -187,14 +208,24 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     if (tag === 'input' && type === 'hidden') return false;
     const r = el.getBoundingClientRect();
     if (r.width < 2 || r.height < 2) return false;
-    if (!wholeDocument && (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw)) return false;
+    if (!wholeDocument && (r.bottom < 0 || r.right < 0 || r.left > vw)) return false;  // above or beside the screen: not offered
     const cs = getComputedStyle(el);
     const formControl = tag === 'input' || tag === 'select' || tag === 'textarea';
     if (cs.visibility === 'hidden' || cs.display === 'none' || cs.pointerEvents === 'none') return false;
+    // Below the first screen: a form control or a button is offered all the same, marked `below`, with no hit test (nothing
+    // can cover what is not on screen; the click scrolls it into view). Links and plain clickables stay out: a long
+    // article's links would flood the table. Live: an Add Candidate form's Save sat at y=849 of an 800 px viewport and was
+    // never offered, so Jev clicked the calendar icon beside the date field instead and stalled in its popup.
+    let isBelow = false;
+    if (!wholeDocument && r.top >= vh) {
+      const buttonLike = tag === 'button' || el.getAttribute('role') === 'button';
+      if (via !== 'semantic' || !(formControl || buttonLike) || below >= BELOW_MAX) return false;
+      isBelow = true; below++;
+    }
     // opacity:0 on a form control with a real box is the "hidden input behind a styled box" pattern
     // (antd/MUI/Bootstrap checkboxes, file inputs under an Upload button) -> still the thing to click.
     if (cs.opacity === '0' && !formControl) return false;
-    const top = wholeDocument ? null : coveredAt(el, r);
+    const top = (wholeDocument || isBelow) ? null : coveredAt(el, r);
     if (top) {
       // covered by something else (modal, banner, overlay) -> a human could not click it either
       if (via !== 'cursor') { covered++; coveredEls.push(el); if (!coverers.includes(top)) coverers.push(top); }
@@ -233,6 +264,7 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
       el.getAttribute('title') || el.getAttribute('alt') || caption || text || ''
     ).slice(0, 80);
     if (!name && editable) name = groupLabel(el);  // a label beside the field beats its machine identifiers
+    if (!name) name = iconName(el);  // an icon-only control, named from its icon class
     if (!name) name = clean(el.getAttribute('name') || el.id || '').slice(0, 80);
     let context;
     if (!name || (role === 'checkbox' || role === 'radio' || role === 'switch')) {
@@ -264,7 +296,8 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
       // a native <datalist> shows its suggestions in browser UI, never as [role=option] nodes, so the
       // settle must not wait for one (run_test.settle)
       datalist: tag === 'input' && el.hasAttribute('list') ? true : undefined,
-      disabled, x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)
+      disabled, below: isBelow || undefined,
+      x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)
     });
     return true;
   };
@@ -316,7 +349,10 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     }
   }
   candidates.sort((a, b) => (a.y - b.y) || (a.x - b.x));
-  const kept = candidates.slice(0, maxElements);
+  // the below-the-fold controls ride on top of the table's budget (at most BELOW_MAX of them), so a long page's cap
+  // cuts the elements Jev cannot see anyway rather than the Save at the bottom of its form
+  const inView = candidates.filter(c => !c.below), belowFold = candidates.filter(c => c.below);
+  const kept = inView.slice(0, maxElements).concat(belowFold.slice(0, BELOW_MAX));
 
   // Pass 4: identical labels. A product grid has one "Add to cart" per card, a list one "Edit" per entry,
   // and when the cards are plain <div>s no row/list-item context is attached above, so Jev sees the same
@@ -358,8 +394,18 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     return cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom;
   };
+  // A control that only shares a layer's box is the layer's own when it lies over the covered region (a dialog's Ok over
+  // the form it blocks); one that does not is the app's shell around a loading page (a fixed top bar painted above a
+  // full-page loader), and the layer stays blank. Live: a post-Save shell read COVERED:13(layer:5), the five being the
+  // top bar's links, so no deferral applied and the next tab was clicked while the save was in flight.
+  const coveredBox = coveredEls.reduce((b, el) => { const q = el.getBoundingClientRect();
+    return { left: Math.min(b.left, q.left), top: Math.min(b.top, q.top), right: Math.max(b.right, q.right), bottom: Math.max(b.bottom, q.bottom) }; },
+    { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
+  const overCovered = el => { const q = el.getBoundingClientRect();
+    return q.right >= coveredBox.left && q.left <= coveredBox.right && q.bottom >= coveredBox.top && q.top <= coveredBox.bottom; };
   const layerControls = coverers.length
-    ? kept.filter(c => coverers.some(t => t === c.el || t.contains(c.el) || c.el.contains(t) || within(c.el, t))).length : 0;
+    ? kept.filter(c => coverers.some(t => t === c.el || t.contains(c.el))
+                    || (coverers.some(t => c.el.contains(t) || within(c.el, t)) && overCovered(c.el))).length : 0;
   const nodes = {};
   kept.forEach((c, i) => {
     if (!wholeDocument) { c.el.setAttribute('data-jev-idx', String(i)); nodes[String(i)] = nodeTuple(c.el); }
@@ -671,6 +717,8 @@ def element_label(e: dict) -> str:
         parts.append("checked" if e["checked"] else "unchecked")
     if e.get("disabled"):
         parts.append("DISABLED")
+    if e.get("below"):
+        parts.append("(below the fold)")  # offered although below the first screen; the click scrolls to it
     return " ".join(parts)
 
 

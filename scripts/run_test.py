@@ -344,6 +344,22 @@ def wait_for_change(page, before: dict | None, wait_ms: int) -> dict:
             return {"ended": "changed", "ms": int((time.perf_counter() - t0) * 1000)}
 
 
+def scroll_page(page, direction: int) -> dict:
+    """SCROLL_DOWN / SCROLL_UP: window.scrollBy by 80% of the viewport; when the window did not move (an app shell whose
+    content scrolls inside an overflow container), a wheel event at the viewport's centre scrolls whatever is under it.
+    Returns what moved and by how much (recorded on the step as `executed.scroll`)."""
+    delta = direction * int(page.evaluate("Math.round(window.innerHeight * 0.8)"))
+    before = page.evaluate("window.scrollY")
+    page.evaluate(f"window.scrollBy(0, {delta})")
+    if page.evaluate("window.scrollY") != before:
+        return {"scrolled": "window", "by": delta}
+    size = page.viewport_size or {"width": 1280, "height": 800}
+    page.mouse.move(size["width"] / 2, size["height"] / 2)
+    page.mouse.wheel(0, delta)
+    page.wait_for_timeout(100)  # the wheel does not wait for the scroll it starts
+    return {"scrolled": "wheel", "by": delta}
+
+
 def execute(page, spec: dict, operation: str, target: dict | None, value_key: str | None, wait_ms: int | None = None,
             before: dict | None = None) -> dict:
     """Perform one operation. `before` is the observation's fingerprint: a WAIT ends as soon as the page differs from it."""
@@ -387,9 +403,9 @@ def execute(page, spec: dict, operation: str, target: dict | None, value_key: st
             res["option"] = target["option"]
             loc.select_option(index=target["option"], timeout=timeout)
         elif operation == "SCROLL_DOWN":
-            page.evaluate("window.scrollBy(0, Math.round(window.innerHeight * 0.8))")
+            res["scroll"] = scroll_page(page, 1)
         elif operation == "SCROLL_UP":
-            page.evaluate("window.scrollBy(0, -Math.round(window.innerHeight * 0.8))")
+            res["scroll"] = scroll_page(page, -1)
         elif operation == "WAIT":
             res["wait_ms"] = spec["browser"]["settle_ms"] if wait_ms is None else wait_ms  # the ceiling: the loop's backoff, else settle_ms
             res["wait"] = wait_for_change(page, before, res["wait_ms"])  # ends when the page changes; then the loop's normal settle

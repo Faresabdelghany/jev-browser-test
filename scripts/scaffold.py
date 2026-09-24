@@ -14,7 +14,7 @@ assertions and setup steps given, and only the non-default settings. Nothing is 
 unless one was given (a trivial one would confirm a pass at first sighting), and a `${ENV}` that is not set yet is
 kept as written and resolved at run time. Keys that look like credentials (password, secret, token, pin) are listed
 in `secrets`. `--slow` is the preset for a slow single-page app (settle 2500 ms, quiet 200 ms, 45 s navigation,
-30 steps / 360 s). Exit 0 with the written path and spec.py's summary on stderr; 2 on bad input or an existing file
+40 steps / 480 s). Exit 0 with the written path and spec.py's summary on stderr; 2 on bad input or an existing file
 (`--force` overwrites).
 """
 from __future__ import annotations
@@ -39,7 +39,7 @@ SETUP_SYNTAX = {
     "goto": ("url",),
 }
 SLOW = {"browser": {"settle_ms": 2500, "quiet_ms": 200, "navigation_timeout_ms": 45000},
-        "budget": {"max_steps": 30, "max_seconds": 360}}
+        "budget": {"max_steps": 40, "max_seconds": 480}}  # a slow-hour pass of a two-page flow took 26 steps; 30 ended one early
 SLOW_WAIT_TIMEOUT_MS = 45000
 SECRET_KEY_RE = re.compile(r"pass(word|wd)?|secret|token|\bpin\b|otp", re.IGNORECASE)
 APP_ERROR = {"when": "An error page, a stack trace or 'something went wrong' text is shown", "verdict": "bug"}
@@ -261,7 +261,7 @@ def main(argv: list[str]) -> int:
                     help="a deterministic step before Jev: fill:css=value, click:css, press:css=Key, select:css=value, wait_for:css, wait_for_url:glob, goto:url")
     ap.add_argument("--notes", help="hints Jev reads every step, about the page and the flow")
     ap.add_argument("--comment", help="the spec's own comment (the ticket, what it checks); default: the scaffold's editing guidance")
-    ap.add_argument("--slow", action="store_true", help="the slow single-page-app preset: settle 2500 ms, quiet 200 ms, 45 s navigation, 30 steps / 360 s")
+    ap.add_argument("--slow", action="store_true", help="the slow single-page-app preset: settle 2500 ms, quiet 200 ms, 45 s navigation, 40 steps / 480 s")
     ap.add_argument("--out", help="where to write (default specs/<id>.json)")
     ap.add_argument("--stdout", action="store_true", help="print the spec instead of writing a file")
     ap.add_argument("--force", action="store_true", help="overwrite an existing file")

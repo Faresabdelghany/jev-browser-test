@@ -53,7 +53,9 @@ export TYPESAFE_API_KEY=...   # https://console.typesafe.ai/keys, or a .env in t
 ```
 
 Use that interpreter for every command below (`python` stands for it). Never install into the system Python,
-never echo the key back, never write it into a spec.
+never echo the key back, never write it into a spec. Work from the project directory: change into it once, in its
+own command (the Bash tool's working directory persists), so every run command starts with the interpreter and
+matches the skill's pre-approved commands, and the runner finds the project's `.env` there.
 
 ### 1. Write the spec
 
@@ -106,6 +108,12 @@ unless you gave one, `${ENV}` kept for run time. Then edit the twenty lines that
   "assert"`, the default) instead of a pause, a second look and another request.
 - **checks** — atomic progress statements, one fact each; an outcome's `requires` can lean on them.
 - **setup** — deterministic Playwright steps for preconditions. Prefer `wait_for` to `wait`.
+- **long pages and type-aheads** — form controls and buttons below the first screen are offered marked `(below the
+  fold)` and the click scrolls to them; links and plain clickables there are not, so on a long page say in the goal
+  where to scroll ("scroll down to the bottom of the form"). A type-ahead that never offers the value ('No Records
+  Found' for a name the page itself displays) wants a `suggestion_not_found` bug outcome with `requires_action` and
+  `after: {type: <the field's label or placeholder>}`, beside the `invalid_search_name` test issue for a suggestion
+  offered but not chosen: the run then ends declared, with the dropdown's own words as evidence.
 - **expect** — only for a spec whose *correct* result is red (a demo account documented as broken): the ending
   it should reach. It is green when it matches and red when the behaviour changes. Never use it to hide a bug.
 

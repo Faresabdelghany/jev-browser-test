@@ -51,6 +51,15 @@
       "requires_action": true,
       "note": "the employee was just saved and its Personal Details page was shown"
     },
+    "suggestion_not_found": {
+      "when": "The suggestion list under the Employee Name box shows a single row reading 'No Records Found' in place of a suggestion with the typed name",
+      "verdict": "bug",
+      "requires_action": true,
+      "after": {
+        "type": "Type for hints"
+      },
+      "note": "the employee was saved seconds earlier and the type-ahead finds nothing for the name that was typed: the filter, not the spec (a suggestion offered but not chosen is invalid_search_name)"
+    },
     "employee_id_taken": {
       "when": "A red message under the Employee Id field says 'Employee Id already exists'",
       "verdict": "bug",

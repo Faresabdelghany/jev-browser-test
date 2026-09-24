@@ -1582,6 +1582,17 @@ class SummarizeTests(unittest.TestCase):
         self.assertIn("NO-EFFECT IN-FLIGHT", table)
         self.assertIn("COVERED:9", table)
 
+    def test_dump_step_names_unnamed_and_below_the_fold_elements(self) -> None:
+        from summarize_trace import dump_step
+        trace = {"steps": [{"n": 4, "elements": [
+            {"idx": 0, "role": "clickable", "name": "", "tag": "i", "x": 942, "y": 512},
+            {"idx": 1, "role": "button", "name": "Save", "below": True, "y": 849},
+            {"idx": 2, "role": "textbox", "name": "First Name", "value": "Jevtest"}]}]}
+        out = dump_step(trace, 4)
+        self.assertIn('[0] clickable "" <i> at (942,512)', out)  # what an unnamed element was, without opening trace.json
+        self.assertIn('[1] button "Save" (below the fold)', out)
+        self.assertIn('[2] textbox "First Name" value="Jevtest"', out)
+
     def test_result_flag_without_result_json(self) -> None:
         import tempfile
         from summarize_trace import main as summarize_main
@@ -2064,7 +2075,7 @@ class ScaffoldTests(unittest.TestCase):
             {"action": "press", "selector": "input#q", "key": "Enter"},
             {"action": "select", "selector": "select#role", "value": "ESS"}])
         self.assertEqual(spec["browser"], {"settle_ms": 2500, "quiet_ms": 200, "navigation_timeout_ms": 45000})
-        self.assertEqual(spec["budget"], {"max_steps": 30, "max_seconds": 360})
+        self.assertEqual(spec["budget"], {"max_steps": 40, "max_seconds": 480})  # a slow-hour pass of a two-page flow took 26 steps; 30 ended one early
 
     def test_a_named_bug_outcome_keeps_its_name_and_after_holds_every_bug_until_the_action(self) -> None:
         # Eval 5 (2026-09-24): the scaffold keyed the bug outcome on the statement's first words (a_red_message_says)
@@ -2286,6 +2297,25 @@ class AssertionsCanWaitTests(unittest.TestCase):
         self.assertFalse(page_loading({"covered": 0, "loading_options": 0, "elements": [{"idx": 0}]}), "settled")
         self.assertFalse(page_loading({"covered": 0, "elements": []}), "an empty document is busy, but nothing on it is loading")
         self.assertTrue(page_busy({"covered": 0, "loading_options": 1, "elements": [{"idx": 0}]}), "busy while the suggestions load")
+
+    def test_scroll_falls_back_to_a_wheel_when_the_window_does_not_move(self) -> None:
+        # Live: SCROLL_DOWN is window.scrollBy, which moves nothing on an app shell whose content scrolls inside an
+        # overflow container; a wheel at the viewport's centre scrolls whatever is under it.
+        from run_test import scroll_page
+        page = mock.MagicMock(); page.viewport_size = {"width": 1000, "height": 500}
+        page.evaluate.side_effect = [400, 0, None, 0]  # the step, scrollY before, the scrollBy, scrollY after: unchanged
+        self.assertEqual(scroll_page(page, 1), {"scrolled": "wheel", "by": 400})
+        page.mouse.move.assert_called_once_with(500.0, 250.0)
+        page.mouse.wheel.assert_called_once_with(0, 400)
+        page.wait_for_timeout.assert_called_once()
+        page = mock.MagicMock(); page.evaluate.side_effect = [400, 800, None, 400]
+        self.assertEqual(scroll_page(page, -1), {"scrolled": "window", "by": -400})
+        page.mouse.wheel.assert_not_called()
+
+    def test_element_label_marks_a_control_below_the_fold(self) -> None:
+        from observe import element_label
+        self.assertEqual(element_label({"role": "button", "name": "Save", "below": True}), 'button "Save" (below the fold)')
+        self.assertEqual(element_label({"role": "button", "name": "Save"}), 'button "Save"')
 
     def test_blank_layer(self) -> None:
         from run_test import blank_layer
