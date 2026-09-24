@@ -253,7 +253,10 @@ the checkbox/radio it controls when the input itself is parked offscreen. Pass 3
 chain (cursor inherits) and skipping anything nested in a pass-1 control; this surfaces React-style
 clickables that carry no role (an avatar menu, a card, a table row). A `<label>` whose control is already
 in the table is skipped here: it adds nothing but a tempting no-op click (measured: with the structured
-state Jev clicked "Username" before typing into it). A field with no accessible name takes the `<label>` that sits
+state Jev clicked "Username" before typing into it), and so is a pointer wrapper around exactly one offered
+control with no text of its own (OrangeHRM's topbar tabs: an `<li>` with `cursor: pointer` around an `<a>` of the
+same caption): a click on the control bubbles to the wrapper anyway, and live every tab reached Jev twice, as
+`clickable "Leave List"` and `link "Leave List"`, splitting its choice 0.57 / 0.25 until `low_confidence`. A field with no accessible name takes the `<label>` that sits
 beside it in its wrapper when that wrapper holds exactly one control (labels with no `for`, the norm in component
 libraries; live, an unnamed Username filter lost to the sidebar's named Search box), or its `aria-labelledby` text;
 one label over two controls names neither. Anonymous controls get a `context`

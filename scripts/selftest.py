@@ -133,6 +133,13 @@ CONTROLS_PAGE = """<!doctype html><html><head><title>Controls</title><style>
   <div class="grp"><label>Range</label> <input id="r1"> <input id="r2"></div>
 </form>
 <details><summary>Show error</summary>Payment failed: card declined</details>
+<!-- a tab bar as OrangeHRM builds it: each <li> has cursor:pointer and wraps an <a> with the same text (a duplicate
+     for the table: a click on the link bubbles to the li); the last li also carries text of its own, so it stays -->
+<ul class="tabs" style="display:flex;gap:12px;list-style:none;padding:0">
+  <li style="cursor:pointer"><a href="#leave-list">Leave List</a></li>
+  <li style="cursor:pointer"><a href="#assign">Assign Leave</a></li>
+  <li style="cursor:pointer"><span>3 new</span> <a href="#inbox">Inbox</a></li>
+</ul>
 <!-- a product grid of plain divs: three identical "Add to cart" buttons, two cards at the same price, and per card
      an image link and a title link with the same name (the same product twice: no context must be invented) -->
 <div class="grid" style="display:flex;gap:16px;margin-top:12px">
@@ -507,6 +514,12 @@ def observer_check(url: str) -> list[str]:
             failures.append(f"the shared price bar must not be taken as the distinguishing context: {contexts}")
         if by_name.get("Continue", {}).get("context"):
             failures.append(f"a unique label needs no context: {by_name.get('Continue')}")
+        # A pointer wrapper around exactly one offered control with no text of its own is not offered: the link is
+        # (live, OrangeHRM's topbar tabs reached Jev twice each, as `clickable "Leave List"` and `link "Leave List"`,
+        # and split its choice 0.57 / 0.25). A wrapper with text of its own ("3 new") stays beside its link.
+        tabs = [(e["role"], e["name"]) for e in obs["elements"] if e["name"] in ("Leave List", "Assign Leave", "3 new Inbox", "Inbox")]
+        if sorted(tabs) != [("clickable", "3 new Inbox"), ("link", "Assign Leave"), ("link", "Inbox"), ("link", "Leave List")]:
+            failures.append(f"a pointer wrapper whose only content is one offered control must not be offered as well: {sorted(tabs)}")
         # The image link and the title link of one card share a name: their common container is the card, and nothing
         # below it tells them apart, so neither gets a context (the first cut of this pass climbed past the card and
         # labelled one product's button with another product's text).

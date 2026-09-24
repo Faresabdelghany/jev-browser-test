@@ -287,6 +287,11 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
       const p = el.parentElement;
       if (p && p !== document.body && getComputedStyle(p).cursor === 'pointer') continue;  // not outermost
       if (p && p.closest(SEL)) continue;                // inside a real control (span inside button)
+      // A pointer wrapper around exactly one offered control with no text of its own (OrangeHRM's topbar tabs: an <li>
+      // with cursor:pointer around an <a> of the same caption) is that control twice; a click on the control bubbles
+      // to the wrapper anyway. Live, every tab reached Jev as `clickable` and as `link` and split its choice 0.57 / 0.25.
+      const inner = el.querySelectorAll(SEL);
+      if (inner.length === 1 && seen.has(inner[0]) && clean(el.innerText || '') === clean(inner[0].innerText || '')) continue;
       describe(el, 'cursor');
     }
   }
