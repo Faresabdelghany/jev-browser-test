@@ -1,0 +1,50 @@
+{
+  "spec_id": "scaffold-login",
+  "outcome": "dashboard_open",
+  "verdict": "pass",
+  "note": null,
+  "probability": 0.99,
+  "confidence": 0.98,
+  "seen_at_step": 4,
+  "first_seen_at_step": 4,
+  "confirmed": true,
+  "confirmed_by": "assertions",
+  "path_confidence": 0.8,
+  "reason": null,
+  "evidence": {
+    "line": "PIM",
+    "present": 0.8,
+    "screenshot": "steps/004.png",
+    "checks": {}
+  },
+  "assertions": [
+    {
+      "url_matches": "**/dashboard/**",
+      "ok": true,
+      "actual": "https://opensource-demo.orangehrmlive.com/web/index.php/dashboard/index"
+    },
+    {
+      "text_contains": "Dashboard",
+      "ok": true,
+      "actual": "Admin\nPIM\nLeave\nTime\nRecruitment\nMy Info\nPerformance\nDashboard\nDirectory\nMaintenance\nClaim\nBuzz\nDashboard\nUpgrade\n\nDemo So"
+    }
+  ],
+  "outcomes_seen_earlier": [],
+  "announcements": [],
+  "story": [
+    "1 TYPE_TEXT [0] textbox \"Username\" <- username",
+    "2 TYPE_TEXT [1] textbox \"Password\" <- password",
+    "3 CLICK [2] button \"Login\""
+  ],
+  "run_stamp": null,
+  "status": "passed",
+  "duration_ms": 7286,
+  "usage": {
+    "jev_requests": 5,
+    "input_tokens": 10467,
+    "output_tokens": 1463,
+    "model": "jev-1.13.0",
+    "reconnects": 0
+  },
+  "trace": "runs/cmp3/scaffold-login/trace.json"
+}

@@ -387,14 +387,18 @@ def deferred_outcomes(seen: list[dict], outcomes: dict, history: list[dict]) -> 
 DEFERRABLE = {"CLICK", "TYPE_TEXT", "SELECT"}  # the actions a covered page can make Jev misplace
 
 
-def defer_action(operation: str, covered: int, confidence: float, threshold: float, layer_controls: int = 0) -> bool:
+def defer_action(operation: str, covered: int, confidence: float, threshold: float, layer_controls: int = 0,
+                 loading_options: int = 0) -> bool:
     """Is this a marginal action on a page where controls sit under a blank layer? Then the loop defers it (with
     backoff, up to `deferral_limit` times on one page): the page is busy (a form still loading behind an overlay, a
     request in flight before a dialog opens), the form the value belongs in is not the one free field, and the tab
     Jev is moving on to is not yet due. A confident action (>= threshold) is executed; so is any action once nothing
     is covered, and any action under a layer that has controls of its own (`layer_controls` > 0: a dialog, an open
-    list, a banner): that layer is not a loader, its controls are the controls, and Jev's pick among them is due now."""
-    return operation in DEFERRABLE and covered > 0 and not layer_controls and confidence < threshold
+    list, a banner): that layer is not a loader, its controls are the controls, and Jev's pick among them is due now.
+    An autocomplete still showing its loading placeholder (`loading_options` > 0, 'Searching....') is the other way a
+    page is visibly on its way: a marginal action then (Search over the unchosen name) is deferred the same."""
+    loading = (covered > 0 and not layer_controls) or loading_options > 0
+    return operation in DEFERRABLE and loading and confidence < threshold
 
 
 def suggested_verdict(status: str, typed: list[str | None]) -> str | None:

@@ -97,6 +97,9 @@ SETTLE_JS = r"""
     resolve({ ended, ms: Math.round(performance.now() - t0) });
   };
   cap = setTimeout(() => finish('cap'), capMs);
+  // a row that only says the suggestions are loading ('Searching....', 'Loading...') is not the suggestions arriving
+  // (observe.py's LOADING_OPTION, the same pattern)
+  const LOADING_OPTION = /^(searching|loading|please wait|fetching|one moment)\b[\s.…]*$/i;
   const visibleOptions = () => {
     const out = [];
     for (const e of document.querySelectorAll('[role="option"]')) {
@@ -110,7 +113,7 @@ SETTLE_JS = r"""
   // observation carries data-jev-idx, so a listbox elsewhere on the page or the previous query's suggestions
   // still on screen cannot end the wait early, while suggestions rendered synchronously by the typing
   // (already on screen when this settle starts) do count.
-  const newOptionVisible = () => visibleOptions().some(e => !e.hasAttribute('data-jev-idx'));
+  const newOptionVisible = () => visibleOptions().some(e => !e.hasAttribute('data-jev-idx') && !LOADING_OPTION.test((e.innerText || e.textContent || '').trim().slice(0, 40)));
   const tick = () => {
     if (done) return;
     frames++;
@@ -291,12 +294,21 @@ def blank_layer(obs: dict) -> bool:
     return obs.get("covered", 0) > 0 and not obs.get("layer_controls")
 
 
+def page_loading(obs: dict) -> bool:
+    """Is something on this page visibly on its way? Controls under a blank layer (a loading or saving overlay), or an
+    autocomplete showing only its loading placeholder ('Searching....', `loading_options`, counted by the observer and
+    not offered). Live: the employee name typed into the Leave List filter, the row 'Searching....' still up, and Jev
+    clicked Search at 0.66-0.70 instead of the suggestion; the unchosen name filtered nothing."""
+    return blank_layer(obs) or obs.get("loading_options", 0) > 0
+
+
 def page_busy(obs: dict) -> bool:
-    """Is this page still on its way? Controls under a blank layer (a loading or saving overlay), or no controls at
-    all (a single-page app's empty shell after a navigation, before it renders). Live: the Personal Details page of a
-    slow demo was an empty document for two looks, same signature, and the assertions were run on it. A settled page
-    has controls and nothing blank covers them; a dialog over the page is settled, its controls are the controls."""
-    return blank_layer(obs) or not obs.get("elements")
+    """Is this page still on its way? Something visibly loading (`page_loading`: a blank layer over controls, an
+    autocomplete's placeholder row), or no controls at all (a single-page app's empty shell after a navigation, before
+    it renders). Live: the Personal Details page of a slow demo was an empty document for two looks, same signature,
+    and the assertions were run on it. A settled page has controls and nothing blank covers them; a dialog over the
+    page is settled, its controls are the controls."""
+    return page_loading(obs) or not obs.get("elements")
 
 
 def assertions_can_wait(checked: list[dict], busy: bool, page_changed: bool, rechecks: int,
@@ -1143,6 +1155,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 if obs.get("covered"):
                     step["covered_controls"] = obs["covered"]  # controls on screen but under another layer: not offered
                     step["layer_controls"] = obs.get("layer_controls", 0)  # the layer's own controls among the offered: 0 is a blank layer
+                if obs.get("loading_options"):
+                    step["loading_options"] = obs["loading_options"]  # autocomplete rows that only say the suggestions are loading: not offered
                 if announced:
                     step["announcements"] = announced  # flag ANNOUNCED; in Jev's state for this and the next two steps
                 if after_no_effect:
@@ -1343,7 +1357,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     last_low_sig = sig
                     stale_streak = 0  # a refused decision is not a stale one: `max_stale` counts consecutive stale steps
                     step["low_streak"] = low_streak
-                    if low_streak >= low_confidence_limit(th, blank_layer(obs)):
+                    if low_streak >= low_confidence_limit(th, page_loading(obs)):
                         ask_reason(step, state)
                         finish(page, step, "low_confidence", dict(STOP))
                         break
@@ -1354,7 +1368,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     continue
                 low_streak, last_low_sig = 0, None
 
-                if defer_action(operation, obs.get("covered", 0), min(confs), th["covered_action_confidence"], obs.get("layer_controls", 0)):
+                if defer_action(operation, obs.get("covered", 0), min(confs), th["covered_action_confidence"], obs.get("layer_controls", 0),
+                                obs.get("loading_options", 0)):
                     # A marginal action while controls sit under a blank layer: the page is busy (a form still loading,
                     # a request in flight before a dialog opens) and the free control Jev picked is probably not the one
                     # (live: the first name went into the sidebar's menu filter in every PIM run; a Leave flow clicked
@@ -1367,10 +1382,11 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     defer_streak = defer_streak + 1 if sig == last_defer_sig else 1
                     last_defer_sig = sig
                     if defer_streak <= deferral_limit(th):
-                        step["action_deferred"] = {"operation": operation, "covered": obs["covered"]}
+                        step["action_deferred"] = {"operation": operation, "covered": obs.get("covered", 0), "loading": obs.get("loading_options", 0)}
                         step["deferrals"] = defer_streak
-                        park(step, f"{operation} deferred: {obs['covered']} controls are under a blank layer; waiting for the page "
-                                   f"({defer_streak}/{deferral_limit(th)})",
+                        busy_why = (f"{obs['covered']} controls are under a blank layer" if obs.get("covered")
+                                    else f"{obs.get('loading_options')} autocomplete row(s) still say the suggestions are loading")
+                        park(step, f"{operation} deferred: {busy_why}; waiting for the page ({defer_streak}/{deferral_limit(th)})",
                              wait_entry(n, "WAIT", f"{operation} deferred: {obs['covered']} controls were under another layer (the page "
                                                    f"still loading or a request in flight?); the page was given time to finish"), sig,
                              wait_ms=spec["browser"]["settle_ms"] * min(2 ** (defer_streak - 1), WAIT_BACKOFF_MAX), before=obs.get("fingerprint"))
@@ -1480,6 +1496,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 if obs.get("covered"):
                     step["covered_controls"] = obs["covered"]
                     step["layer_controls"] = obs.get("layer_controls", 0)
+                if obs.get("loading_options"):
+                    step["loading_options"] = obs["loading_options"]
                 if announced:
                     step["announcements"] = announced
                 recent_ann = recent_announcements(all_announcements, n)

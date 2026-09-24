@@ -166,6 +166,8 @@ SETTLE_PAGE = """<!doctype html><html><head><title>Settle</title></head><body>
 <button id="forever" onclick="forever()">Forever</button>
 <input id="cb" role="combobox" aria-label="Product" oninput="suggest()">
 <ul id="list" role="listbox"></ul>
+<button id="go" onclick="document.getElementById('result').textContent = 'Result: ' + document.getElementById('cb').value">Go</button>
+<div id="result"></div>
 <input id="sb" role="searchbox" aria-label="Find">
 <input id="sync" role="combobox" aria-label="Colour" oninput="filterSync()">
 <ul id="synclist" role="listbox"></ul>
@@ -176,9 +178,17 @@ SETTLE_PAGE = """<!doctype html><html><head><title>Settle</title></head><body>
  const paint = () => { document.getElementById('counter').textContent = ++n; };
  function burst(){ const t = setInterval(paint, 20); setTimeout(() => clearInterval(t), 150); }
  function forever(){ setInterval(paint, 20); }
- function suggest(){ setTimeout(() => {
-   const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = 'Blue Hoodie';
-   document.getElementById('list').appendChild(li); }, 120); }
+ const option = (text) => { const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = text; return li; };
+ function suggest(){
+   const list = document.getElementById('list');
+   if (new URLSearchParams(location.search).get('placeholder') === '1') {
+     // a server-side autocomplete: a 'Searching....' row at 120 ms, the suggestion in its place at 1400 ms; choosing it
+     // fills the box (OrangeHRM's 'Type for hints...' fields)
+     setTimeout(() => { if (!list.querySelector('li')) list.appendChild(option('Searching....')); }, 120);
+     setTimeout(() => { list.innerHTML = ''; const li = option('Blue Hoodie');
+       li.onclick = () => { document.getElementById('cb').value = 'Blue Hoodie'; list.innerHTML = ''; }; list.appendChild(li); }, 1400);
+   } else setTimeout(() => list.appendChild(option('Blue Hoodie')), 120);
+ }
  function filterSync(){  // client-side filtering: the suggestions are on screen before the input handler returns
    const ul = document.getElementById('synclist'); ul.innerHTML = '';
    for (const c of ['blue', 'black', 'red']) if (c.startsWith(document.getElementById('sync').value)) {
@@ -292,8 +302,25 @@ def settle_check(url: str) -> list[str]:
         r6 = settle(pg, sp(1000, 50), after=("TYPE_TEXT", "combobox"))
         if r6["ended"] != "options" or r6["ms"] >= 200:
             failures.append(f"suggestions already on screen when the settle starts must count as arrived, not time out: {r6}")
+        pg.goto(url + "?placeholder=1")  # a server-side autocomplete: 'Searching....' first, the suggestion 1.4 s after the typing
+        observe(pg)
+        pg.fill("#cb", "blu")
+        r7 = settle(pg, sp(1000, 50), after=("TYPE_TEXT", "combobox"))
+        if r7["ended"] != "options_timeout":
+            failures.append(f"a 'Searching....' row is not the suggestions arriving: the options wait should time out, got {r7}")
+        pg.wait_for_timeout(200)
+        ph = observe(pg, 50, 500)
+        names = [e.get("name") for e in ph["elements"]]
+        if ph.get("loading_options") != 1 or "Searching...." in names or ph["fingerprint"].get("loading") != 1:
+            failures.append(f"placeholder: expected loading_options=1 (also in the fingerprint) and the row not offered, got "
+                            f"{ph.get('loading_options')} / {ph['fingerprint'].get('loading')} names={names}")
+        pg.wait_for_timeout(1400)
+        real = observe(pg, 50, 500)
+        names = [e.get("name") for e in real["elements"]]
+        if real.get("loading_options") != 0 or "Blue Hoodie" not in names:
+            failures.append(f"suggestion arrived: expected loading_options=0 and 'Blue Hoodie' offered, got {real.get('loading_options')} names={names}")
         b.close()
-    print(f"settle check: burst={r1} forever={r2} combobox={r3} quiet={r4} no-suggestions={r5} sync={r6}")
+    print(f"settle check: burst={r1} forever={r2} combobox={r3} quiet={r4} no-suggestions={r5} sync={r6} placeholder={r7}")
     print()
     return failures
 
@@ -742,6 +769,8 @@ class FakeJev:
             return "Typed: Jevtest"  # the covered fixture echoes what went into First Name
         if "confirmed" in s:
             return "Confirmed"  # the covered fixture's dialog writes it when its Ok is clicked
+        if "result:" in s:
+            return "Result: Blue Hoodie"  # the settle fixture's Go button writes the box's value
         if "employee list" in s:
             return "Employee List"  # the slow site's module page
         if "saved successfully" in s:
@@ -865,6 +894,25 @@ class FakeJev:
                 answers["type_value"] = self._choice("first_name", questions["type_value"]["criteria"], conf=0.95)
             elif state.get("covered_controls"):
                 answers["operation"] = self._choice("WAIT", ops, conf=0.3)
+            else:
+                answers["operation"] = self._choice("DONE", ops, conf=0.9)
+            return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
+        if self.mode == "go_before_suggestion":
+            # Live: the employee name typed into the Leave List filter, and while the list still read 'Searching....' Jev
+            # clicked Search at 0.66-0.70 instead of the suggestion (two runs of nine): the unchosen name filtered nothing.
+            product = self._find(types, '"Product"')
+            option = self._find(clicks, 'option "Blue Hoodie"')
+            go = self._find(clicks, '"Go"')
+            if product and "TYPE_TEXT" in ops and not typed_before:
+                answers["operation"] = self._choice("TYPE_TEXT", ops, conf=0.9)
+                answers["type_target"] = self._choice(product, types, conf=0.95)
+                answers["type_value"] = self._choice("query", questions["type_value"]["criteria"], conf=0.95)
+            elif option:
+                answers["operation"] = self._choice("CLICK", ops, conf=0.9)
+                answers["click_target"] = self._choice(option, clicks, conf=0.95)
+            elif go and not any('"Go"' in (a.get("target") or "") for a in recent):
+                answers["operation"] = self._choice("CLICK", ops, conf=0.7)  # marginal, with the placeholder on screen
+                answers["click_target"] = self._choice(go, clicks, conf=0.95)
             else:
                 answers["operation"] = self._choice("DONE", ops, conf=0.9)
             return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
@@ -1332,7 +1380,7 @@ def main() -> int:
     first, second = (steps + [{}, {}])[:2]
     if trace["status"] != "passed" or trace["outcome"] != "typed":
         failures.append(f"type while covered: expected passed/typed, got {trace['status']}/{trace.get('outcome')} ({trace.get('error')})")
-    if first.get("action_deferred") != {"operation": "TYPE_TEXT", "covered": 3} or (first.get("executed") or {}).get("action") != "WAIT" or first.get("low_confidence"):
+    if first.get("action_deferred") != {"operation": "TYPE_TEXT", "covered": 3, "loading": 0} or (first.get("executed") or {}).get("action") != "WAIT" or first.get("low_confidence"):
         failures.append(f"type while covered: the marginal typing on the covered page should be deferred as a WAIT, not refused as low confidence: "
                         f"{first.get('action_deferred')} {first.get('executed')} low={first.get('low_confidence')}")
     if ((first.get("executed") or {}).get("wait") or {}).get("ended") != "changed":
@@ -1419,6 +1467,32 @@ def main() -> int:
     if not steps or steps[0].get("action_deferred") or (steps[0].get("executed") or {}).get("action") != "CLICK" or steps[0].get("covered_controls") != 3:
         failures.append(f"dialog layer: the marginal click on the layer's own Ok should be executed at once on the covered page: "
                         f"{[(s.get('action_deferred'), (s.get('executed') or {}).get('action'), s.get('covered_controls')) for s in steps[:2]]}")
+
+    # 4j5. an autocomplete that shows 'Searching....' before its suggestion (?placeholder=1 on the settle fixture): the
+    #      placeholder row is not offered and counts as loading; Jev's marginal click on Go (0.7) while it shows is deferred
+    #      (a wait ending when the suggestion arrives), the suggestion is then chosen and Go clicked, and the page says
+    #      Result: Blue Hoodie. Live: Search clicked over the placeholder at 0.66-0.70 in two Leave runs of nine.
+    ph_spec = base_spec("file://" + settle_html + "?placeholder=1")
+    ph_spec.update({"goal": "Type the given query into Product, wait for the suggestion Blue Hoodie and choose it, then click Go, so that the page says Result: Blue Hoodie",
+                    "data": {"query": "blu"}, "secrets": [], "checks": {}, "done_when": [], "never": [],
+                    "outcomes": {"found": {"when": "The page says Result: Blue Hoodie", "verdict": "pass"}},
+                    "assert": [{"text_contains": "Result: Blue Hoodie"}]})
+    ph_spec["browser"]["settle_ms"], ph_spec["browser"]["quiet_ms"] = 400, 50
+    out = os.path.join(tmp, "run-go-before-suggestion")
+    trace = run(ph_spec, FakeJev("go_before_suggestion"), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    steps = trace["steps"]
+    deferred = [s for s in steps if s.get("action_deferred")]
+    if trace["status"] != "passed" or trace["outcome"] != "found":
+        failures.append(f"placeholder: expected passed/found, got {trace['status']}/{trace.get('outcome')} ({trace.get('error')})")
+    if not deferred or deferred[0]["action_deferred"].get("loading") != 1 or deferred[0].get("loading_options") != 1 or deferred[0].get("covered_controls") \
+            or "DEFERRED-CLICK:loading" not in summarize(trace, out) or any('"Searching' in (e.get("name") or "") for e in deferred[0].get("elements") or []):
+        failures.append(f"placeholder: the click on Go over the 'Searching....' row should be deferred as loading, the row not offered: "
+                        f"{[(s.get('n'), s.get('action_deferred'), s.get('loading_options'), s.get('covered_controls')) for s in steps]}")
+    chosen = next((s for s in steps if '"Blue Hoodie"' in (s.get("target") or {}).get("label", "") and (s.get("executed") or {}).get("action") == "CLICK"), None)
+    if not chosen or chosen["n"] <= deferred[0]["n"]:
+        failures.append(f"placeholder: the suggestion should be chosen after the deferral: {[(s.get('n'), (s.get('target') or {}).get('label')) for s in steps]}")
 
     # 4k. `after` on an outcome: "the cookie banner is shown" is true of the start page, but the outcome counts only
     #     after a click on Accept cookies; step 1 records it as deferred (like requires_action) and the run goes on

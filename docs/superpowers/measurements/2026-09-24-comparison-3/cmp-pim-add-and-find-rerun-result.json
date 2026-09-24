@@ -1,0 +1,66 @@
+{
+  "spec_id": "scaffold-pim-add-and-find",
+  "outcome": "one_record_found",
+  "verdict": "pass",
+  "note": null,
+  "probability": 1.0,
+  "confidence": 1.0,
+  "seen_at_step": 22,
+  "first_seen_at_step": 22,
+  "confirmed": true,
+  "confirmed_by": "assertions",
+  "path_confidence": 0.52,
+  "reason": null,
+  "evidence": {
+    "line": "(1) Record Found",
+    "present": 0.85,
+    "screenshot": "steps/022.png",
+    "checks": {}
+  },
+  "assertions": [
+    {
+      "text_contains": "(1) Record Found",
+      "ok": true,
+      "actual": "itle\n-- Select --\nSub Unit\n-- Select --\nReset\nSearch\n\n\n Add\n(1) Record Found\nId\nFirst (& Middle) Name\nLast Name\nJob Title\nEmployment Sta"
+    }
+  ],
+  "outcomes_seen_earlier": [],
+  "announcements": [
+    {
+      "step": 13,
+      "text": "Success Successfully Saved",
+      "kind": "live",
+      "tone": "success"
+    }
+  ],
+  "story": [
+    "2 CLICK [7] link \"Admin\"",
+    "4 CLICK [16] link \"PIM\"",
+    "5 WAIT",
+    "6 CLICK [7] link \"Add Employee\"",
+    "7 WAIT",
+    "9 TYPE_TEXT [14] textbox \"First Name\" <- first_name",
+    "10 TYPE_TEXT [16] textbox \"Last Name\" <- last_name",
+    "11 CLICK [27] button \"Save\"",
+    "12 WAIT",
+    "14 WAIT",
+    "15 CLICK [6] link \"Employee List\"",
+    "16 WAIT",
+    "17 TYPE_TEXT [16] textbox \"Type for hints...\" in \"Employee Name\" <- last_name",
+    "18 WAIT",
+    "19 CLICK [20] option \"Jevcmp Runnertlva02ax\"",
+    "20 CLICK [27] button \"Search\"",
+    "21 WAIT"
+  ],
+  "run_stamp": "tlva02ax",
+  "status": "passed",
+  "duration_ms": 40944,
+  "usage": {
+    "jev_requests": 23,
+    "input_tokens": 97431,
+    "output_tokens": 8972,
+    "model": "jev-1.13.0",
+    "reconnects": 0
+  },
+  "trace": "runs/cmp3/scaffold-pim-add-and-find/trace.json"
+}

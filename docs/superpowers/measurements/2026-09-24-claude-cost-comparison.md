@@ -125,3 +125,32 @@ The Jev path's tokens are Jev's: 12.5k input a login run, 106.5k a PIM run, bill
 said; the break-even moved from the fourth rerun to the first or second. The hour's slowness is in both paths' wall-clock
 and in the Jev path's retries, and a normal-hour repeat (the two `specs/compare/scaffold-*.json` specs, the same three
 windows) is the next measurement; it costs the tokens of J2 plus one CLI drive.
+
+## Third measurement (2026-09-24, 14:45–14:48): the normal-hour repeat of J2 and P
+
+The repeat the second section asked for: the demo answering its login page in 0.6–0.8 s, the same two flows, the Jev
+path from `specs/compare/scaffold-*.json` as they passed (no first run from the scaffold this time: the specs exist, so
+J1 is the second section's figure), the runner at `6deea29`, and Claude's tokens read from this session's transcript
+with `usage_between.py`. Both windows fell inside single tool calls, so the markers alone (`2026-09-24-comparison-3/`)
+bracket no request; the table assigns requests by what each turn did (the per-request list is in the section below).
+
+| window | what happened | Claude requests | new tokens (input + cache writes + output) | of which output | wall-clock |
+|---|---|---:|---:|---:|---:|
+| J2: Jev path, rerun | both finished specs run once from the clean export, both results read (the launch turn and the reading turn) | 2 | **8,112** | 1,846 | 49 s (the runs: login 7.3 s, PIM 40.9 s) |
+| P: Playwright CLI path | the skill read, both flows driven in six turns (nineteen CLI commands: `find` instead of whole snapshots, `run-code` waits, role locators), one `run-code` retried (a Node-side reference) | 6 | **14,951** | 4,145 | 88 s including Claude's turnaround |
+
+Both Jev runs passed at the first attempt: `scaffold-login` 5 requests, 10.5k Jev input tokens, `dashboard_open`,
+evidence "PIM"; `scaffold-pim-add-and-find` 23 requests, 97.4k Jev input tokens, `one_record_found`, evidence "(1)
+Record Found" (`cmp-*-rerun-result.json`). The CLI path's five snapshot files came to 40 KB.
+
+**Reading.** In a normal hour the CLI path costs two thirds of what it cost in the slow hour (15.0k against 21.7k: no
+wrong Save to recover, no snapshot of a half-loaded page, fewer commands), and the Jev rerun costs a little more than
+before (8.1k against 5.4k: the launch turn carried the previous tool result into the cache, ~3k of it; the two reads of
+the results are the rest). With the second section's first run, the break-even moves to (36.7 − 15.0) / (15.0 − 8.1) ≈
+3.1, **the fourth run of a flow**, or 2.3 with the second section's rerun figure: between the first-rerun break-even of
+the slow hour and the fourth of the original report. The wall-clock gap holds: 48 s of browser time on the Jev path
+against 88 s of CLI turns, and the Jev path's result is a typed verdict with an evidence line.
+
+Per request, from the transcript (new tokens, output): J2 launch 11:45:30Z 5,781 / 1,221; J2 read (also opening P and
+loading the skill) 11:46:28Z 2,331 / 625; P: 11:46:37Z 6,007 / 405 (the skill's ~5k in the cache write), 11:46:50Z
+1,758 / 471, 11:47:05Z 1,521 / 751, 11:47:17Z 1,690 / 554, 11:47:36Z 1,742 / 923, 11:47:56Z 2,233 / 1,041 (the close).

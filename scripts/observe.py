@@ -72,6 +72,21 @@ JS_HELPERS = r"""
   };
   // How many of the controls the observation found covered (tagged data-jev-covered) are still covered: a loading
   // overlay lifting off a form changes no tagged node and no text, but it is the change a WAIT on such a page waits for.
+  // An option that is a loading placeholder ('Searching....', 'Loading...'): a server-side autocomplete's row while
+  // its suggestions are on their way. Not a choice: counted (loading_options), not offered, and a busy signal for the
+  // loop (run_test.page_loading). Live: Jev clicked Search over a 'Searching....' row at 0.66-0.70, two runs of nine.
+  const LOADING_OPTION = /^(searching|loading|please wait|fetching|one moment)\b[\s.…]*$/i;
+  const loadingOption = (el) => (el.getAttribute('role') === 'option' || el.tagName.toLowerCase() === 'option')
+    && LOADING_OPTION.test(clean(el.innerText || el.textContent).slice(0, 40));
+  const loadingNow = () => {
+    let n = 0;
+    for (const el of document.querySelectorAll('[role="option"]')) {
+      if (!el.isConnected || !loadingOption(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width >= 2 && r.height >= 2) n++;
+    }
+    return n;
+  };
   const coveredNow = () => {
     let n = 0;
     for (const el of document.querySelectorAll('[data-jev-covered]')) {
@@ -144,6 +159,7 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
   let covered = 0;  // controls on screen but under another layer (overlay, dialog, banner): counted, not offered
   const coveredEls = [];  // those controls, tagged data-jev-covered so the fingerprint can tell when they come free
   const coverers = [];  // the layers found on top of them (a loading overlay, a backdrop, an open list), each once
+  let loadingOptions = 0;  // autocomplete rows that only say the suggestions are loading: counted, not offered
 
   // A field with no accessible name whose <label> sits beside it in a wrapper, with no for/id linking the two
   // (OrangeHRM's oxd-input-group, many React form kits): the nearest ancestor holding exactly this one control
@@ -204,6 +220,7 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     // typed value cannot become a field's label, and a textarea's initial markup is not a second value.
     const editable = formControl || el.isContentEditable;
     const text = editable ? '' : clean(el.innerText || el.textContent).slice(0, 80);
+    if (role === 'option' && LOADING_OPTION.test(text.slice(0, 40))) { loadingOptions++; seen.add(el); return false; }
     let labelText = '';
     if (el.labels && el.labels.length) labelText = clean(el.labels[0].innerText);
     if (!labelText) {  // aria-labelledby: the named elements' text, in order
@@ -358,8 +375,9 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     truncated: candidates.length - kept.length,
     covered,
     layer_controls: layerControls,  // offered controls that belong to the covering layers; 0 with covered > 0 is a blank layer
+    loading_options: loadingOptions,  // autocomplete rows that only say 'Searching....' / 'Loading...': not offered, the suggestions are on their way
     visible_text: visibleText(maxTextChars),
-    fingerprint: { url: location.href, title: document.title, text_head: visibleText(500), nodes, covered },
+    fingerprint: { url: location.href, title: document.title, text_head: visibleText(500), nodes, covered, loading: loadingOptions },
     scroll: {
       y: Math.round(window.scrollY),
       viewport: vh,
@@ -486,7 +504,7 @@ ANNOUNCE_INIT_JS = r"""
 FINGERPRINT_JS = "() => {\n" + JS_HELPERS + r"""
   const nodes = {};
   for (const el of document.querySelectorAll('[data-jev-idx]')) nodes[el.getAttribute('data-jev-idx')] = nodeTuple(el);
-  return { url: location.href, title: document.title, text_head: visibleText(500), nodes, covered: coveredNow() };
+  return { url: location.href, title: document.title, text_head: visibleText(500), nodes, covered: coveredNow(), loading: loadingNow() };
 }
 """
 
@@ -622,6 +640,9 @@ def compare_fingerprint(before: dict, after: dict, operation: str, target_idx=No
     if before.get("covered") is not None and after.get("covered") is not None and before["covered"] != after["covered"]:
         # a loading overlay lifted off a form (or a dialog closed): nothing tagged changed, the page did
         return f"covered controls changed: {before['covered']} -> {after['covered']}"
+    if before.get("loading") is not None and after.get("loading") is not None and before["loading"] != after["loading"]:
+        # an autocomplete's placeholder row giving way to its suggestions (or appearing): the change a wait on such a page waits for
+        return f"loading options changed: {before['loading']} -> {after['loading']}"
     for key, tup in b_nodes.items():
         if key not in a_nodes:
             return f"element [{key}] is no longer on the page"

@@ -1869,6 +1869,9 @@ class DeferActionTests(unittest.TestCase):
             self.assertFalse(defer_action(op, covered=9, confidence=0.65, threshold=0.8, layer_controls=2),
                              "the layer has controls of its own (a dialog, an open list): its controls are the controls")
             self.assertTrue(defer_action(op, covered=9, confidence=0.65, threshold=0.8, layer_controls=0), "a blank layer: a loader")
+            self.assertTrue(defer_action(op, covered=0, confidence=0.65, threshold=0.8, loading_options=1),
+                            "an autocomplete still showing its loading placeholder: the suggestions are on their way")
+            self.assertFalse(defer_action(op, covered=0, confidence=0.8, threshold=0.8, loading_options=1), "a confident action goes")
         for op in ("WAIT", "DONE", "BLOCKED", "SCROLL_DOWN", "PRESS_ENTER"):
             self.assertFalse(defer_action(op, covered=9, confidence=0.65, threshold=0.8), op)
 
@@ -1877,6 +1880,9 @@ class DeferActionTests(unittest.TestCase):
         self.assertEqual(_flags({"action_deferred": {"operation": "TYPE_TEXT", "covered": 9}}), "DEFERRED-TYPE_TEXT:9")
         self.assertEqual(_flags({"action_deferred": {"operation": "CLICK", "covered": 7}}), "DEFERRED-CLICK:7")
         self.assertEqual(_flags({"deferrals_exhausted": 5}), "DEFER-LIMIT:5", "the action executed after the last deferral on a page")
+        self.assertEqual(_flags({"action_deferred": {"operation": "CLICK", "covered": 0, "loading": 1}}), "DEFERRED-CLICK:loading",
+                         "deferred while an autocomplete's placeholder row was on screen, nothing covered")
+        self.assertEqual(_flags({"loading_options": 2}), "LOADING:2", "placeholder rows on screen, not offered")
 
 
 class AnnouncementTests(unittest.TestCase):
@@ -2198,6 +2204,14 @@ class AssertionsCanWaitTests(unittest.TestCase):
         self.assertTrue(page_busy({"covered": 9, "layer_controls": 0, "elements": [{"idx": 0}]}), "a blank layer over the form: loading or saving")
         self.assertFalse(page_busy({"covered": 9, "layer_controls": 2, "elements": [{"idx": 0}]}),
                          "a dialog or an open list over the form: its controls are the controls, the page is settled")
+
+    def test_page_loading_counts_an_autocomplete_placeholder(self) -> None:
+        from run_test import page_busy, page_loading
+        self.assertTrue(page_loading({"covered": 0, "loading_options": 1, "elements": [{"idx": 0}]}), "a 'Searching....' row: the suggestions are on their way")
+        self.assertTrue(page_loading({"covered": 3, "layer_controls": 0}), "a blank layer")
+        self.assertFalse(page_loading({"covered": 0, "loading_options": 0, "elements": [{"idx": 0}]}), "settled")
+        self.assertFalse(page_loading({"covered": 0, "elements": []}), "an empty document is busy, but nothing on it is loading")
+        self.assertTrue(page_busy({"covered": 0, "loading_options": 1, "elements": [{"idx": 0}]}), "busy while the suggestions load")
 
     def test_blank_layer(self) -> None:
         from run_test import blank_layer

@@ -90,9 +90,11 @@ def _flags(step: dict) -> str:
         # open list), nothing when it is blank (a loading or saving overlay)
         layer = f"(layer:{step['layer_controls']})" if step.get("layer_controls") else ""
         f.append(f"COVERED:{step['covered_controls']}{layer}")
+    if step.get("loading_options"):
+        f.append(f"LOADING:{step['loading_options']}")  # autocomplete rows that only said 'Searching....' / 'Loading...': not offered
     if step.get("action_deferred"):
-        d = step["action_deferred"]  # a marginal action while that many controls were under a blank layer: a wait instead
-        f.append(f"DEFERRED-{d.get('operation')}:{d.get('covered')}")
+        d = step["action_deferred"]  # a marginal action while that many controls were under a blank layer (or, with none covered,
+        f.append(f"DEFERRED-{d.get('operation')}:{d.get('covered') or 'loading'}")  # while an autocomplete's placeholder showed): a wait instead
     if step.get("deferrals_exhausted"):
         f.append(f"DEFER-LIMIT:{step['deferrals_exhausted']}")  # executed on a page still under its blank layer, after that many deferrals
     if step.get("announcements"):

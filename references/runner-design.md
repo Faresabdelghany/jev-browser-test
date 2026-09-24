@@ -295,7 +295,13 @@ per page, and in every slow-hour run the second identical decision was the same 
 sidebar filter at 0.77–0.83 and the Leave List tab at 0.71 before the dialog had opened, while loaders of 5–17 s
 outlived the one wait (`measurements/2026-09-24-regression-6f9c5be-hrm.md`). Undecided decisions under a blank layer
 get the same two extra looks (`low_confidence_limit`), as the confirmation rechecks do (scenarios 4i, 4j, 4j2–4j4,
-selftest `covered_check`).
+selftest `covered_check`). The other way a page is visibly on its way is an autocomplete whose list holds only a
+loading row ('Searching....', 'Loading...', `LOADING_OPTION` in the observer): the row is not offered, counted as
+`loading_options` (in the fingerprint too, so a wait ends when the suggestions replace it), the settle's options wait
+does not take it for the suggestions, and `page_loading` treats it like a blank layer for the deferral and the
+undecided looks. Live: the employee name typed into the Leave List filter, 'Searching....' still up, and Jev clicked
+Search at 0.66–0.70 instead of the suggestion, two runs of nine; the unchosen name filtered nothing (scenario 4j5,
+`settle_check`'s placeholder case).
 
 Executing a click on a control that something sits on top of dispatches the click on the control itself
 (`executed.dispatched`), because a forced pointer click lands on the styled box and is swallowed; other

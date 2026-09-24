@@ -819,3 +819,56 @@ in the 51 runs (no `DEFERRED-*`, no `DEFER-LIMIT`), and the new count did its on
 the suggestion "Playwright (software)" at 0.68 / 0.71 while the open list covered one control, `COVERED:1(layer:2)`, and
 went at once, where the same pick used to wait one `settle_ms` (4 requests a run, against 5); `modal-close`'s Close read
 `COVERED:1(layer:1)` at 0.98. Request counts otherwise equal (`toolshop-search-cart` 8 against 10, Jev's choice of path).
+
+**The five hrm specs at `1b69699`, in the slow hour** (`2026-09-24-regression-1b69699-hrm-slow.md`, 14:16–14:35, launched
+on probes of 2.8–4.4 s, the host recovering during the last spec; 1,121 s on one worker): **13/15**, against 3/15 and
+4/15 in the midday hour and 11/15 as the demo recovered at `6f9c5be`. `hrm-admin-add-user` 3/3 (144–182 s a run in this
+hour), `hrm-login` 3/3, `hrm-pim-add-employee-list` 3/3 (18–21 s, the host back), `hrm-add-employee` 2/3,
+`hrm-leave-assign` 2/3. The deferral did what it was changed to do: every PIM form typed the first name into the sidebar
+filter no more (two deferrals, `DEFERRED-TYPE_TEXT:9` twice, then First Name at 0.95), and the Leave flow that used to
+leave for the Leave List tab under the spinner waited it out (steps 16–18 undecided or `DEFERRED-CLICK:7` three times,
+then the dialog: `COVERED:29(layer:3)`, its Ok clicked at 0.96 at once, then the tab deferred once more under the
+saving spinner and taken after the toast). The two reds: `hrm-add-employee` run 3 (`done_unverified`, 99 s) saw its
+Save's toast, then the empty shell, then the record page under its loader (`COVERED:15`), and the fourth busy look was
+the last the count allowed, 27.5 s of waits at `settle_ms` 2500, one look before the fields rendered: fixed at `6deea29`
+below. `hrm-leave-assign` run 1 (`low_confidence`, 162 s): the flow reached the Leave List with the assignment saved,
+typed the employee name into the filter, and while the suggestion list still showed the "Searching...." placeholder
+(the WAIT before it had ended on that row appearing) Jev clicked Search at 0.70 instead of waiting for the suggestion,
+against the notes; the unchosen name did not filter, and four undecided steps on the result ended the run. The runner
+executed a decision above `min_confidence`; the notes name the placeholder; in a normal hour the suggestion arrives
+within a second (runs 2 and 3 passed in 68 and 34 s as the host recovered).
+
+**`6deea29`.** A confirmation look on a busy page (a blank layer over controls, an empty document) may park again past
+the count bound for as long as the confirmation's waits are under `navigation_timeout_ms` (`can_recheck`,
+`pending.waited_ms`, `step.recheck_waited_ms`; the wait clipped to what is left): a page on its way may take as long as
+a page may take to arrive here, 45 s in the hrm specs. Selftest 4o2 (the staged record page at three times its delays,
+`settle_ms` 300, `navigation_timeout_ms` 15 s: the looks go past four and the pass is confirmed on the record); unit
+tests 134.
+
+**The comparison, repeated in the normal hour** (14:45–14:48, right after the `6deea29` suite): `2026-09-24-claude-cost-comparison.md`,
+section "Third measurement". Jev path rerun 8.1k new Claude tokens (both scaffold specs green at once, 7 s and 41 s of
+browser time), Playwright CLI path 15.0k (six turns, 88 s); break-even at the fourth run against the second section's
+first run, between the slow hour's first-rerun figure and the original report's fourth.
+
+**The five hrm specs at `6deea29`, in a normal hour** (`2026-09-24-regression-6deea29-hrm.md`, 14:35–14:42, launched on
+probes of 0.5–0.7 s; 420 s on one worker): **12/15**. `hrm-add-employee` 3/3 (16–17 s), `hrm-login` 3/3,
+`hrm-pim-add-employee-list` 3/3 (21–69 s), `hrm-admin-add-user` 1/3, `hrm-leave-assign` 2/3. Seventeen deferrals in
+the suite, none exhausted; two confirmation rechecks, none past the first. The three reds are not the host's:
+
+- `hrm-admin-add-user` runs 2 and 3 (`low_confidence`, 39 / 42 s): the user was saved (the toast, the System Users list
+  at 0.95) and its row was not on the page: the demo's user table now holds 56–57 rows, fifty a page, after a day of
+  runs adding one each, and the goal's "only if that row is not in the table, filter by the username" left Jev
+  undecided between DONE and the filter (0.3–0.57, four looks). Run 1 found the row on the page. A test issue: the
+  goal now filters by the username unconditionally and says so about the page size (the spec at `<next commit>`).
+- `hrm-leave-assign` run 2 (`low_confidence`, 57 s): the same step as the slow hour's run 1, the employee name typed
+  into the Leave List filter and Search clicked at 0.66 while the list still read "Searching...." (the suggestion took
+  longer than the WAIT before it, which had ended on the placeholder row appearing); the unchosen name filtered
+  nothing. Runs 1 and 3 waited (0.61 and an undecided 0.50), chose the suggestion and passed.
+
+**The loading placeholder** (`<next commit>`). An autocomplete row that only says the suggestions are loading
+('Searching....', 'Loading...', `LOADING_OPTION` in the observer) is not offered and is counted (`loading_options`, in
+the fingerprint too), the settle's options wait does not take it for the suggestions, and `page_loading` treats it as
+it treats a blank layer: a marginal action while it shows is deferred (`DEFERRED-<OP>:loading`) until the page changes,
+undecided looks get the two extra looks. Selftest 4j5 (a server-side autocomplete: Go at 0.7 over the placeholder is
+deferred twice, the suggestion is then chosen, Go clicked, the page says the result) and `settle_check`'s placeholder
+case; unit tests 135.

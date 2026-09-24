@@ -158,7 +158,8 @@ action landed and the page did not change: the classic dead control; the next st
 counted), `COVERED:<n>` (controls on screen but under another layer, so not offered; plain, the layer is blank and the
 form is still loading; `(layer:<m>)`, the layer has controls of its own, a dialog or an open list), `DEFERRED-<OP>:<n>` (a
 marginal click or typing under a blank layer turned into a wait, again with backoff while the layer stays, five on one
-page; `DEFER-LIMIT:5` when it then went ahead), `ANNOUNCED:"…"` (a toast or
+page; `DEFER-LIMIT:5` when it then went ahead; `DEFERRED-<OP>:loading` while an autocomplete still said 'Searching....',
+`LOADING:<n>` on such steps), `ANNOUNCED:"…"` (a toast or
 live message appeared between the previous observation and this one; Jev saw it in its state for this and the next
 two steps, faded or not), `SLOW-NAV:<s>` (the click landed; the page it asked for answered after the action timeout: a
 slow host, not a failure), `RECHECK:<n>` / `ASSERT-PENDING:<n>` (a pass in sight on a page still busy, looked at again),
