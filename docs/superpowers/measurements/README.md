@@ -872,3 +872,12 @@ it treats a blank layer: a marginal action while it shows is deferred (`DEFERRED
 undecided looks get the two extra looks. Selftest 4j5 (a server-side autocomplete: Go at 0.7 over the placeholder is
 deferred twice, the suggestion is then chosen, Go clicked, the page says the result) and `settle_check`'s placeholder
 case; unit tests 135.
+
+**The five hrm specs at `0ce1c20`, in a normal hour** (`2026-09-24-regression-0ce1c20-hrm.md`, 14:53–15:06, login page
+0.6–1.0 s at launch, 0.4–0.6 s during; 494 s on one worker): **ALL PASS, thirteen flows of thirteen**, with two setup
+failures that are the host's, not outcomes (`hrm-add-employee` run 2: the scripted login's `wait_for **/dashboard/**`
+timed out at 40 s; `hrm-leave-assign` run 2: the seed employee's Save navigation, 45 s): `hrm-add-employee` 2/2 (30–60 s),
+`hrm-admin-add-user` 3/3 (29–66 s, the filter step now unconditional), `hrm-leave-assign` 2/2 (31–63 s), `hrm-login` 3/3
+(6 s), `hrm-pim-add-employee-list` 3/3 (20 s). Thirteen deferrals, eleven steps with a 'Searching....' row counted and
+not offered (`LOADING:n`), six confirmation rechecks, none exhausted. Against the day: 3/15 in the midday slow hour at
+`9edd768`, 11/15 as the demo recovered at `6f9c5be`, 13/15 in a slow hour at `1b69699`, 12/15 at `6deea29`, 13/13 here.
