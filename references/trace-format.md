@@ -25,6 +25,7 @@ evidence, the file Claude reads first. The trace is the *evidence* behind it; th
   "assertions": [ { "url_matches": "**/login", "ok": true, "actual": "https://.../login" } ],   // every assertion with what was found
   "outcomes_seen_earlier": [],                                  // non-terminal sightings: non-pass ones (fail_fast: false) and pass sightings that vanished on their recheck ({.., "unconfirmed": true})
   "story": [ "1 TYPE_TEXT [0] textbox \"Username\" <- username", "2 TYPE_TEXT [1] textbox \"Password\" <- password", "3 CLICK [2] button \"Login\"" ],
+  "announcements": [ { "step": 6, "text": "Successfully Saved", "kind": "live", "tone": "success" } ],   // every toast / live message of the run, with the step whose observation it preceded
   "run_stamp": "tj4x2ka7",                                       // what ${RUN_STAMP} became in this run (the data it created carries it); null when the spec has none
   "status": "passed", "duration_ms": 6200,
   "usage": { "jev_requests": 5, "input_tokens": 9774, "output_tokens": 1741, "model": "jev-1.13.0", "reconnects": 0 },
@@ -201,6 +202,11 @@ environment failure (or a spec file is missing / two files share an id).
       "outcome_unconfirmed": "item_added",                           // the recheck did not see it again: a transient sighting, the run went on
       "final_look": true,                                            // the one step after the budget ran out: asked only the checks, the outcome and blocked_reason
       "outcome_deferred": ["not_reordered"],                         // an outcome true of the page whose requires_action (no action yet) or after (the named action not executed yet) holds it back: recorded, not a verdict
+      "announcements": [ { "text": "Successfully Saved", "kind": "live", "tone": "success", "ms_before_observation": 2140 } ],
+      //   toasts and ARIA live messages that appeared between the previous observation and this one (observe.ANNOUNCE_INIT_JS reports them as they
+      //   appear, so a toast gone before the runner looked is here); kind = alert | status | log | live (aria-live) | toast (a toast-like class name),
+      //   tone = success | error | warning | info when the class names say; also on the history entry of the last executed action ("announced":
+      //   [texts]) and in Jev's state for this and the next two steps; flag ANNOUNCED:"…"
       "type_deferred": 9,                                            // a TYPE_TEXT below thresholds.covered_type_confidence while 9 controls were covered: not executed, executed is a runner WAIT ending when the page changes (once per page signature); flag TYPE-DEFERRED:9
       "no_effect": true,                                             // this step's executed CLICK/TYPE_TEXT/SELECT/PRESS_ENTER changed nothing (page_changed false): flag NO-EFFECT
       "after_no_effect": true,                                       // this observation is the page the previous action failed to change (a key-mode picture)

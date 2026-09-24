@@ -177,6 +177,27 @@ SETTLE_PAGE = """<!doctype html><html><head><title>Settle</title></head><body>
 </script></body></html>"""
 
 
+# A page that confirms by toast: Save inserts a toast (aria-live, a "toast" class with a --success tone) 60 ms after
+# the click and removes it 240 ms later, and shows a hidden [role=alert] for the same 240 ms; both are gone before the
+# runner observes (settle_ms 900 with quiet_ms 400 puts the observation 400 ms after the last mutation, at ~700 ms).
+# Nothing about the save stays on the page: the toast is the only evidence.
+TOAST_PAGE = """<!doctype html><html><head><title>Toasts</title></head><body>
+<h1>Settings</h1>
+<button id="save" onclick="save()">Save</button>
+<div id="toasts" class="toast-container"></div>
+<div id="count" role="alert" hidden>3 items updated</div>
+<script>
+ function save(){
+   setTimeout(() => {
+     const t = document.createElement('div'); t.className = 'app-toast app-toast--success'; t.setAttribute('aria-live', 'polite');
+     t.textContent = 'Saved successfully'; document.getElementById('toasts').appendChild(t);
+     document.getElementById('count').hidden = false;
+     setTimeout(() => { t.remove(); document.getElementById('count').hidden = true; }, 240);
+   }, 60);
+ }
+</script></body></html>"""
+
+
 # A page that loads for a while after a click: Start hides itself, "Loading..." shows, and after ?ms=<n>
 # milliseconds (default 1200; 0 = never) "Hello World!" replaces it. Nothing else is on the page, so the only
 # sensible decision while it loads is WAIT, again and again, on a page whose signature does not change.
@@ -609,6 +630,8 @@ class FakeJev:
             return "We use cookies"  # true until the banner's Accept button is clicked
         if "typed:" in s:
             return "Typed: Jevtest"  # the covered fixture echoes what went into First Name
+        if "saved successfully" in s:
+            return "Saved successfully"  # the toast fixture's message, gone before the observation
         return None
 
     def _outcome(self, criteria: dict, text: str) -> str:
@@ -645,7 +668,8 @@ class FakeJev:
             answers["evidence_present"] = {"type": "noul", "noul": 0.95 if any_hit else 0.1}
             if set(questions) <= set(line_keys) | {"evidence_present"}:
                 return {"answers": answers, "usage": {"input_tokens": 200, "output_tokens": 20}, "model": "fake-jev", "latency_ms": 1}
-        text = state.get("visible_text", "")
+        # a message the page announced (a toast that has faded) is as good as page text for the outcome rules
+        text = state.get("visible_text", "") + " " + " ".join(a.get("text", "") for a in state.get("announcements") or [])
         for key, q in questions.items():
             if q["type"] == "noul":
                 if key in answers:
@@ -694,6 +718,14 @@ class FakeJev:
         typed_before = any(a["operation"] == "TYPE_TEXT" for a in recent)
         search_box_visible = any(e["label"] == "Search products" for e in state["elements"])
 
+        if self.mode == "toast":
+            save = self._find(clicks, '"Save"')
+            if save and not any(a.get("operation") == "CLICK" for a in recent):
+                answers["operation"] = self._choice("CLICK", ops, conf=0.9)
+                answers["click_target"] = self._choice(save, clicks, conf=0.95)
+            else:
+                answers["operation"] = self._choice("DONE", ops, conf=0.9)
+            return {"answers": answers, "usage": usage, "model": "fake-jev", "latency_ms": 1}
         if self.mode == "type_while_covered":
             # Live: with the form's fields under a loading overlay the sidebar's Search box was the only field offered,
             # and Jev typed the first name into it at 0.54-0.67. Once the fields are shown it types into First Name.
@@ -848,8 +880,8 @@ def outcome_spec(url: str) -> dict:
 
 
 RESULT_KEYS = ["spec_id", "outcome", "verdict", "note", "probability", "confidence", "seen_at_step", "first_seen_at_step",
-               "confirmed", "confirmed_by", "path_confidence", "reason", "evidence", "assertions", "outcomes_seen_earlier", "story",
-               "run_stamp", "status", "duration_ms", "usage", "trace"]
+               "confirmed", "confirmed_by", "path_confidence", "reason", "evidence", "assertions", "outcomes_seen_earlier",
+               "announcements", "story", "run_stamp", "status", "duration_ms", "usage", "trace"]
 
 
 def result_shape_check(trace: dict, out: str) -> list[str]:
@@ -1204,6 +1236,51 @@ def main() -> int:
     if any(s.get("outcome_deferred") for s in trace["steps"][1:]) or any(s.get("outcome_seen") for s in trace["steps"]):
         failures.append(f"after: once Accept was clicked the banner is gone, so nothing is deferred or seen later: "
                         f"{[(s.get('outcome_deferred'), s.get('outcome_seen')) for s in trace['steps']]}")
+
+    # 4l. a save confirmed only by a toast that fades before the observation: the announcement is captured between the
+    #     observations and reaches the step, Jev's state (for the last three observations, so the recheck still sees
+    #     it), the history entry of the click that drew it, the evidence lines and the result. The hidden [role=alert]
+    #     shown for the same 300 ms is captured through its attribute change.
+    toast_html = os.path.join(tmp, "toast.html")
+    with open(toast_html, "w", encoding="utf-8") as f:
+        f.write(TOAST_PAGE)
+    toast_spec = base_spec("file://" + toast_html)
+    toast_spec.update({"goal": "Click Save so that the page confirms the save", "data": {}, "secrets": [], "checks": {},
+                       "done_when": [], "never": [], "confirm": "recheck",
+                       "outcomes": {"saved": {"when": "A toast says Saved successfully", "verdict": "pass"}}, "assert": []})
+    toast_spec["browser"]["settle_ms"], toast_spec["browser"]["quiet_ms"] = 900, 400
+    jev = FakeJev("toast")
+    out = os.path.join(tmp, "run-toast")
+    trace = run(toast_spec, jev, out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    steps = trace["steps"]
+    second = steps[1] if len(steps) > 1 else {}
+    ann = second.get("announcements") or []
+    if trace["status"] != "passed" or trace["outcome"] != "saved":
+        failures.append(f"toast: expected passed/saved from the announcement alone, got {trace['status']}/{trace.get('outcome')} ({trace.get('error')})")
+    if "Saved successfully" in second.get("visible_text", ""):
+        failures.append("toast: the fixture's toast should be gone before the observation (raise its delay or the spec's settle)")
+    if [(a.get("text"), a.get("kind"), a.get("tone")) for a in ann] != [("Saved successfully", "live", "success"), ("3 items updated", "alert", None)]:
+        failures.append(f"toast: step 2 should carry the toast (live, success) and the shown alert: {ann}")
+    if not all(isinstance(a.get("ms_before_observation"), int) and 0 <= a["ms_before_observation"] < 5000 for a in ann):
+        failures.append(f"toast: each announcement says how long before the observation it appeared: {ann}")
+    states = step_states(jev)
+    if len(states) < 3 or [a["step"] for a in states[1].get("announcements") or []] != [2, 2] or [a["step"] for a in states[2].get("announcements") or []] != [2, 2]:
+        failures.append(f"toast: Jev's state should list the announcements on the step they preceded and on the recheck step: "
+                        f"{[st.get('announcements') for st in states]}")
+    if "announcements" in states[0]:
+        failures.append("toast: no announcement before the click, so the first state has no announcements key")
+    click = next((a for a in states[-1]["recent_actions"] if a.get("operation") == "CLICK"), {})
+    if click.get("announced") != ["Saved successfully", "3 items updated"]:
+        failures.append(f"toast: the history entry of the click should say what the page announced after it: {click}")
+    if trace["result"]["evidence"]["line"] != "live message: Saved successfully":
+        failures.append(f"toast: the evidence line should quote the announced message: {trace['result']['evidence']}")
+    if trace["result"]["announcements"] != [{"step": 2, "text": "Saved successfully", "kind": "live", "tone": "success"},
+                                            {"step": 2, "text": "3 items updated", "kind": "alert"}]:
+        failures.append(f"toast: result.announcements should list both with their step: {trace['result']['announcements']}")
+    if 'ANNOUNCED:"Saved successfully" +1' not in summarize(trace, out):
+        failures.append("toast: the summary should flag the announcement on step 2")
 
     # 5. a low-confidence DONE is a WAIT, not a verdict -> the flow continues and passes
     spec = base_spec(url)

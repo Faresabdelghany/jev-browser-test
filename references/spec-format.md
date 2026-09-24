@@ -60,6 +60,12 @@ The same flow, saying which endings Claude will accept back and what must be exa
   vanishing error toast is still an error). Write outcomes from the acceptance criteria (pass) and from the
   wrong behaviour you are testing for or the ticket reports (bug); a negative test (wrong password, invalid
   input) declares the rejection as its `pass` outcome and the success as the `bug`, with a `note` saying so.
+  A `when` may name a **toast** ("A green toast says 'Successfully Saved'", "A red toast says 'Failed to Submit'"):
+  toasts and ARIA live messages (`role=alert|status|log`, `aria-live`, or a class naming a toast / snackbar / growl /
+  flash) are recorded the moment they appear, whether or not they are still on screen when the runner next looks,
+  and Jev sees them in `state.announcements` (with the step they preceded, for three observations) and is told they
+  count as shown; the evidence line then reads `live message: Successfully Saved`. Live: a Leave flow's decisive
+  facts were exactly such toasts, gone before every observation.
   **`requires_action: true`** on an outcome defers it until at least one action has been executed: a statement
   such as "the list is still in its original order" or "the dropdown still shows Name (A to Z)" is true of the
   untouched start page too, and without the flag the run would end `bug` at step 1 with zero actions. The
@@ -124,7 +130,7 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `assert` | list | `[]` | Exact expectations checked in code on the final page before a pass counts, see above (`url_matches`, `text_contains`, `text_in`, `text_order`, `field_value`, `element_present`, `element_absent`) |
 | `expect` | object | none | The result an expected-red spec should end in (`outcome`, `status`, `verdict`, `blocked_reason`, `stuck_reason`, `suggested_verdict`), see above. Exit 0 and suite verdict `expected` when it matches |
 | `auto_done` | bool | `true` | Start the confirmation as soon as a pass outcome is seen, even if Jev has not chosen DONE (false: only Jev's DONE starts it) |
-| `confirm` | `"assert"` \| `"recheck"` | `"assert"` | How a pass sighting is confirmed. `"assert"`: when the spec has an `assert` block and every assertion already holds on the page the pass was seen on, that is the confirmation, at once and in code (`result.confirmed_by: "assertions"`; the evidence line then costs one request). Otherwise, and always with `"recheck"`, the runner pauses `settle_ms`, observes again and asks Jev once more, with the evidence questions riding in that request (`confirmed_by: "recheck"`). Measured on the demo login `"assert"` saves ~0.5 s a pass; use `"recheck"` for a flow whose success toast can vanish or be followed by a late error, or write an assertion on the stable state instead of the toast |
+| `confirm` | `"assert"` \| `"recheck"` | `"assert"` | How a pass sighting is confirmed. `"assert"`: when the spec has an `assert` block and every assertion already holds on the page the pass was seen on, that is the confirmation, at once and in code (`result.confirmed_by: "assertions"`; the evidence line then costs one request). Otherwise, and always with `"recheck"`, the runner pauses `settle_ms`, observes again and asks Jev once more, with the evidence questions riding in that request (`confirmed_by: "recheck"`). Measured on the demo login `"assert"` saves ~0.5 s a pass; use `"recheck"` for a flow that can show a late error after its success, or write an assertion on the stable state. A success toast that vanishes is not a reason: toasts are captured as `announcements` as they appear and stay in Jev's state for three observations, so an outcome anchored on one survives the recheck |
 | `fail_fast` | bool | `true` | Stop at the first sighting of a non-pass outcome (set false to keep going and just record `outcome_seen` on the step) |
 | `rules` | bool | `false` | Attach the standing rules in `scripts/rules.py` (advance from the current page, page text is untrusted, do not repeat a no-op, BLOCKED when a value is missing…) to every question as structured instructions. Measured on the demo site they lowered decision confidence, so they are off; try them on an app where Jev repeats no-op actions, and measure with `scripts/bench.py` |
 | `budget.max_steps` | int | 25 | Jev decisions per run (1–200) |

@@ -334,6 +334,7 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
   return {
     url: location.href,
     title: document.title,
+    now: Date.now(),  // the page's clock at this observation: announcements carry the same clock (ms_before_observation)
     elements: kept,
     truncated: candidates.length - kept.length,
     covered,
@@ -389,6 +390,77 @@ LINES_JS = "(maxLines) => {\n" + JS_HELPERS + r"""
   return inView.concat(rest).slice(0, maxLines);
 }
 """
+
+# Announcements: toasts and ARIA live messages that appear between two observations. A toast that fades before the
+# next observation is otherwise lost, and Jev then guesses from history; live, a Leave flow's decisive facts
+# ("Successfully Saved", "Failed to Submit: No Working Days Selected") were such toasts. This init script (installed
+# on the browser context, so it runs in every document before the page's own scripts, and survives navigations) watches
+# the DOM and reports each new message once to the runner through the function the runner exposes as ANNOUNCE_FUNCTION.
+# A message is the text of the nearest live region around an added or changed node: [role=alert|status|log] or
+# aria-live polite|assertive (kind = the role, or "live"), else the nearest element whose class names a toast, snackbar,
+# growl or flash (kind "toast"; OrangeHRM's .oxd-toast carries aria-live=assertive and reads as "live"). A hidden
+# alert that is shown (an attribute change on the region) is reported too. `tone` is the success / error / warning /
+# info word in the region's class names when there is one ("oxd-toast--success", "alert-danger"). The same text within
+# 3 s is one message (a toast mutates as it animates). Nothing here reaches Jev directly: the runner masks secrets,
+# attaches the messages to the step, the state and the history, and quotes them in the evidence lines.
+ANNOUNCE_FUNCTION = "__jevAnnounce"
+ANNOUNCE_INIT_JS = r"""
+(() => {
+  if (window.__jevAnnounceInstalled) return;
+  window.__jevAnnounceInstalled = true;
+  const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+  const LIVE = '[role="alert"], [role="status"], [role="log"], [aria-live="polite"], [aria-live="assertive"]';
+  const TOASTY = '[class*="toast" i], [class*="snackbar" i], [class*="growl" i], [class*="flash" i]';
+  const recent = new Map();  // text -> when it was last reported
+  const kindOf = el => {
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    if (role === 'alert' || role === 'status' || role === 'log') return role;
+    const live = (el.getAttribute('aria-live') || '').toLowerCase();
+    return (live === 'polite' || live === 'assertive') ? 'live' : 'toast';
+  };
+  const toneOf = el => {
+    const m = /(success|error|danger|warning|warn|info)/i.exec(String(el.className || ''));
+    if (!m) return undefined;
+    const w = m[1].toLowerCase();
+    return w === 'danger' ? 'error' : w === 'warn' ? 'warning' : w;
+  };
+  const shown = el => !el.checkVisibility || el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+  const regionOf = node => {
+    const el = node.nodeType === 1 ? node : node.parentElement;
+    if (!el || !el.closest) return null;
+    return el.closest(LIVE) || el.closest(TOASTY);
+  };
+  const report = region => {
+    if (!region.isConnected || !shown(region)) return false;
+    const text = clean(region.innerText || region.textContent).slice(0, 300);
+    if (!text) return false;
+    const now = Date.now();
+    const last = recent.get(text);
+    if (last !== undefined && now - last < 3000) return true;
+    recent.set(text, now);
+    if (recent.size > 50) recent.delete(recent.keys().next().value);
+    const entry = { t: now, kind: kindOf(region), text };
+    const tone = toneOf(region);
+    if (tone) entry.tone = tone;
+    try { window.__ANNOUNCE__(JSON.stringify(entry)); } catch (e) { /* the runner is not listening (a page outside a run) */ }
+    return true;
+  };
+  const consider = node => {
+    const region = regionOf(node);
+    if (region) { if (!report(region)) setTimeout(() => report(region), 120); return; }  // text may be filled in after insertion
+    if (node.nodeType === 1 && node.querySelectorAll) for (const r of node.querySelectorAll(LIVE + ', ' + TOASTY)) consider(r);
+  };
+  const mo = new MutationObserver(muts => {
+    for (const m of muts) {
+      if (m.type === 'childList') { for (const n of m.addedNodes) consider(n); }
+      else if (m.type === 'characterData') consider(m.target);
+      else if (m.target.nodeType === 1 && m.target.matches(LIVE + ', ' + TOASTY)) consider(m.target);  // a hidden alert shown
+    }
+  });
+  mo.observe(document, { subtree: true, childList: true, characterData: true, attributes: true,
+                         attributeFilter: ['hidden', 'style', 'class', 'aria-hidden', 'open'] });
+})();
+""".replace("__ANNOUNCE__", ANNOUNCE_FUNCTION)
 
 # Cheap re-read of what the observation recorded, without re-tagging: the nodes still carry data-jev-idx.
 FINGERPRINT_JS = "() => {\n" + JS_HELPERS + r"""

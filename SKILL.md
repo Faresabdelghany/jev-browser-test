@@ -125,16 +125,20 @@ python $SKILL/scripts/summarize_trace.py runs/<id>/<ts>/trace.json --step 7   # 
 ```
 
 `result.json` first: `outcome`, `verdict`, `evidence.line` (the page's own words, chosen by Jev and copied
-verbatim), `confirmed_by` (`assertions` or `recheck`), `path_confidence`, `assertions`, `story`, and for
-`undetermined` the `reason` with its typed cause and `suggested_verdict`; `expected` for a spec with `expect`.
+verbatim; `live message: Successfully Saved` when it quotes a toast that had already faded), `confirmed_by`
+(`assertions` or `recheck`), `path_confidence`, `assertions`, `announcements` (every toast and ARIA live message
+the page showed during the run, with the step it preceded: what the app said about each action, kept even when it
+was gone before the runner looked), `story`, and for `undetermined` the `reason` with its typed cause and
+`suggested_verdict`; `expected` for a spec with `expect`.
 `confirmed_by: recheck` on a spec that has assertions means the pass was not yet in sight when Jev chose DONE
 (the outcome read below 0.8), so the runner took the checking step and saw it there: correct, one request more.
 Open the step table only for `undetermined` or a surprising outcome. Flags worth knowing: `NO-EFFECT` (an
 action landed and the page did not change: the classic dead control; the next step's picture shows it),
 `DEFERRED:<outcome>` (true of the page, but its `requires_action` / `after` condition has not happened yet: not
 counted), `COVERED:<n>` (controls on screen but under a loading overlay or a dialog, so not offered: the form is still
-loading), `TYPE-DEFERRED:<n>` (a marginal typing on such a page turned into one wait), `LOW-CONF`, `STALE`,
-`EVIDENCE-ASKED`. With the
+loading), `TYPE-DEFERRED:<n>` (a marginal typing on such a page turned into one wait), `ANNOUNCED:"…"` (a toast or
+live message appeared between the previous observation and this one; Jev saw it in its state for this and the next
+two steps, faded or not), `LOW-CONF`, `STALE`, `EVIDENCE-ASKED`. With the
 default `screenshots: "key"` the terminal step, every flagged step and the step after a no-effect action have a
 `steps/NNN.png`; `--screenshots all` pictures every step on a rerun. The one reading rule: the checks recorded
 in step *n* describe the page **before** action *n*; action *n*'s effect shows in step *n+1*. After a no-effect
@@ -260,6 +264,7 @@ request change nothing), so what *you* control is the number of round trips and 
 | `unstable_page` | The page never held still (`step.stale` says what moved). Raise `browser.quiet_ms` / `settle_ms` or `wait_for` the thing that keeps changing in `setup` |
 | `low_confidence` with WAIT and DONE split around 0.45 while a loader is visible | Jev could not tell "still loading" from "done". Undecided steps already wait like a WAIT (`settle_ms` × 1, 2, 4, ending when the page changes) and the count restarts when the page changes; if the run still ends before the loader does, raise `settle_ms`, and name the loader's end in the goal ("until the message X appears") |
 | Jev typed into a search or filter box while a form was still loading (`COVERED:<n>` on that step) | The form's own fields sat under a loading overlay, so the one free field got the text. A marginal typing there (below `thresholds.covered_type_confidence`, 0.8) is deferred once by the runner (`TYPE-DEFERRED:<n>`: one wait, ending when the overlay lifts); a confident one is executed, so if it still happens add a `notes` sentence naming the fields to wait for ("type only once First Name and Last Name are shown; the sidebar Search filters the menu"); for a start page, `wait_for` the form in `setup` |
+| The app confirms or refuses by a toast that is gone before the next step (`Successfully Saved`, `Failed to Submit`) | The runner records toasts and ARIA live messages as they appear (`announcements` on the step and in the result, `ANNOUNCED` flag) and Jev sees them for three observations, so an outcome `when` may name the toast ("A red toast says 'Failed to Submit'") and gets the message as its evidence line. If a spec still misses one, the app's toast has neither a live role nor a toast-like class name: anchor the outcome on the stable state instead |
 | A bug outcome fires before the action that gives it meaning (`No Records Found` on an unfiltered list before Search) | `requires` on checks is a probability, not an event. Put `"after": {"click": "Search"}` on the outcome: it is deferred (`DEFERRED:<name>`) until a click on Search has been executed |
 | A suite reads `flaky` but every run is a clean declared outcome | The app varies by design; see Suites. A spec with two legitimate pass endings agrees on verdicts, so declare both as `pass` outcomes |
 | An expected-red spec keeps a nightly gate red | Declare its ending in `expect`; the suite then reads it `expected` and goes red only when the behaviour changes |

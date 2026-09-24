@@ -31,13 +31,13 @@ from datetime import datetime, timezone
 
 from jev_client import JevClient, JevError
 from observe import (
-    GUARD_SKIPPED, LINES_JS, TARGET_OPERATIONS, compare_fingerprint, element_label, fingerprint, mask_secrets, mask_text,
-    observe, signature,
+    ANNOUNCE_FUNCTION, ANNOUNCE_INIT_JS, GUARD_SKIPPED, LINES_JS, TARGET_OPERATIONS, compare_fingerprint, element_label,
+    fingerprint, mask_secrets, mask_text, observe, signature,
 )
 from policy import (
-    ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, build_adjudication, build_questions, build_reason_questions, build_state,
-    defer_typing, deferred_outcomes, evidence_line_keys, is_field, quoted_pick, read_checks, read_choice, read_outcome,
-    resolve_target, seen_outcomes, suggested_verdict, validate_choice,
+    ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, announcement_lines, build_adjudication, build_questions, build_reason_questions,
+    build_state, defer_typing, deferred_outcomes, evidence_line_keys, is_field, quoted_pick, read_checks, read_choice,
+    read_outcome, recent_announcements, resolve_target, seen_outcomes, suggested_verdict, validate_choice,
 )
 from spec import (HEADED_ENV, UNDETERMINED, effective_outcomes, load_dotenv, load_spec, match_expect, resolve_headless,
                   spec_warnings, validate)
@@ -492,14 +492,18 @@ def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = No
     return results
 
 
-def adjudication_request(page, name: str, when: str, secrets: list[str] | None = None) -> dict | None:
+def adjudication_request(page, name: str, when: str, secrets: list[str] | None = None, extra_lines: list[str] | None = None) -> dict | None:
     """The evidence questions for a seen outcome (spec §5.4) over the current page's numbered lines, ready to send
     alone (`adjudicate`) or riding in a confirmation step's request (the loop merges them: one round trip fewer
-    for every pass). None when the page text cannot be read. The lines are masked like every observation."""
+    for every pass). None when the page text cannot be read. The lines are masked like every observation.
+    `extra_lines` (the messages the page announced recently, policy.announcement_lines) follow the page's lines, kept
+    within the cap: a toast that has faded is then a line Jev can point at, and one still on the page is quoted from it."""
     try:
         lines = [mask_text(ln, secrets or []) for ln in page.evaluate(LINES_JS, ADJUDICATION_MAX_LINES)]
     except Exception:  # noqa: BLE001 - the page is gone or navigating
         return None
+    extra = list(extra_lines or [])[:ADJUDICATION_MAX_LINES // 2]
+    lines = lines[:ADJUDICATION_MAX_LINES - len(extra)] + extra
     state, questions, offered = build_adjudication(name, when, lines)
     # one key for a one-sentence statement, one per sentence otherwise
     return {"name": name, "state": state, "questions": questions, "offered": offered, "keys": evidence_line_keys(questions)}
@@ -532,7 +536,8 @@ def read_adjudication(rec: dict, answers: dict, req: dict) -> None:
         rec["present"] = round(float(present["noul"]), 3)
 
 
-def adjudicate(page, jev, name: str, when: str, secrets: list[str] | None = None, prefetched: dict | None = None) -> dict:
+def adjudicate(page, jev, name: str, when: str, secrets: list[str] | None = None, prefetched: dict | None = None,
+               extra_lines: list[str] | None = None) -> dict:
     """The evidence for a seen outcome (spec §5.4): Jev selects the line of the final page that states the outcome
     (`evidence_line`; one Choice per sentence of a compound statement, the most confident sentence's line is
     quoted) and re-judges the statement (`evidence_present`). The chosen line is copied verbatim into the result:
@@ -548,7 +553,7 @@ def adjudicate(page, jev, name: str, when: str, secrets: list[str] | None = None
         except Exception as e:  # noqa: BLE001
             rec["error"] = f"{type(e).__name__}: {str(e)[:300]}"
         return rec
-    req = adjudication_request(page, name, when, secrets)
+    req = adjudication_request(page, name, when, secrets, extra_lines)
     if req is None:
         rec["error"] = "could not read the page text"
         return rec
@@ -619,6 +624,10 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
                                   and not (seen and s["n"] == final.get("seen_at_step") and s["outcome_seen"] == seen["name"])]
                                  + [{"step": s["n"], "outcome": s["outcome_unconfirmed"], "unconfirmed": True}
                                     for s in steps if s.get("outcome_unconfirmed")],
+        # every toast / live message the page announced during the run, with the step whose observation it preceded:
+        # what the app said about each action, whether or not it was still on screen when the runner looked
+        "announcements": [{"step": s["n"], **{k: a[k] for k in ("text", "kind", "tone") if a.get(k)}}
+                          for s in steps for a in s.get("announcements") or []],
         "story": story,
         "run_stamp": spec.get("run_stamp"),  # the value ${RUN_STAMP} took in this run (None when the spec has none)
         "status": status,
@@ -718,6 +727,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     after_no_effect = False  # the last executed action changed nothing: the next step shows that page (a key picture)
     low_streak, last_low_sig = 0, None  # consecutive undecided (low-confidence) steps on one page signature
     type_deferred_sig: str | None = None  # the page signature a marginal TYPE_TEXT under a covering layer was deferred on
+    announced_raw: list[dict] = []  # messages the page reported through ANNOUNCE_FUNCTION since the last observation
+    all_announcements: list[dict] = []  # every announcement of the run, each with the step it preceded
     stale_streak = 0
     # A pass outcome (or Jev's DONE) gets one settle-and-recheck before it counts: {name, action}
     pending: dict | None = None
@@ -854,7 +865,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         finish(page, step, "passed" if ok else "assert_failed", {"action": action, "ok": True, "error": None, "confirmed": True})
         if ok and not spec["setup"] and not any("reason" not in h for h in history):
             trace["passed_without_actions"] = True
-        final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]), secret_values, prefetched)
+        final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]), secret_values, prefetched,
+                                           announced_lines(step["n"]))
 
     def accepted(seen: list[dict], step: dict) -> list[dict]:
         """Outcomes with `requires_action` do not count before the first executed action (a statement such as
@@ -872,7 +884,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         final["seen_at_step"] = final["first_seen_at_step"] = step["n"]
         step["outcome_seen"] = seen["name"]
         finish(page, step, "outcome", dict(STOP))
-        final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]), secret_values)
+        final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]), secret_values,
+                                           extra_lines=announced_lines(step["n"]))
 
     timing: dict = {}  # where the wall-clock went: launch, navigation, setup, steps, final
 
@@ -887,6 +900,38 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
             trace["observation_retries"] = trace.get("observation_retries", 0) + 1
         return observe_after_navigation(
             page, spec, lambda: mask_secrets(observe(page, obs_cfg["max_elements"], obs_cfg["max_text_chars"]), secret_values), bump)
+
+    def on_announce(raw) -> None:
+        """The page reports a toast / live message (observe.ANNOUNCE_INIT_JS): keep it until the next observation."""
+        try:
+            entry = json.loads(raw) if isinstance(raw, str) else raw
+        except ValueError:
+            return
+        if isinstance(entry, dict) and isinstance(entry.get("text"), str):
+            announced_raw.append(entry)
+
+    def take_announcements(n: int, obs: dict) -> list[dict]:
+        """The messages announced since the previous observation, masked, with how long before this observation each
+        appeared (the page's own clock on both sides); recorded for the run under step n and returned for the step."""
+        taken, announced_raw[:] = list(announced_raw), []
+        now = obs.get("now")
+        out = []
+        for a in taken:
+            rec = {"text": mask_text(a["text"], secret_values), "kind": a.get("kind") or "toast"}
+            if a.get("tone"):
+                rec["tone"] = a["tone"]
+            rec["ms_before_observation"] = (max(0, int(now - a["t"]))
+                                            if isinstance(now, (int, float)) and isinstance(a.get("t"), (int, float)) else None)
+            out.append(rec)
+        all_announcements.extend({"step": n, **a} for a in out)
+        acted = next((h for h in reversed(history) if "reason" not in h), None)
+        if out and acted is not None:
+            # on the last executed action, whatever runner waits followed it: what the app said in answer to it
+            acted.setdefault("announced", []).extend(a["text"] for a in out)
+        return out
+
+    def announced_lines(n: int) -> list[str]:
+        return announcement_lines(recent_announcements(all_announcements, n))
 
     def final_page(checks: dict) -> dict:
         """trace.final for a run that ends without a fresh observation: url and title masked like a step's."""
@@ -927,6 +972,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     context, created_context = browser.contexts[0], False
                 else:
                     context = browser.new_context(viewport=viewport)
+                context.add_init_script(ANNOUNCE_INIT_JS)  # before the tab exists: it runs in every document the tab loads
                 page = context.new_page()
                 page.set_viewport_size(viewport)
                 trace["browser"] = {"attached": True, "cdp_url": cdp_url,
@@ -937,6 +983,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 if spec["browser"]["storage_state"]:
                     ctx_kwargs["storage_state"] = spec["browser"]["storage_state"]
                 context = browser.new_context(**ctx_kwargs)
+                context.add_init_script(ANNOUNCE_INIT_JS)
                 page = context.new_page()
                 trace["browser"] = {"attached": False, "headless": headless}
         except Exception as e:  # noqa: BLE001 - nothing to trace yet: this is the environment, not the test
@@ -957,6 +1004,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
             popup.on("popup", track_popup)
 
         page.on("popup", track_popup)
+        page.expose_function(ANNOUNCE_FUNCTION, on_announce)  # the page's announcements land in announced_raw, across navigations
         page.set_default_timeout(spec["browser"]["action_timeout_ms"])
         t_lap = lap("launch_ms", t_lap)
         try:
@@ -981,6 +1029,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     break
                 obs = look()
                 sig = signature(obs)
+                announced = take_announcements(n, obs)  # what the page said since the last observation (toasts, live messages)
                 note_page_change(sig)  # did the previous action change what Jev sees?
                 step: dict = {
                     "n": n,
@@ -994,17 +1043,22 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 }
                 if obs.get("covered"):
                     step["covered_controls"] = obs["covered"]  # controls on screen but under another layer: not offered
+                if announced:
+                    step["announcements"] = announced  # flag ANNOUNCED; in Jev's state for this and the next two steps
                 if after_no_effect:
                     step["after_no_effect"] = True  # this is the page the previous action failed to change
-                state = build_state(spec, obs, n, history)
-                questions, meta = build_questions(spec, obs, last_operation, outcomes, ask_stuck=last_page_changed is False)
+                recent_ann = recent_announcements(all_announcements, n)
+                state = build_state(spec, obs, n, history, recent_ann)
+                questions, meta = build_questions(spec, obs, last_operation, outcomes, ask_stuck=last_page_changed is False,
+                                                  announcements=recent_ann)
                 offered = meta["offered"]
                 step["offered_operations"] = meta["operations"]
                 merged_adj = None
                 if pending and pending.get("name"):
                     # The confirmation of a pass sighting: ask the evidence questions in the same request (speculative
                     # fan-out), so a confirmed pass needs no adjudication round trip. The Choices point at state.lines.
-                    merged_adj = adjudication_request(page, pending["name"], outcome_when(pending["name"]), secret_values)
+                    merged_adj = adjudication_request(page, pending["name"], outcome_when(pending["name"]), secret_values,
+                                                      announced_lines(n))
                     if merged_adj:
                         state["lines"] = merged_adj["state"]["lines"]
                         questions.update(merged_adj["questions"])
@@ -1277,6 +1331,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 n = (trace["steps"][-1]["n"] + 1) if trace["steps"] else 1
                 obs = look()
                 sig = signature(obs)
+                announced = take_announcements(n, obs)
                 note_page_change(sig)
                 step = {
                     "n": n, "url": obs["url"], "title": obs["title"], "signature": sig, "screenshot": None,
@@ -1285,12 +1340,15 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 }
                 if obs.get("covered"):
                     step["covered_controls"] = obs["covered"]
-                questions, meta = build_questions(spec, obs, last_operation, outcomes, ask_blocked=True)
+                if announced:
+                    step["announcements"] = announced
+                recent_ann = recent_announcements(all_announcements, n)
+                questions, meta = build_questions(spec, obs, last_operation, outcomes, ask_blocked=True, announcements=recent_ann)
                 last_look = {k: v for k, v in questions.items() if k in spec["checks"] or k in ("outcome", "blocked_reason")}
                 checks, outcome_answer = {}, None
                 try:
                     t_jev = time.perf_counter()
-                    resp = jev.system_one(build_state(spec, obs, n, history), last_look)
+                    resp = jev.system_one(build_state(spec, obs, n, history, recent_ann), last_look)
                     step["latency_ms"] = {"jev": latency_of(resp, t_jev)}
                     step["usage"] = resp.get("usage")
                     checks = read_checks(resp["answers"], spec)

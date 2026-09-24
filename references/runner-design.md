@@ -207,6 +207,26 @@ adjudication request per bug sighting.
 - **Bigger option sets**: if the API rejects a Choice with too many criteria, lower
   `observation.max_elements`, or split `click_target` by role (links vs buttons) and ask both speculatively.
 
+## Announcements: toasts as evidence
+
+A toast that fades before the next observation is invisible to a loop that only looks between actions, and Jev then
+guesses from history; live, a Leave flow's decisive facts ("Successfully Saved", "Failed to Submit: No Working Days
+Selected") were such toasts. `observe.ANNOUNCE_INIT_JS`, installed on the browser context (so it runs in every document
+before the page's own scripts and survives navigations), watches the DOM with a MutationObserver and reports each new
+message once through a function the runner exposes on the page (`page.expose_function`; delivered during the runner's
+next Playwright call, so a message that appears while Jev is deciding is in hand by the next observation). A message is
+the text of the nearest live region around an added or changed node ([role=alert|status|log], aria-live polite /
+assertive; kind = the role or `live`), else of the nearest element whose class names a toast, snackbar, growl or flash
+(kind `toast`); a hidden alert that is shown counts too (attribute change), and the same text within 3 s is one
+message. The runner masks secrets, records them on the step (`announcements`, with `ms_before_observation` from the
+page's own clock), on the history entry of the last executed action (`announced`), in `result.announcements`, and in
+Jev's state (`state.announcements`, the last three observations' worth, so a pass anchored on a toast survives its
+recheck and a failure toast is judged once); the outcome question then says an announced message counts as shown, and
+the announced messages are appended to the adjudication lines, so `evidence.line` can read `live message: Successfully
+Saved`. Probed on OrangeHRM: the toast is `.oxd-toast--success[aria-live=assertive]`, complete at insertion 0.3 s after
+the click, gone at 3 s. Selftest 4l: a toast and an alert shown for 240 ms, both gone before the observation, carry the
+pass and its evidence line.
+
 ## Known limits
 
 Main frame only; no file uploads, drag-and-drop, canvas, or hover-only menus; no shadow DOM piercing

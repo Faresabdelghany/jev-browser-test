@@ -1869,6 +1869,70 @@ class DeferTypingTests(unittest.TestCase):
         self.assertEqual(_flags({"type_deferred": 9}), "TYPE-DEFERRED:9")
 
 
+class AnnouncementTests(unittest.TestCase):
+    """Toasts and ARIA live messages that appear between two observations are captured as `announcements`: on the
+    step, in Jev's state (a window of the last observations, so a pass anchored on a toast survives its recheck),
+    on the history entry of the action that drew them, in the adjudication lines and in the result. Live, the
+    Leave flow's decisive facts ('Successfully Saved', 'Failed to Submit: No Working Days Selected') were toasts
+    that had faded before the next observation."""
+
+    ANN = [{"step": 2, "text": "Successfully Saved", "kind": "live", "tone": "success", "ms_before_observation": 2100},
+           {"step": 4, "text": "Failed to Submit: No Working Days Selected", "kind": "alert", "tone": "error", "ms_before_observation": 900}]
+
+    def test_recent_announcements_keeps_a_window_of_three_observations(self) -> None:
+        from policy import ANNOUNCEMENT_WINDOW, recent_announcements
+        self.assertEqual(ANNOUNCEMENT_WINDOW, 3)
+        self.assertEqual([a["step"] for a in recent_announcements(self.ANN, 4)], [2, 4])
+        self.assertEqual([a["step"] for a in recent_announcements(self.ANN, 5)], [4], "step 2 fell out of the window at step 5")
+        self.assertEqual(recent_announcements(self.ANN, 7), [])
+        self.assertEqual(recent_announcements([], 3), [])
+
+    def test_state_carries_announcements_only_when_there_are_some(self) -> None:
+        obs = observation([])
+        self.assertNotIn("announcements", build_state(SPEC, obs, 1, []))
+        state = build_state(SPEC, obs, 4, [], announcements=self.ANN)
+        self.assertEqual(state["announcements"], [
+            {"step": 2, "text": "Successfully Saved", "kind": "live", "tone": "success"},
+            {"step": 4, "text": "Failed to Submit: No Working Days Selected", "kind": "alert", "tone": "error"}])
+        self.assertLess(list(state).index("announcements"), list(state).index("recent_actions"))
+
+    def test_outcome_question_says_announced_messages_count_only_when_there_are_some(self) -> None:
+        from policy import QUESTIONS
+        obs = observation([])
+        spec = _merge(SPEC, {"outcomes": {"ok": {"when": "The page says done", "verdict": "pass"}}})
+        plain, _ = build_questions(spec, obs, None)
+        self.assertEqual(plain["outcome"]["instructions"], QUESTIONS["outcome"])
+        with_ann, _ = build_questions(spec, obs, None, announcements=self.ANN)
+        self.assertIn("announced", with_ann["outcome"]["instructions"])
+        self.assertIn("state.announcements", with_ann["outcome"]["instructions"])
+
+    def test_announcement_lines_quote_kind_and_text_once_each(self) -> None:
+        from policy import announcement_lines
+        twice = self.ANN + [dict(self.ANN[0], step=3)]
+        self.assertEqual(announcement_lines(twice), ["live message: Successfully Saved",
+                                                     "alert message: Failed to Submit: No Working Days Selected"])
+        self.assertEqual(announcement_lines([]), [])
+
+    def test_result_lists_every_announcement_with_its_step(self) -> None:
+        from run_test import build_result
+        spec = _merge(DEFAULTS, {"id": "t", "start_url": "http://x/", "goal": "g",
+                                 "outcomes": {"ok": {"when": "The page says done", "verdict": "pass"}}})
+        steps = [{"n": 1}, {"n": 2, "announcements": [dict(self.ANN[0])]}, {"n": 3},
+                 {"n": 4, "announcements": [dict(self.ANN[1]), {"text": "Saved", "kind": "toast", "ms_before_observation": 5}]}]
+        trace = {"status": "passed", "steps": steps, "duration_ms": 1, "usage": {}, "final": {}}
+        result = build_result(trace, spec, {"ok": {"verdict": "pass"}}, {"outcome": {"name": "ok", "verdict": "pass"}}, "out")
+        self.assertEqual(result["announcements"], [
+            {"step": 2, "text": "Successfully Saved", "kind": "live", "tone": "success"},
+            {"step": 4, "text": "Failed to Submit: No Working Days Selected", "kind": "alert", "tone": "error"},
+            {"step": 4, "text": "Saved", "kind": "toast"}])
+
+    def test_summary_flags_the_first_announcement(self) -> None:
+        from summarize_trace import _flags
+        self.assertEqual(_flags({"announcements": [{"text": "Successfully Saved", "kind": "live"}]}), 'ANNOUNCED:"Successfully Saved"')
+        self.assertEqual(_flags({"announcements": [{"text": "x" * 60, "kind": "toast"}, {"text": "y", "kind": "toast"}]}),
+                         'ANNOUNCED:"' + "x" * 40 + '…" +1')
+
+
 class _FixedRand:
     def __init__(self, chars: str) -> None:
         self.chars = list(chars)

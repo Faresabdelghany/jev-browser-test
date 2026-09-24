@@ -83,6 +83,11 @@ def _flags(step: dict) -> str:
         f.append(f"COVERED:{step['covered_controls']}")  # controls on screen under another layer (a loading overlay, a dialog): not offered
     if step.get("type_deferred"):
         f.append(f"TYPE-DEFERRED:{step['type_deferred']}")  # a marginal TYPE_TEXT while that many controls were covered: one wait instead
+    if step.get("announcements"):
+        # what the page announced (a toast, a live message) between the previous observation and this one; the first message shown
+        first = step["announcements"][0].get("text") or ""
+        more = len(step["announcements"]) - 1
+        f.append(f'ANNOUNCED:"{first[:40]}{"…" if len(first) > 40 else ""}"' + (f" +{more}" if more else ""))
     if step.get("adjudication_merged"):
         f.append("EVIDENCE-ASKED")  # the evidence questions rode in this confirmation request
     if step.get("stale"):
