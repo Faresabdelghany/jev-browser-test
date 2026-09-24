@@ -432,7 +432,7 @@ ANNOUNCE_INIT_JS = r"""
   };
   const report = region => {
     if (!region.isConnected || !shown(region)) return false;
-    const text = clean(region.innerText || region.textContent).slice(0, 300);
+    const text = clean(region.innerText || region.textContent).replace(/\s*[×✕✖⨯]+\s*$/, '').slice(0, 300);  // minus the close button
     if (!text) return false;
     const now = Date.now();
     const last = recent.get(text);

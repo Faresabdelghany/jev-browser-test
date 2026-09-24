@@ -1933,6 +1933,106 @@ class AnnouncementTests(unittest.TestCase):
                          'ANNOUNCED:"' + "x" * 40 + '…" +1')
 
 
+class ScaffoldTests(unittest.TestCase):
+    """scripts/scaffold.py: a valid spec from a URL, a goal and the data values, so Claude edits twenty lines instead
+    of authoring eighty (the comparison's only loss was the first run's Claude tokens: 72k against 19k, most of it
+    reading the skill and writing three specs by hand)."""
+
+    def run_scaffold(self, *args: str, tmp: str | None = None) -> tuple[int, dict | None, str]:
+        import io
+        import tempfile
+        from contextlib import redirect_stderr, redirect_stdout
+        from scaffold import main as scaffold_main
+        tmp = tmp or tempfile.mkdtemp(prefix="jev-scaffold-")
+        out = os.path.join(tmp, "spec.json")
+        err, outbuf = io.StringIO(), io.StringIO()
+        with redirect_stderr(err), redirect_stdout(outbuf):
+            code = scaffold_main(["scaffold.py", *args, "--out", out])
+        spec = None
+        if os.path.exists(out):
+            with open(out, encoding="utf-8") as f:
+                spec = json.load(f)
+        return code, spec, err.getvalue() + outbuf.getvalue()
+
+    def test_url_goal_and_data_make_a_spec_that_validates(self) -> None:
+        from spec import load_spec
+        import tempfile
+        tmp = tempfile.mkdtemp(prefix="jev-scaffold-")
+        code, spec, text = self.run_scaffold(
+            "--url", "https://shop.example.com/", "--goal", "Search for the given term and open the first result, so that the product page shows 'Blue Hoodie'",
+            "--data", "search_term=blue hoodie", tmp=tmp)
+        self.assertEqual(code, 0, text)
+        self.assertEqual(spec["start_url"], "https://shop.example.com/")
+        self.assertEqual(spec["data"], {"search_term": "blue hoodie"})
+        self.assertEqual(spec["id"], "search-for-the-given-term")
+        self.assertEqual(spec["outcomes"]["goal_reached"], {"when": "The product page shows 'Blue Hoodie'", "verdict": "pass"})
+        self.assertEqual(spec["outcomes"]["app_error"]["verdict"], "bug")
+        self.assertNotIn("assert", spec, "no assertion was given: none is invented (a trivial one would confirm a pass at first sight)")
+        self.assertIn("scaffold.py", spec["comment"])
+        loaded = load_spec(os.path.join(tmp, "spec.json"))  # the file validates as the runner loads it
+        self.assertEqual(loaded["id"], "search-for-the-given-term")
+        self.assertIn("OK: spec", text)
+
+    def test_options_fill_every_part_of_the_contract(self) -> None:
+        code, spec, text = self.run_scaffold(
+            "--url", "https://app.example.com/login", "--goal", "Add the user so that the list shows it", "--id", "admin-add-user",
+            "--data", "username=jev${RUN_STAMP}", "--data", "password=${HRM_PASSWORD}", "--secret", "password",
+            "--pass", "The System Users table shows a row with the username 'jev${RUN_STAMP}'",
+            "--bug", "A red message under the Username field says 'Already exists'",
+            "--needs-human", "A CAPTCHA is shown",
+            "--assert-url", "**/admin/viewSystemUsers*", "--assert-text", "jev${RUN_STAMP}", "--assert-in", ".oxd-table-body|jev${RUN_STAMP}",
+            "--setup", "fill:input[name=username]=Admin", "--setup", "fill:input[name=password]=${HRM_PASSWORD}",
+            "--setup", "click:button[type=submit]", "--setup", "wait_for_url:**/dashboard/**", "--setup", "wait_for:a[href*=/admin/]",
+            "--setup", "goto:https://app.example.com/admin", "--setup", "press:input#q=Enter", "--setup", "select:select#role=ESS",
+            "--notes", "The sidebar Search box filters the menu: never type into it.", "--slow")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(spec["id"], "admin-add-user")
+        self.assertEqual(spec["secrets"], ["password"])
+        self.assertEqual(spec["notes"], "The sidebar Search box filters the menu: never type into it.")
+        self.assertEqual(spec["outcomes"]["goal_reached"]["when"], "The System Users table shows a row with the username 'jev${RUN_STAMP}'")
+        bugs = [n for n, o in spec["outcomes"].items() if o["verdict"] == "bug"]
+        self.assertEqual(bugs, ["a_red_message_under", "app_error"])
+        self.assertEqual(spec["outcomes"]["a_red_message_under"]["when"], "A red message under the Username field says 'Already exists'")
+        self.assertTrue(spec["outcomes"]["a_red_message_under"]["requires_action"])
+        self.assertEqual(spec["outcomes"]["a_captcha_is_shown"], {"when": "A CAPTCHA is shown", "verdict": "needs_human"})
+        self.assertEqual(spec["assert"], [{"url_matches": "**/admin/viewSystemUsers*"}, {"text_contains": "jev${RUN_STAMP}"},
+                                          {"text_in": {"selector": ".oxd-table-body", "contains": "jev${RUN_STAMP}"}}])
+        self.assertEqual(spec["setup"], [
+            {"action": "fill", "selector": "input[name=username]", "value": "Admin"},
+            {"action": "fill", "selector": "input[name=password]", "value": "${HRM_PASSWORD}"},
+            {"action": "click", "selector": "button[type=submit]"},
+            {"action": "wait_for", "url": "**/dashboard/**", "timeout_ms": 45000},
+            {"action": "wait_for", "selector": "a[href*=/admin/]", "timeout_ms": 45000},
+            {"action": "goto", "url": "https://app.example.com/admin"},
+            {"action": "press", "selector": "input#q", "key": "Enter"},
+            {"action": "select", "selector": "select#role", "value": "ESS"}])
+        self.assertEqual(spec["browser"], {"settle_ms": 2500, "quiet_ms": 200, "navigation_timeout_ms": 45000})
+        self.assertEqual(spec["budget"], {"max_steps": 30, "max_seconds": 360})
+
+    def test_credential_like_keys_become_secrets_and_a_missing_env_var_is_no_error_at_scaffold_time(self) -> None:
+        code, spec, text = self.run_scaffold("--url", "http://x/", "--goal", "Log in so that the dashboard opens",
+                                             "--data", "username=Admin", "--data", "password=${NOT_SET_ANYWHERE_123}")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(spec["secrets"], ["password"])
+        self.assertEqual(spec["data"]["password"], "${NOT_SET_ANYWHERE_123}", "written as the placeholder, resolved at run time")
+
+    def test_refuses_to_overwrite_without_force_and_rejects_bad_input(self) -> None:
+        import tempfile
+        tmp = tempfile.mkdtemp(prefix="jev-scaffold-")
+        code, _, _ = self.run_scaffold("--url", "http://x/", "--goal", "Log in so that the dashboard opens", tmp=tmp)
+        self.assertEqual(code, 0)
+        code, _, text = self.run_scaffold("--url", "http://x/", "--goal", "Something else so that it shows", tmp=tmp)
+        self.assertEqual(code, 2)
+        self.assertIn("exists", text)
+        code, spec, _ = self.run_scaffold("--url", "http://x/", "--goal", "Something else so that it shows", "--force", tmp=tmp)
+        self.assertEqual((code, spec["goal"]), (0, "Something else so that it shows"))
+        for bad in (["--url", "http://x/", "--goal", "short"], ["--url", "http://x/", "--goal", "Do it so that done", "--data", "novalue"],
+                    ["--url", "http://x/", "--goal", "Do it so that done", "--setup", "hover:button"],
+                    ["--url", "http://x/", "--goal", "Do it so that done", "--assert-in", "no-separator"]):
+            code, _, text = self.run_scaffold(*bad, tmp=tempfile.mkdtemp(prefix="jev-scaffold-"))
+            self.assertEqual(code, 2, (bad, text))
+
+
 class _FixedRand:
     def __init__(self, chars: str) -> None:
         self.chars = list(chars)

@@ -1,0 +1,36 @@
+# Troubleshooting
+
+Read the row that matches the symptom; every fix is either in the spec, in the environment or a real finding about
+the app. `$SKILL` is the skill directory. Exit 2 is never a verdict: fix it first.
+
+| Symptom | Cause / fix |
+|---|---|
+| `TYPESAFE_API_KEY is not set` | Export the key or put it in `.env` in the directory you run from |
+| No window appears, or one appears unannounced | The launch line says which mode ran: `browser: headed` or `browser: headless (...)`. Precedence: `--headed` / `--headless`, then `JEV_HEADED` in `.env`, then the spec's `browser.headless` (default true). A window no run announced belongs to another tool's browser, not to this runner |
+| exit 2 with "Spec problems" | Read the list: a `done_when` naming an unknown check, a check written as a question, a missing `${ENV}`, an `assert` of the wrong shape |
+| exit 2, `reason.phase: navigation` (`Page.goto: Timeout`) | The start URL did not load within `browser.navigation_timeout_ms` (30 s): a slow or unreachable host, or too many parallel workers on a shared one. Environment, never a bug: rerun sequentially, raise the timeout |
+| exit 2, `reason.phase: setup` (`setup[i] failed`) | The selector or `wait_for` in a setup step did not match; fix it or move that step into the goal |
+| `blocked` right after a text field appears (`blocked_reason: missing_data_value`) | Add the needed value to `data` |
+| `blocked` / `stuck` after a click flagged `NO-EFFECT` (`stuck_reason: control_had_no_effect`, suggested BUG) | A dead control, the classic product bug. The next step's picture shows the unchanged page; confirm the click landed on the right control in `--step N` |
+| A bug outcome fires at step 1 with zero actions | Its `when` is true of the start page ("the list is still unsorted"). Set `requires_action: true` on it |
+| `assert_failed` | A pass was seen but an assertion did not hold: `reason.failed_assertions` has the actual values. Decide whether the assertion or the app is wrong; never loosen it silently |
+| An assertion on a message passes on every load | `text_contains` searches the whole page and the page's copy mentions the words. Use `text_in` with the element's selector |
+| The outcome that came back does not match what the screenshot shows | The spec mislabelled it: fix that outcome's `when` or `verdict`, rerun, say so |
+| Two outcomes hover at 0.4–0.5 while the page clearly shows one | Both `when`s are true of that page; reword them with a string unique to each |
+| A pass outcome hovers at 0.7–0.85 although the page plainly shows it | The page's copy repeats the same words elsewhere (an example sentence, a menu). Anchor the `when` on the element as well as the text ("the blue bar above the heading reads …"), and put the exact text in a `text_in` assertion |
+| A "first item / top of the list" statement reads 0.6 when it is plainly true | Positional facts are soft for Jev; state them in `assert` (`text_in` on the first item's selector, `text_order`) and keep the outcome `when` on what the page says |
+| `evidence.line` is null although the outcome is right | The `when` mixes several facts or history in one sentence. One plain page fact per sentence, history in its own sentence; an absence has no line to quote, `evidence.present` is its evidence |
+| `low_confidence` with `type_value` split between two keys | Rename `data` keys to the field labels the app shows |
+| `low_confidence` over several elements with the same label | The observer names them by their card or row; if the table still shows bare duplicates, say which one in `notes` ("the third Add to cart") or script that click in `setup` |
+| `stuck` with confidence ≈ `min_confidence` and flat target probabilities | The control Jev needs is not in the table (a div with no role or cursor hint): a `setup` click or an ARIA role in the app. TEST_ISSUE, note the accessibility gap |
+| `budget_exhausted` with `stuck_reason: still_loading` | The page was still loading when the budget ran out. Rerun once; then raise `budget`, or suspect a loader that never completes |
+| `unstable_page` | The page never held still (`step.stale` says what moved). Raise `browser.quiet_ms` / `settle_ms` or `wait_for` the thing that keeps changing in `setup` |
+| `low_confidence` with WAIT and DONE split around 0.45 while a loader is visible | Jev could not tell "still loading" from "done". Undecided steps already wait like a WAIT (`settle_ms` × 1, 2, 4, ending when the page changes) and the count restarts when the page changes; if the run still ends before the loader does, raise `settle_ms`, and name the loader's end in the goal ("until the message X appears") |
+| Jev typed into a search or filter box while a form was still loading (`COVERED:<n>` on that step) | The form's own fields sat under a loading overlay, so the one free field got the text. A marginal typing there (below `thresholds.covered_type_confidence`, 0.8) is deferred once by the runner (`TYPE-DEFERRED:<n>`: one wait, ending when the overlay lifts); a confident one is executed, so if it still happens add a `notes` sentence naming the fields to wait for ("type only once First Name and Last Name are shown; the sidebar Search filters the menu"); for a start page, `wait_for` the form in `setup` |
+| The app confirms or refuses by a toast that is gone before the next step (`Successfully Saved`, `Failed to Submit`) | The runner records toasts and ARIA live messages as they appear (`announcements` on the step and in the result, `ANNOUNCED` flag) and Jev sees them for three observations, so an outcome `when` may name the toast ("A red toast says 'Failed to Submit'") and gets the message as its evidence line. If a spec still misses one, the app's toast has neither a live role nor a toast-like class name: anchor the outcome on the stable state instead |
+| A bug outcome fires before the action that gives it meaning (`No Records Found` on an unfiltered list before Search) | `requires` on checks is a probability, not an event. Put `"after": {"click": "Search"}` on the outcome: it is deferred (`DEFERRED:<name>`) until a click on Search has been executed |
+| A suite reads `flaky` but every run is a clean declared outcome | The app varies by design; see Suites. A spec with two legitimate pass endings agrees on verdicts, so declare both as `pass` outcomes |
+| An expected-red spec keeps a nightly gate red | Declare its ending in `expect`; the suite then reads it `expected` and goes red only when the behaviour changes |
+| Choice rejected as too large | Lower `observation.max_elements` |
+| Page needs an existing login session | `browser.storage_state`, or attach to a logged-in Chrome (`--cdp-url http://127.0.0.1:9222`); recipe in `references/spec-format.md` |
+| Elements inside iframes are missing | Main frame only for now; `references/runner-design.md` says how to extend |

@@ -190,7 +190,8 @@ TOAST_PAGE = """<!doctype html><html><head><title>Toasts</title></head><body>
  function save(){
    setTimeout(() => {
      const t = document.createElement('div'); t.className = 'app-toast app-toast--success'; t.setAttribute('aria-live', 'polite');
-     t.textContent = 'Saved successfully'; document.getElementById('toasts').appendChild(t);
+     t.textContent = 'Saved successfully'; const x = document.createElement('span'); x.textContent = '×'; t.appendChild(x);
+     document.getElementById('toasts').appendChild(t);
      document.getElementById('count').hidden = false;
      setTimeout(() => { t.remove(); document.getElementById('count').hidden = true; }, 240);
    }, 60);

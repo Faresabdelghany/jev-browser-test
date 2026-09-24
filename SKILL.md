@@ -57,7 +57,29 @@ never echo the key back, never write it into a spec.
 
 ### 1. Write the spec
 
-Read `references/spec-format.md` the first time, then write `specs/<id>.json`:
+Scaffold it, then edit; do not author it by hand (measured: writing three specs from the format reference cost
+~50k tokens of reading and drafting on a first run, the scaffold's edit is a fraction of that):
+
+```bash
+python $SKILL/scripts/scaffold.py --url https://app.example.com/ \
+  --goal 'Open PIM, add an employee with the given names and save, so that the Personal Details page shows the name Jevtest Runner${RUN_STAMP}' \
+  --data first_name=Jevtest --data 'last_name=Runner${RUN_STAMP}' \
+  --setup 'fill:input[name=username]=Admin' --setup 'fill:input[name=password]=${HRM_PASSWORD}' \
+  --setup 'click:button[type=submit]' --setup 'wait_for_url:**/dashboard/**' \
+  --bug "A red 'Required' message is shown under a field after Save" \
+  --assert-url '**/viewPersonalDetails/**' --assert-in '.orangehrm-edit-employee-name|Jevtest' --slow --out specs/<id>.json
+```
+
+Single quotes around anything with `${...}` (the shell must not expand it: the runner does, at run time).
+
+```
+```
+
+It writes a spec that already validates (goal, data, a `pass` outcome from the goal's "so that" clause, your `bug`
+outcomes with `requires_action`, the standing `app_error`, your assertions and setup steps, `--slow` for a slow
+single-page app), prints `spec.py`'s summary, and leaves nothing invented: no assertion unless you gave one, `${ENV}`
+kept for run time. Then edit the twenty lines that matter, guided by the field notes below; open
+`references/spec-format.md` only for a field the scaffold's `comment` does not explain.
 
 - **goal** — what you would tell a tester in one breath, ending with the visible outcome.
 - **data** — every string the flow might type. Jev chooses *which* value; a missing one surfaces as `BLOCKED`.
@@ -206,24 +228,10 @@ Handed a run folder (`result.json`, `trace.json`, screenshots), the answer is in
 python $SKILL/scripts/run_suite.py specs/*.json --repeat 3 --workers 2   # -> runs/suite/<ts>/results.json + results.md
 ```
 
-Launch it with the Bash tool's `run_in_background` and **do nothing until the completion notification**. Then
-read `results.md`: per spec the outcome distribution, the **agreement on verdicts** (two legitimate pass endings
-agree), medians, and a suite verdict: one verdict everywhere → it; a spec with `expect` whose every run matched →
-`expected` (green); any disagreement → **`flaky`**, computed, never diagnosed from one run. A start URL that never
-loaded or a setup step that failed is listed as an environment/setup failure and kept out of the distribution.
-Exit 0 iff every spec is `pass` or `expected`. Open a trace only for a spec that is `undetermined` or `flaky`.
-
-When a suite reads `flaky`, say which kind: **environment** (load timeouts, stale pages, error runs) or **an app
-that varies by design** (every run a confident declared outcome, different evidence lines: a random notification,
-an A/B page). The second is not noise to retry away: if the spec asserts one ending of a legitimate variation, fix
-the spec (`text_in` on the element accepting either message, or an either/or pass outcome); if the product's
-contract forbids the variation, it is a BUG with a measured rate. Before spending browser runs on a page you
-suspect is random, sample it without a browser: a loop of plain HTTP requests to the link's target shows a
-server-side coin flip in seconds and costs the demo host nothing.
-
-For a human reader (a PR, a ticket), `python $SKILL/scripts/report.py runs/<id>/<ts>` writes a self-contained
-`report.html` beside the trace (step table, probabilities, checks, screenshots inline); given a suite directory
-it writes one per run. Keep specs independent (each has its own `setup`). Keep `runs/` out of version control.
+Launch it with the Bash tool's `run_in_background` and do nothing until the completion notification; then read
+`results.md` (one suite verdict per spec: `pass`, `expected`, `bug`, ..., or the computed `flaky`). Open a trace only
+for a spec that is `undetermined` or `flaky`. `references/suites.md` says how to read agreement and flakiness, which
+kind of flaky it is (environment or an app that varies by design), and how to get a `report.html` for a human.
 
 ## What makes a run fast (and what does not)
 
@@ -240,45 +248,20 @@ request change nothing), so what *you* control is the number of round trips and 
 
 ## Troubleshooting
 
-| Symptom | Cause / fix |
-|---|---|
-| `TYPESAFE_API_KEY is not set` | Export the key or put it in `.env` in the directory you run from |
-| No window appears, or one appears unannounced | The launch line says which mode ran: `browser: headed` or `browser: headless (...)`. Precedence: `--headed` / `--headless`, then `JEV_HEADED` in `.env`, then the spec's `browser.headless` (default true). A window no run announced belongs to another tool's browser, not to this runner |
-| exit 2 with "Spec problems" | Read the list: a `done_when` naming an unknown check, a check written as a question, a missing `${ENV}`, an `assert` of the wrong shape |
-| exit 2, `reason.phase: navigation` (`Page.goto: Timeout`) | The start URL did not load within `browser.navigation_timeout_ms` (30 s): a slow or unreachable host, or too many parallel workers on a shared one. Environment, never a bug: rerun sequentially, raise the timeout |
-| exit 2, `reason.phase: setup` (`setup[i] failed`) | The selector or `wait_for` in a setup step did not match; fix it or move that step into the goal |
-| `blocked` right after a text field appears (`blocked_reason: missing_data_value`) | Add the needed value to `data` |
-| `blocked` / `stuck` after a click flagged `NO-EFFECT` (`stuck_reason: control_had_no_effect`, suggested BUG) | A dead control, the classic product bug. The next step's picture shows the unchanged page; confirm the click landed on the right control in `--step N` |
-| A bug outcome fires at step 1 with zero actions | Its `when` is true of the start page ("the list is still unsorted"). Set `requires_action: true` on it |
-| `assert_failed` | A pass was seen but an assertion did not hold: `reason.failed_assertions` has the actual values. Decide whether the assertion or the app is wrong; never loosen it silently |
-| An assertion on a message passes on every load | `text_contains` searches the whole page and the page's copy mentions the words. Use `text_in` with the element's selector |
-| The outcome that came back does not match what the screenshot shows | The spec mislabelled it: fix that outcome's `when` or `verdict`, rerun, say so |
-| Two outcomes hover at 0.4–0.5 while the page clearly shows one | Both `when`s are true of that page; reword them with a string unique to each |
-| A pass outcome hovers at 0.7–0.85 although the page plainly shows it | The page's copy repeats the same words elsewhere (an example sentence, a menu). Anchor the `when` on the element as well as the text ("the blue bar above the heading reads …"), and put the exact text in a `text_in` assertion |
-| A "first item / top of the list" statement reads 0.6 when it is plainly true | Positional facts are soft for Jev; state them in `assert` (`text_in` on the first item's selector, `text_order`) and keep the outcome `when` on what the page says |
-| `evidence.line` is null although the outcome is right | The `when` mixes several facts or history in one sentence. One plain page fact per sentence, history in its own sentence; an absence has no line to quote, `evidence.present` is its evidence |
-| `low_confidence` with `type_value` split between two keys | Rename `data` keys to the field labels the app shows |
-| `low_confidence` over several elements with the same label | The observer names them by their card or row; if the table still shows bare duplicates, say which one in `notes` ("the third Add to cart") or script that click in `setup` |
-| `stuck` with confidence ≈ `min_confidence` and flat target probabilities | The control Jev needs is not in the table (a div with no role or cursor hint): a `setup` click or an ARIA role in the app. TEST_ISSUE, note the accessibility gap |
-| `budget_exhausted` with `stuck_reason: still_loading` | The page was still loading when the budget ran out. Rerun once; then raise `budget`, or suspect a loader that never completes |
-| `unstable_page` | The page never held still (`step.stale` says what moved). Raise `browser.quiet_ms` / `settle_ms` or `wait_for` the thing that keeps changing in `setup` |
-| `low_confidence` with WAIT and DONE split around 0.45 while a loader is visible | Jev could not tell "still loading" from "done". Undecided steps already wait like a WAIT (`settle_ms` × 1, 2, 4, ending when the page changes) and the count restarts when the page changes; if the run still ends before the loader does, raise `settle_ms`, and name the loader's end in the goal ("until the message X appears") |
-| Jev typed into a search or filter box while a form was still loading (`COVERED:<n>` on that step) | The form's own fields sat under a loading overlay, so the one free field got the text. A marginal typing there (below `thresholds.covered_type_confidence`, 0.8) is deferred once by the runner (`TYPE-DEFERRED:<n>`: one wait, ending when the overlay lifts); a confident one is executed, so if it still happens add a `notes` sentence naming the fields to wait for ("type only once First Name and Last Name are shown; the sidebar Search filters the menu"); for a start page, `wait_for` the form in `setup` |
-| The app confirms or refuses by a toast that is gone before the next step (`Successfully Saved`, `Failed to Submit`) | The runner records toasts and ARIA live messages as they appear (`announcements` on the step and in the result, `ANNOUNCED` flag) and Jev sees them for three observations, so an outcome `when` may name the toast ("A red toast says 'Failed to Submit'") and gets the message as its evidence line. If a spec still misses one, the app's toast has neither a live role nor a toast-like class name: anchor the outcome on the stable state instead |
-| A bug outcome fires before the action that gives it meaning (`No Records Found` on an unfiltered list before Search) | `requires` on checks is a probability, not an event. Put `"after": {"click": "Search"}` on the outcome: it is deferred (`DEFERRED:<name>`) until a click on Search has been executed |
-| A suite reads `flaky` but every run is a clean declared outcome | The app varies by design; see Suites. A spec with two legitimate pass endings agrees on verdicts, so declare both as `pass` outcomes |
-| An expected-red spec keeps a nightly gate red | Declare its ending in `expect`; the suite then reads it `expected` and goes red only when the behaviour changes |
-| Choice rejected as too large | Lower `observation.max_elements` |
-| Page needs an existing login session | `browser.storage_state`, or attach to a logged-in Chrome (`--cdp-url http://127.0.0.1:9222`); recipe in `references/spec-format.md` |
-| Elements inside iframes are missing | Main frame only for now; `references/runner-design.md` says how to extend |
+`references/troubleshooting.md` has the symptom table (read it when a run does not end the way the spec says). The
+three you meet first: exit 2 is a spec or environment problem, never a bug (the message says which); a bug outcome
+that fires before anything happened wants `requires_action: true` or `after` on it; `low_confidence` over two data
+keys or two same-named elements wants keys named like the app's labels, or a `notes` sentence saying which one.
 
 ## Files
 
-- `scripts/run_test.py` (one spec → `result.json` + `trace.json`), `run_suite.py` (specs × repeats → `results.json`
-  + `results.md`), `report.py` (a run → `report.html`), `spec.py` (validation), `summarize_trace.py`, `selftest.py`
-  (offline check), `unit_tests.py`, `bench.py` (N repeats, medians), and the pieces `observe.py`, `policy.py`,
-  `rules.py`, `jev_client.py` (read `references/runner-design.md` before changing them).
-- `references/spec-format.md`, `trace-format.md`, `verdict-rubric.md`, `runner-design.md`.
+- `scripts/scaffold.py` (URL + goal + data → a valid spec to edit), `run_test.py` (one spec → `result.json` +
+  `trace.json`), `run_suite.py` (specs × repeats → `results.json` + `results.md`), `report.py` (a run →
+  `report.html`), `spec.py` (validation), `summarize_trace.py`, `selftest.py` (offline check), `unit_tests.py`,
+  `bench.py` (N repeats, medians), and the pieces `observe.py`, `policy.py`, `rules.py`, `jev_client.py` (read
+  `references/runner-design.md` before changing them).
+- `references/spec-format.md` (every field), `troubleshooting.md` (symptom → fix), `suites.md` (agreement, flakiness,
+  reports), `trace-format.md`, `verdict-rubric.md`, `runner-design.md`.
 - `specs/smoke-login.json`, `specs/smoke-login-badpw.json` (the demo-site smoke specs); `specs/examples/*.json`,
   nineteen specs against public sites: a shop checkout in four variants (two with the accounts the site documents as
   broken, one of them an `expect` spec), an encyclopedia search with a real autocomplete, a todo app, a 5 s loader,
