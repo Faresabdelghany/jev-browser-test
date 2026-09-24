@@ -60,3 +60,68 @@ because the last name was fixed). The commits of this session attack each part:
 The next comparison should be run the same way (two flows, both paths, one session) from the scaffold, and its
 Claude-token figures recorded from the session's usage report at the time, with the `.playwright-cli/` snapshot sizes
 and the `runs/` traces kept beside them as the re-measurable half.
+
+## Second measurement (2026-09-24, 13:12–13:31): both paths in one session, Claude's tokens from the transcript
+
+Run as the first section asked: the same two flows, both paths, one session, the Jev path from the scaffold, and
+Claude's tokens read from the session's own transcript (`usage_between.py` sums the API usage of every assistant
+message between two timestamps, one record per request). Three windows, their markers under
+`2026-09-24-comparison-2/*-start.txt` / `*-end.txt`:
+
+| window | what happened | Claude requests | new tokens (input + cache writes + output) | of which output (thinking) | cache reads | wall-clock |
+|---|---|---:|---:|---:|---:|---:|
+| J1: Jev path, first run | `scaffold.py` twice, both specs read and edited, one exit 2 (below), the login spec run twice and the PIM spec four times until both passed, every result and two step tables read | 7 | **36,685** | 12,819 (6,452) | 2,376,578 | 11 min 47 s |
+| J2: Jev path, rerun | both finished specs run once, both results read, the red one's step table read | 2 | **5,424** | 2,415 (1,696) | 714,410 | 3 min 14 s |
+| P: Playwright CLI path | the skill read, both flows driven step by step (fourteen CLI commands, `find` instead of whole snapshots, `run-code` waits), one wrong Save recovered | 9 | **21,694** | 6,642 (2,487) | 3,317,630 | 4 min 10 s |
+
+`new` is what a fresh session would pay in full: the tokens that entered the context for the first time or were
+generated. The cache reads are this session's 2.4–3.3M tokens of earlier context re-read on every request, priced at a
+tenth; a fresh session would carry a fraction of them, so the `new` column is the comparable figure. Two things sat
+outside the windows and belong to the Jev path's first run in a fresh session: the read of `SKILL.md` (~5.4k tokens,
+done at the start of this session) and the knowledge of these two flows already in the context (the `hrm-login` and
+`hrm-pim-add-employee-list` example specs and their traces had been read in the morning's regression work), which made
+the spec edits shorter than a first meeting with the app would.
+
+**Break-even.** With the measured figures, (36.7 − 21.7) / (21.7 − 5.4) ≈ 0.9: **from the first rerun on the Jev path
+is cheaper in Claude tokens**; with the `SKILL.md` read added to the first run (≈ 42k), ≈ 1.25, the second rerun. The
+first section's reported 71.6k / 5.7k / 19.3k gave 3.8. The rerun and CLI figures agree with the report within a few
+thousand tokens; the first-run figure halved, and the section above says what the scaffold and the slimmer skill
+removed from it.
+
+**What the windows contained, and the hour they ran in.** The demo was in a slow hour (its login page 3.4–4.7 s by
+`curl` during J1, 5.0 s at the start of P, 6.4 s at 13:23; module pages 10–15 s), which cost both paths and the Jev path
+more:
+
+- J1's first exit 2 was a scaffold defect, fixed in `81ce6a2`: the scaffold's comment spelled the `${ENV_VAR}` form
+  when a key looked like a credential, the loader scans the whole spec for placeholders, and the login spec would not
+  load ("missing environment variables: ENV_VAR"). Then the login run ended `blocked` on the demo's empty shell (the
+  form not yet rendered; a `setup` `wait_for` on the Username box fixed it, as `hrm-login` has), and passed: 7 Jev
+  requests, 37 s. The PIM spec needed four runs: `low_confidence` after Jev typed the first name into the sidebar
+  filter at 0.81 (above the deferral gate) and gave up on the form still covered 17 s later; `low_confidence` after it
+  clicked a table row ("Kathleen Brooks") while the autocomplete still said "Searching...." and then refused Search
+  (a note about the rows and the suggestion list followed); `budget_exhausted` at the 30-step default with the right
+  suggestion clicked at step 29 and Search at 30 (budget 40 / 420 s followed); then **pass**, 28 requests, 106.5k Jev
+  input tokens, 111 s, "(1) Record Found". Both specs are `specs/compare/scaffold-login.json` and
+  `scaffold-pim-add-and-find.json` as they were when they passed; every run's `result.json` is under
+  `2026-09-24-comparison-2/`.
+- J2: the login rerun passed (7 requests, 41 s); the PIM rerun ended `low_confidence` the second way above (the row
+  "mandaa Brooks" at 0.81 / 0.57 while the suggestions were loading). In a normal hour the same flow passes 3/3
+  (`hrm-pim-add-employee-list`, round 3 and the end of the `b487e2e` suite, 19–26 s a run); in this hour the
+  suggestion list took seconds and a clickable row with a name is the tempting thing on screen. A rerun that is red
+  costs its reading, and the window includes it.
+- P: the CLI's first `find` on the login page matched nothing (the empty shell; a `run-code` `waitForSelector`
+  followed), its click on PIM hit its own 5 s timeout while the navigation completed (the same shape the runner now
+  records as `SLOW-NAV`), and its first Save was rejected with "Employee Id already exists": the `hrm-*` suite running
+  on the same demo had opened an Add Employee form in the same second (the race `hrm-add-employee` documents), so a
+  fresh id was typed and the second Save reached Personal Details. Eight snapshot files, 20 KB, against the first
+  section's ten files and 126 KB: `find` returns the matching nodes with three lines of context, and a page that is
+  read that way costs a few hundred tokens instead of three thousand.
+
+**Browser time** (the passing runs): the Jev path's login 37–41 s and PIM 111 s in this hour (6.5 s and 16 s in the
+first section's normal hour); the CLI path's two flows 4 min 10 s including Claude's turnaround, with one wrong Save.
+The Jev path's tokens are Jev's: 12.5k input a login run, 106.5k a PIM run, billed at TypeSafe.
+
+**What to take from it.** The measured first-run cost is half the reported one and the reruns cost what the report
+said; the break-even moved from the fourth rerun to the first or second. The hour's slowness is in both paths' wall-clock
+and in the Jev path's retries, and a normal-hour repeat (the two `specs/compare/scaffold-*.json` specs, the same three
+windows) is the next measurement; it costs the tokens of J2 plus one CLI drive.

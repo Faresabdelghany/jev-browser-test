@@ -741,3 +741,31 @@ captions with the messages, and the notes say what "Wait for it..." means: 3/3, 
 | `table-sort-due` | expected 3/3 | flaky: expected 2, `not_sorted` 1 (the footer link at 0.55) | expected 3/3 (`after`) |
 | `shop-checkout-problem-account` | bug 3/3 | bug 3/3 | bug 3/3 |
 | `menu-random` / `notify-random` (vary by design) | flaky 2/1 · flaky 2/1 | flaky 2/1 · flaky 1/2 | flaky 2/1 · bug 3/3 |
+
+**The five OrangeHRM specs at `b487e2e`** (`2026-09-24-regression-b487e2e-hrm.md`, 1,178 s on one worker, 13:11–13:31,
+the login page 3–6 s by `curl` for most of it and normal for the last two specs): `hrm-login` **pass 3/3** (11–16 s)
+and `hrm-pim-add-employee-list` **pass 3/3** (20–27 s, the host normal by then); `hrm-add-employee` 0/3,
+`hrm-admin-add-user` pass 1, `low_confidence` 1, one environment failure, `hrm-leave-assign` pass 1, `low_confidence`
+2. Every sidebar click of the hour is `SLOW-NAV` (8.5–19.4 s) and Jev's history says it landed; what ended the red runs:
+
+| run | ending | what the trace says |
+|---|---|---|
+| `hrm-add-employee` 1 | `low_confidence` (BLOCKED, `site_refused_or_error`) | the form stayed under its loading overlay for the three undecided looks after the sidebar typing (17 s of waits); Jev gave up on a page still on its way |
+| `hrm-add-employee` 2, 3 | `assert_failed` after two parked looks | covered form (the toast in sight), empty shell, then the record's page under its own overlay with url and heading holding and the two `field_value`s not yet rendered: the bound of two rechecks ran out one look early → `81ce6a2` gives a busy page two more looks |
+| `hrm-admin-add-user` 1 | environment failure | `setup[9]`, the seed employee's Save: `Locator.click: Timeout 8000ms`, the button under the form's loader for 8 s |
+| `hrm-admin-add-user` 3 | `low_confidence` in 174 s | 26 steps, `SLOW-NAV` 17.2 s, hesitation on a page with eight covered controls |
+| `hrm-leave-assign` 1, 3 | `low_confidence` (BLOCKED, `other`) in 162 s / 94 s | 25–27 steps, `SLOW-NAV` 19.4 / 10.6 s in run 1; Jev gave up late in the flow |
+
+The two passes of the slower specs took 178 s (admin) and 131 s (leave), against 33 s and 30 s in the morning's round
+3. **Reading:** the seventeen specs say the runner changes are safe; the five OrangeHRM specs in this hour measure the
+host, and the three defects the hour exposed in the runner (a landed click reported as failed, a pass confirmed on a
+covered or empty page, the recheck bound on a page rendering in stages) are fixed and covered offline. The rerun that
+can say "green" is the same command in a normal hour, from a clean export of `81ce6a2` or later:
+`GIT_COMMIT=<sha> python scripts/run_suite.py specs/examples/hrm-*.json --repeat 3 --workers 1` after
+`curl -o /dev/null -s -w '%{time_total}' https://opensource-demo.orangehrmlive.com/web/index.php/auth/login` reads
+under 1.5 s three times.
+
+**The comparison, re-measured** in the same hour (13:12–13:31): `2026-09-24-claude-cost-comparison.md`, section
+"Second measurement". Claude's tokens read from the session transcript: Jev path first run 36.7k new tokens (from the
+scaffold, six runs in the slow hour, one exit 2 from a scaffold defect fixed in `81ce6a2`), rerun 5.4k, Playwright CLI
+path 21.7k; break-even at the first or second rerun, against the reported fourth.
