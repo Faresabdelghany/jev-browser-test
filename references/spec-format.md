@@ -107,7 +107,8 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `goal` | string | required | What a tester would be told to do. One flow, plain language, names the visible outcome |
 | `notes` | string | `""` | Hints Jev sees every step ("dismiss the cookie banner first", "the product grid loads lazily"). Keep them about the page and the flow: a sentence about the test itself ("this spec is expected to be red") is read by Jev as a hint about the page and measurably lowers its confidence in the right decision |
 | `comment` | string | none | Free text for humans (why the spec exists, what it documents). Never sent to Jev, kept in the trace's copy of the spec |
-| `data` | object | `{}` | Every string Jev may type, by name. Jev picks the name, never writes text. Values support `${ENV_VAR}` |
+| `data` | object | `{}` | Every string Jev may type, by name. Jev picks the name, never writes text. Values support `${ENV_VAR}` and `${RUN_STAMP}` |
+| `${RUN_STAMP}` | placeholder | fresh per run | Anywhere in the spec (`data`, `goal`, `notes`, outcome `when`s, `assert`, `setup` values): one value per run, eight lowercase letters and digits (the epoch second in base 36 plus two random characters), so data the application keeps is unique across runs, repeats and parallel workers without anyone exporting a variable. `RUN_STAMP` in the environment wins over a fresh one (export it to rerun, or clean up after, one run's data). Recorded as `result.run_stamp` and `trace.spec.run_stamp`; `null` when the spec never mentions it |
 | `secrets` | list | `[]` | Names in `data` whose values must never appear in the trace or in the state sent to Jev. Shown as `<secret>` in `available_data_values`, and masked again in every observation (a secret typed into a plain text field or a contenteditable reads back as `<secret>`, not as the value). Masking replaces **every occurrence**, so a value shorter than 6 characters after `${ENV}` substitution (`1`, `2024`, `admin`) also rewrites unrelated page text Jev decides on; `spec.py` and the runner print a warning on stderr for it (exit code unchanged): use a longer test credential, or leave a non-confidential value out of `secrets` |
 | `setup` | list | `[]` | Deterministic Playwright steps run **before** Jev takes over (see below) |
 | `checks` | object | `{}` | `name -> statement` evaluated as a Noul (0–1) against the page at every step |
@@ -233,6 +234,11 @@ Checks are Noul questions: Jev returns the probability that the statement is tru
 - Put **every string the flow might need** in `data`: search terms, form values, coupon codes, the
   exact text of an option to pick. If Jev needs a value that is not there, the right outcome is `BLOCKED`,
   which comes back to Claude to fix the spec — that is a test issue, not a product bug.
+- A value the application **keeps** (a username, a last name, a record title) gets `${RUN_STAMP}` in it, and so
+  does every mention of it in the goal, the outcomes and the assertions (`"last_name": "Runner${RUN_STAMP}"`,
+  `"when": "The table shows a row for 'Runner${RUN_STAMP}'"`): the runner substitutes one fresh value per run, so a
+  spec run three times in a suite creates three distinct records and a search for the name finds exactly one.
+  Without it, the second run collides with the first ("Already exists", two records found) and reads as a bug.
 - Test credentials go in `data` via `${ENV_VAR}` and are listed in `secrets`. Never paste real
   passwords into a spec file. Prefer `setup` for the login itself so the credential never reaches Jev at all.
   The one exception is a credential the site itself publishes (the demo accounts a practice site prints on its

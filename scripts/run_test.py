@@ -620,6 +620,7 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
                                  + [{"step": s["n"], "outcome": s["outcome_unconfirmed"], "unconfirmed": True}
                                     for s in steps if s.get("outcome_unconfirmed")],
         "story": story,
+        "run_stamp": spec.get("run_stamp"),  # the value ${RUN_STAMP} took in this run (None when the spec has none)
         "status": status,
         "duration_ms": trace["duration_ms"],
         "usage": trace["usage"],

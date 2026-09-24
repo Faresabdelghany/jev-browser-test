@@ -8,8 +8,10 @@ from __future__ import annotations
 import copy
 import json
 import os
+import random
 import re
 import sys
+import time
 
 RESERVED_QUESTIONS = {
     "operation",
@@ -51,6 +53,24 @@ SETUP_ACTIONS = {"goto", "click", "fill", "press", "wait", "wait_for", "select"}
 SECRET_MIN_LEN = 6  # a shorter secret is masked wherever it occurs and rewrites unrelated page text: a warning, not a problem
 ENV_RE = re.compile(r"\$\{([A-Z0-9_]+)\}")
 DOTENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+RUN_STAMP_VAR = "RUN_STAMP"  # `${RUN_STAMP}`: made up once per run (or taken from the environment when set there)
+RUN_STAMP_TOKEN = "${" + RUN_STAMP_VAR + "}"
+_BASE36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def new_run_stamp(now: float | None = None, rand=None) -> str:
+    """A value unique to this run for data the application keeps (a username, a last name, a title): the
+    current epoch second in base 36 (six characters, unique across runs and days) followed by two random base-36
+    characters (unique across the workers a suite starts in the same second). Eight lowercase letters and digits,
+    so it fits a username, a last name or an id field. The environment's RUN_STAMP wins over a fresh one
+    (see load_spec): export it to rerun a spec against, or clean up after, the data an earlier run created."""
+    n = int(time.time() if now is None else now)
+    digits = ""
+    while n > 0:
+        digits = _BASE36[n % 36] + digits
+        n //= 36
+    r = random.SystemRandom() if rand is None else rand
+    return digits.rjust(6, "0")[-6:] + "".join(r.choice(_BASE36) for _ in range(2))
 
 DEFAULTS = {
     "notes": "",
@@ -115,12 +135,15 @@ def _merge(defaults: dict, given: dict) -> dict:
     return out
 
 
-def substitute_env(value, missing: list[str]):
-    """Replace ${VAR} with os.environ[VAR] in strings, recursively."""
+def substitute_env(value, missing: list[str], extra: dict | None = None):
+    """Replace ${VAR} with os.environ[VAR] in strings, recursively. `extra` holds values that are not environment
+    variables (the run stamp); a name found in neither is appended to `missing` and left as written."""
     if isinstance(value, str):
 
         def repl(m):
             name = m.group(1)
+            if extra and name in extra:
+                return extra[name]
             if name not in os.environ:
                 missing.append(name)
                 return m.group(0)
@@ -128,9 +151,9 @@ def substitute_env(value, missing: list[str]):
 
         return ENV_RE.sub(repl, value)
     if isinstance(value, list):
-        return [substitute_env(v, missing) for v in value]
+        return [substitute_env(v, missing, extra) for v in value]
     if isinstance(value, dict):
-        return {k: substitute_env(v, missing) for k, v in value.items()}
+        return {k: substitute_env(v, missing, extra) for k, v in value.items()}
     return value
 
 
@@ -438,13 +461,21 @@ def effective_outcomes(spec: dict) -> dict:
     return out
 
 
-def load_spec(path: str) -> dict:
-    """Load, apply defaults, substitute ${ENV} and validate. Raises ValueError on problems."""
+def load_spec(path: str, run_stamp: str | None = None) -> dict:
+    """Load, apply defaults, substitute ${ENV} and validate. Raises ValueError on problems.
+
+    `${RUN_STAMP}` anywhere in the spec (data, goal, outcomes, assertions, setup values) becomes one value for this
+    run: `run_stamp` when given, else the environment's RUN_STAMP, else a fresh `new_run_stamp()`. The value used is
+    recorded as `spec["run_stamp"]` (None when the spec never mentions it), and from there in the trace and the
+    result, so the data a run created can be found in the application afterwards."""
     with open(path, encoding="utf-8") as f:
         raw = json.load(f)
     spec = _merge(DEFAULTS, raw)
+    used = RUN_STAMP_TOKEN in json.dumps(raw)
+    stamp = run_stamp or os.environ.get(RUN_STAMP_VAR) or new_run_stamp()
     missing: list[str] = []
-    spec = substitute_env(spec, missing)
+    spec = substitute_env(spec, missing, {RUN_STAMP_VAR: stamp})
+    spec["run_stamp"] = stamp if used else None
     errors = validate(spec)
     if missing:
         errors.append("missing environment variables: " + ", ".join(sorted(set(missing))))
@@ -481,6 +512,8 @@ def main(argv: list[str]) -> int:
     if spec["assert"]:
         print(f"  assert: {len(spec['assert'])} assertion(s) on the final page")
     print(f"  data keys: {list(spec['data'])}  secrets: {spec['secrets']}")
+    if spec.get("run_stamp"):
+        print(f"  run stamp: {spec['run_stamp']} (a fresh ${{RUN_STAMP}} every run; export RUN_STAMP to pin it)")
     print(f"  budget: {spec['budget']}")
     return 0
 

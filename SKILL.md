@@ -62,7 +62,11 @@ Read `references/spec-format.md` the first time, then write `specs/<id>.json`:
 - **goal** — what you would tell a tester in one breath, ending with the visible outcome.
 - **data** — every string the flow might type. Jev chooses *which* value; a missing one surfaces as `BLOCKED`.
   Credentials go through `${ENV_VAR}` + `secrets`, and preferably through `setup` so they never reach Jev. A
-  credential the site itself publishes (a demo account printed on its login page) may be written plainly.
+  credential the site itself publishes (a demo account printed on its login page) may be written plainly. Any
+  value the app **keeps** (a username, a last name, a title, an id) gets **`${RUN_STAMP}`** in it
+  (`"username": "jev${RUN_STAMP}"`): the runner substitutes a fresh eight-character stamp every run and repeat,
+  so nothing collides with what an earlier run created, and `result.run_stamp` says which value it was. Export
+  `RUN_STAMP=<value>` to rerun a spec against, or clean up after, one particular run's data.
 - **outcomes** — the endings you accept back: the acceptance criteria as `pass`, the wrong behaviour you test for
   (or the ticket reports) as `bug`, a CAPTCHA or approval step as `needs_human`. A negative test declares the
   rejection as `pass` and the success as `bug`, with a `note`. Write each `when` as **one visible fact per

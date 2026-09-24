@@ -25,6 +25,7 @@ evidence, the file Claude reads first. The trace is the *evidence* behind it; th
   "assertions": [ { "url_matches": "**/login", "ok": true, "actual": "https://.../login" } ],   // every assertion with what was found
   "outcomes_seen_earlier": [],                                  // non-terminal sightings: non-pass ones (fail_fast: false) and pass sightings that vanished on their recheck ({.., "unconfirmed": true})
   "story": [ "1 TYPE_TEXT [0] textbox \"Username\" <- username", "2 TYPE_TEXT [1] textbox \"Password\" <- password", "3 CLICK [2] button \"Login\"" ],
+  "run_stamp": "tj4x2ka7",                                       // what ${RUN_STAMP} became in this run (the data it created carries it); null when the spec has none
   "status": "passed", "duration_ms": 6200,
   "usage": { "jev_requests": 5, "input_tokens": 9774, "output_tokens": 1741, "model": "jev-1.13.0", "reconnects": 0 },
   "trace": "runs/smoke-login-badpw/20260922-101500/trace.json",

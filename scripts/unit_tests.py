@@ -1711,5 +1711,82 @@ class BrowserModeTests(unittest.TestCase):
         self.assertNotIn("--headed", argv)
 
 
+class RunStampTests(unittest.TestCase):
+    """`${RUN_STAMP}`: a value the runner makes up once per run, so data an app keeps (a username, a last name)
+    is unique on every run and repeat without anyone exporting a variable by hand."""
+
+    def test_new_run_stamp_is_eight_lowercase_base36_chars_and_differs_between_calls(self) -> None:
+        import re as _re
+        from spec import new_run_stamp
+        a, b = new_run_stamp(), new_run_stamp()
+        self.assertRegex(a, r"^[0-9a-z]{8}$")
+        self.assertNotEqual(a, b)
+        self.assertEqual(new_run_stamp(now=0, rand=_FixedRand("zz")), "000000zz")
+        self.assertEqual(new_run_stamp(now=36 ** 6 - 1, rand=_FixedRand("ab")), "zzzzzzab")
+
+    def _write(self, tmp: str, spec: dict) -> str:
+        path = os.path.join(tmp, "stamped.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(spec, f)
+        return path
+
+    STAMPED = {
+        "id": "stamped", "start_url": "http://x/", "goal": "Add the user jev${RUN_STAMP} so that the list shows it",
+        "data": {"username": "jev${RUN_STAMP}", "last_name": "Runner${RUN_STAMP}"},
+        "setup": [{"action": "fill", "selector": "#u", "value": "seed${RUN_STAMP}"}],
+        "outcomes": {"listed": {"when": "The table shows a row with the username 'jev${RUN_STAMP}'", "verdict": "pass"}},
+        "assert": [{"text_contains": "jev${RUN_STAMP}"}],
+    }
+
+    def test_load_spec_substitutes_one_generated_stamp_everywhere_and_records_it(self) -> None:
+        import tempfile
+        from spec import load_spec
+        tmp = tempfile.mkdtemp(prefix="jev-stamp-")
+        env = {k: v for k, v in os.environ.items() if k != "RUN_STAMP"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            spec = load_spec(self._write(tmp, self.STAMPED))  # no RUN_STAMP in the environment: no "missing" error
+        stamp = spec["run_stamp"]
+        self.assertRegex(stamp, r"^[0-9a-z]{8}$")
+        self.assertEqual(spec["data"], {"username": f"jev{stamp}", "last_name": f"Runner{stamp}"})
+        self.assertEqual(spec["setup"][0]["value"], f"seed{stamp}")
+        self.assertIn(f"jev{stamp}", spec["goal"])
+        self.assertEqual(spec["outcomes"]["listed"]["when"], f"The table shows a row with the username 'jev{stamp}'")
+        self.assertEqual(spec["assert"], [{"text_contains": f"jev{stamp}"}])
+        self.assertNotIn("${RUN_STAMP}", json.dumps(spec))
+
+    def test_run_stamp_in_the_environment_wins_so_a_cleanup_spec_can_name_the_same_data(self) -> None:
+        import tempfile
+        from spec import load_spec
+        tmp = tempfile.mkdtemp(prefix="jev-stamp-")
+        with mock.patch.dict(os.environ, {"RUN_STAMP": "abc12345"}):
+            spec = load_spec(self._write(tmp, self.STAMPED))
+        self.assertEqual((spec["run_stamp"], spec["data"]["username"]), ("abc12345", "jevabc12345"))
+
+    def test_a_spec_that_does_not_use_the_stamp_records_none(self) -> None:
+        import tempfile
+        from spec import load_spec
+        tmp = tempfile.mkdtemp(prefix="jev-stamp-")
+        plain = {**self.STAMPED, "goal": "Log in so that the dashboard opens", "data": {"username": "Admin"}, "setup": [],
+                 "outcomes": {"ok": {"when": "The topbar heading says 'Dashboard'", "verdict": "pass"}}, "assert": []}
+        self.assertIsNone(load_spec(self._write(tmp, plain))["run_stamp"])
+
+    def test_result_and_trace_carry_the_stamp(self) -> None:
+        from run_test import build_result, redacted_spec
+        spec = _merge(DEFAULTS, {"id": "t", "start_url": "http://x/", "goal": "g", "run_stamp": "abc12345",
+                                 "outcomes": {"ok": {"when": "The page says done", "verdict": "pass"}}})
+        trace = {"status": "passed", "steps": [], "duration_ms": 1, "usage": {}, "final": {}}
+        result = build_result(trace, spec, {"ok": {"verdict": "pass"}}, {"outcome": {"name": "ok", "verdict": "pass"}}, "out")
+        self.assertEqual(result["run_stamp"], "abc12345")
+        self.assertEqual(redacted_spec(spec)["run_stamp"], "abc12345")
+
+
+class _FixedRand:
+    def __init__(self, chars: str) -> None:
+        self.chars = list(chars)
+
+    def choice(self, _alphabet):
+        return self.chars.pop(0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
