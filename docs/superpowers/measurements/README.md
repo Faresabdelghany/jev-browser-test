@@ -859,13 +859,13 @@ the suite, none exhausted; two confirmation rechecks, none past the first. The t
   at 0.95) and its row was not on the page: the demo's user table now holds 56–57 rows, fifty a page, after a day of
   runs adding one each, and the goal's "only if that row is not in the table, filter by the username" left Jev
   undecided between DONE and the filter (0.3–0.57, four looks). Run 1 found the row on the page. A test issue: the
-  goal now filters by the username unconditionally and says so about the page size (the spec at `<next commit>`).
+  goal now filters by the username unconditionally and says so about the page size (the spec at `b740501`).
 - `hrm-leave-assign` run 2 (`low_confidence`, 57 s): the same step as the slow hour's run 1, the employee name typed
   into the Leave List filter and Search clicked at 0.66 while the list still read "Searching...." (the suggestion took
   longer than the WAIT before it, which had ended on the placeholder row appearing); the unchosen name filtered
   nothing. Runs 1 and 3 waited (0.61 and an undecided 0.50), chose the suggestion and passed.
 
-**The loading placeholder** (`<next commit>`). An autocomplete row that only says the suggestions are loading
+**The loading placeholder** (`b740501`). An autocomplete row that only says the suggestions are loading
 ('Searching....', 'Loading...', `LOADING_OPTION` in the observer) is not offered and is counted (`loading_options`, in
 the fingerprint too), the settle's options wait does not take it for the suggestions, and `page_loading` treats it as
 it treats a blank layer: a marginal action while it shows is deferred (`DEFERRED-<OP>:loading`) until the page changes,
