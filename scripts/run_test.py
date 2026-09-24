@@ -246,14 +246,21 @@ def await_navigation(page, spec: dict, before: dict | None, spent_ms: int) -> di
     return {"ended": waited["ended"], "ms": spent_ms + waited["ms"], "action_timeout_ms": spent_ms}
 
 
-def assertions_can_wait(checked: list[dict], covered: int, page_changed: bool, rechecks: int) -> bool:
-    """A pass is in sight but an assertion does not hold: is the page still busy, so that this look has not ruled out
-    timing? Yes while controls sit under another layer (a saving overlay) or the page changed during the pause, and
-    the recheck bound (CONFIRM_RECHECKS_MAX) is not reached. Live: a Save's toast announced the pass while the
-    overlay still covered the form and the URL was still the form's; the assertions were run there and the run ended
-    `assert_failed` two seconds before the page it asserted arrived. On a settled page a failing assertion is the
-    verdict at once."""
-    return any(not a["ok"] for a in checked) and (covered > 0 or page_changed) and rechecks < CONFIRM_RECHECKS_MAX
+def page_busy(obs: dict) -> bool:
+    """Is this page still on its way? Controls under another layer (a loading or saving overlay), or no controls at
+    all (a single-page app's empty shell after a navigation, before it renders). Live: the Personal Details page of a
+    slow demo was an empty document for two looks, same signature, and the assertions were run on it. A settled page
+    has controls and nothing covers them."""
+    return obs.get("covered", 0) > 0 or not obs.get("elements")
+
+
+def assertions_can_wait(checked: list[dict], busy: bool, page_changed: bool, rechecks: int) -> bool:
+    """A pass is in sight but an assertion does not hold: has this look ruled out timing? Not while the page is busy
+    (`page_busy`: covered controls, an empty shell) or changed during the pause, within the recheck bound
+    (CONFIRM_RECHECKS_MAX). Live: a Save's toast announced the pass while the overlay still covered the form and the
+    URL was still the form's; the assertions were run there and the run ended `assert_failed` two seconds before the
+    page it asserted arrived. On a settled page a failing assertion is the verdict at once."""
+    return any(not a["ok"] for a in checked) and (busy or page_changed) and rechecks < CONFIRM_RECHECKS_MAX
 
 
 def wait_for_change(page, before: dict | None, wait_ms: int) -> dict:
@@ -1171,10 +1178,11 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     pending = None
                     if passes:
                         checked = check_assertions(spec, page, obs, secret_values) if spec["assert"] else []
-                        if assertions_can_wait(checked, obs.get("covered", 0), sig != was["sig"], was["rechecks"]):
-                            # The pass is in sight (a toast announced the save) but the page is still busy, controls under
-                            # the saving overlay or changed during the pause, and the assertions do not hold yet (the URL
-                            # still the form's): not the settled page. Look again, as for a page that shows no pass yet.
+                        if assertions_can_wait(checked, page_busy(obs), sig != was["sig"], was["rechecks"]):
+                            # The pass is in sight (a toast announced the save) but the page is still busy (controls under
+                            # the saving overlay, the next page's empty shell) or changed during the pause, and the assertions
+                            # do not hold yet (the URL still the form's, the name not rendered): not the settled page. Look
+                            # again, as for a page that shows no pass yet.
                             pending = {**was, "sig": sig, "rechecks": was["rechecks"] + 1}
                             step["pending_outcome"] = passes[0]["name"]
                             step["recheck_again"] = pending["rechecks"]
@@ -1188,11 +1196,12 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                         pre = {**merged_adj, "answers": answers} if merged_adj and merged_adj["name"] == passes[0]["name"] else None
                         settle_pass(page, step, obs, passes[0], was["action"], jev, pre, assertions=checked or None)
                         break
-                    if sig != was["sig"] and was["rechecks"] < CONFIRM_RECHECKS_MAX:
-                        # The page changed during the pause and shows no pass yet: this is not the settled page, so
-                        # the look has not ruled out timing. Look again, pausing settle_ms x 2, x 4 (ending the moment
-                        # the page changes again), until two consecutive looks agree or the bound is reached. Live: a
-                        # slow Save navigated during the pause and the confirmation saw the next page's loading overlay.
+                    if (sig != was["sig"] or page_busy(obs)) and was["rechecks"] < CONFIRM_RECHECKS_MAX:
+                        # The page changed during the pause, or is still busy (covered controls, an empty shell), and shows
+                        # no pass yet: this is not the settled page, so the look has not ruled out timing. Look again,
+                        # pausing settle_ms x 2, x 4 (ending the moment the page changes again), until two consecutive looks
+                        # agree on a settled page or the bound is reached. Live: a slow Save navigated during the pause and
+                        # the confirmation saw the next page's loading overlay; a DONE on a form under its saving spinner.
                         pending = {**was, "sig": sig, "rechecks": was["rechecks"] + 1}
                         step["pending_outcome"] = was["name"]
                         step["recheck_again"] = pending["rechecks"]

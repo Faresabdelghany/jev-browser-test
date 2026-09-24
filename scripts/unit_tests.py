@@ -2162,17 +2162,24 @@ class AssertionsCanWaitTests(unittest.TestCase):
     changed during the pause and shows no pass, bounded by CONFIRM_RECHECKS_MAX; on a settled page a failing
     assertion is the verdict at once."""
 
+    def test_page_busy(self) -> None:
+        from run_test import page_busy
+        self.assertTrue(page_busy({"covered": 9, "elements": [{"idx": 0}]}), "controls under a layer")
+        self.assertTrue(page_busy({"covered": 0, "elements": []}), "an empty shell after a navigation, before the app renders")
+        self.assertTrue(page_busy({}))
+        self.assertFalse(page_busy({"covered": 0, "elements": [{"idx": 0}]}), "controls, nothing over them: settled")
+
     def test_wait_while_the_page_is_busy_and_an_assertion_fails(self) -> None:
         from run_test import CONFIRM_RECHECKS_MAX, assertions_can_wait
         failing = [{"url_matches": "**/x", "ok": False}, {"text_contains": "a", "ok": True}]
         holding = [{"url_matches": "**/x", "ok": True}]
-        self.assertTrue(assertions_can_wait(failing, covered=9, page_changed=False, rechecks=0), "controls under the saving overlay")
-        self.assertTrue(assertions_can_wait(failing, covered=0, page_changed=True, rechecks=0), "the page changed during the pause")
-        self.assertTrue(assertions_can_wait(failing, covered=9, page_changed=True, rechecks=CONFIRM_RECHECKS_MAX - 1))
-        self.assertFalse(assertions_can_wait(failing, covered=0, page_changed=False, rechecks=0), "a settled page: the failing assertion is the verdict")
-        self.assertFalse(assertions_can_wait(failing, covered=9, page_changed=True, rechecks=CONFIRM_RECHECKS_MAX), "the bound is reached")
-        self.assertFalse(assertions_can_wait(holding, covered=9, page_changed=True, rechecks=0), "every assertion holds: pass now")
-        self.assertFalse(assertions_can_wait([], covered=9, page_changed=True, rechecks=0), "no assertions to wait for")
+        self.assertTrue(assertions_can_wait(failing, busy=True, page_changed=False, rechecks=0), "controls under the saving overlay, or an empty shell")
+        self.assertTrue(assertions_can_wait(failing, busy=False, page_changed=True, rechecks=0), "the page changed during the pause")
+        self.assertTrue(assertions_can_wait(failing, busy=True, page_changed=True, rechecks=CONFIRM_RECHECKS_MAX - 1))
+        self.assertFalse(assertions_can_wait(failing, busy=False, page_changed=False, rechecks=0), "a settled page: the failing assertion is the verdict")
+        self.assertFalse(assertions_can_wait(failing, busy=True, page_changed=True, rechecks=CONFIRM_RECHECKS_MAX), "the bound is reached")
+        self.assertFalse(assertions_can_wait(holding, busy=True, page_changed=True, rechecks=0), "every assertion holds: pass now")
+        self.assertFalse(assertions_can_wait([], busy=True, page_changed=True, rechecks=0), "no assertions to wait for")
 
     def test_the_summary_flags_the_pending_assertions(self) -> None:
         from summarize_trace import _flags

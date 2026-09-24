@@ -1,6 +1,6 @@
 {
   "id": "table-sort-due",
-  "comment": "the-internet's Data Tables, Example 1: the column headers sort the table but carry no affordance at all: no role, no tabindex, no onclick attribute, default cursor, handlers bound by jQuery. Neither the observer nor a sighted user hovering the header can tell they are clickable, so Jev is offered only the row links and the footer link, and the run ends undetermined one way or another: low_confidence (CLICK split against BLOCKED under min_confidence), stuck (a borderline click on the footer link that changes nothing, three times) or blocked. `expect` names only the outcome, because which of those endings a borderline confidence produces varies from run to run while the fact documented does not; the spec goes red the day the headers get a role or a pointer cursor and the sort really happens. The requires_action bug outcome 'not_sorted' read 0.79 on the start page and was correctly deferred.",
+  "comment": "the-internet's Data Tables, Example 1: the column headers sort the table but carry no affordance at all: no role, no tabindex, no onclick attribute, default cursor, handlers bound by jQuery. Neither the observer nor a sighted user hovering the header can tell they are clickable, so Jev is offered only the row links and the footer link, and the run ends undetermined one way or another: low_confidence (CLICK split against BLOCKED under min_confidence), stuck (a borderline click on the footer link that changes nothing, three times) or blocked. `expect` names only the outcome, because which of those endings a borderline confidence produces varies from run to run while the fact documented does not; the spec goes red the day the headers get a role or a pointer cursor and the sort really happens. The requires_action bug outcome 'not_sorted' read 0.79 on the start page and was correctly deferred. The two bug outcomes carry after: {click: Due}: each says what the table looks like after the Due header was clicked, and the header is the one control Jev cannot see, so they must not fire on the footer link Jev sometimes clicks instead (once at 0.55 in a suite: NO-EFFECT, then not_sorted read as the ending, against the spec's expect). With `after` every ending of this spec is the declared undetermined.",
   "start_url": "https://the-internet.herokuapp.com/tables",
   "goal": "In the first table (Example 1), click the 'Due' column header so that the rows are sorted by the amount due in ascending order, $50.00 first and $100.00 last.",
   "notes": "Only Example 1, the upper table, matters. One click on a header sorts ascending; a second click reverses it. The 'Elemental Selenium' link in the footer leads away from the page and is not part of the task.",
@@ -16,12 +16,18 @@
       "when": "In the first table $100.00 is in the top row of the Due column after the header was clicked",
       "verdict": "bug",
       "requires_action": true,
-      "note": "amounts sorted as strings, not as numbers"
+      "note": "amounts sorted as strings, not as numbers",
+      "after": {
+        "click": "Due"
+      }
     },
     "not_sorted": {
       "when": "After the Due header was clicked the first table still lists Smith, Bach, Doe, Conway in that order",
       "verdict": "bug",
-      "requires_action": true
+      "requires_action": true,
+      "after": {
+        "click": "Due"
+      }
     }
   },
   "assert": [
