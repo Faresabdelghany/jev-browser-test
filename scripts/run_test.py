@@ -1,6 +1,6 @@
 """Run one Jev browser test from a spec and write a trace and a result.
 
-    python scripts/run_test.py path/to/spec.json [--out runs/<id>] [--headed] [--screenshots all|key|none] [--cdp-url URL]
+    python scripts/run_test.py path/to/spec.json [--out runs/<id>] [--headed | --headless] [--screenshots all|key|none] [--cdp-url URL]
 
 Exit codes: 0 = the run ended in an outcome with verdict "pass", 1 = it did not (see result.json / trace
 status), 2 = spec / environment problem.
@@ -39,7 +39,8 @@ from policy import (
     evidence_line_keys, is_field, quoted_pick, read_checks, read_choice, read_outcome, resolve_target, seen_outcomes,
     suggested_verdict, validate_choice,
 )
-from spec import UNDETERMINED, effective_outcomes, load_dotenv, load_spec, match_expect, spec_warnings, validate
+from spec import (HEADED_ENV, UNDETERMINED, effective_outcomes, load_dotenv, load_spec, match_expect, resolve_headless,
+                  spec_warnings, validate)
 from summarize_trace import is_action_step, summarize
 
 
@@ -677,12 +678,13 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
 SCREENSHOT_MODES = (True, False, "key")
 
 
-def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, headed: bool = False) -> dict:
+def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) -> dict:
     """Execute the spec. `jev` is anything with .system_one(state, questions) and .usage_summary().
 
     `screenshots`: True (every step), False (none, not even final.png) or "key" (terminal and flagged
-    steps only); None takes the spec's `observation.screenshots`. Writes trace.json and result.json into
-    out_dir and returns the trace (the result is under trace["result"]).
+    steps only); None takes the spec's `observation.screenshots`. The browser mode is `spec["browser"]["headless"]`
+    as main() resolved it (CLI flag, then JEV_HEADED, then the spec: spec.resolve_headless). Writes trace.json
+    and result.json into out_dir and returns the trace (the result is under trace["result"]).
     """
     from playwright.sync_api import sync_playwright
 
@@ -902,8 +904,17 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
     with sync_playwright() as p:
         t_lap = time.perf_counter()
         cdp_url = spec["browser"]["cdp_url"]
+        headless = bool(spec["browser"]["headless"])
         viewport = {"width": spec["browser"]["viewport"][0], "height": spec["browser"]["viewport"][1]}
         created_context = True
+        # Say which mode this is before anything opens: the question "why can't I see it" (or "why can I") is
+        # answered by the run itself, and the trace keeps the answer (trace.browser.headless).
+        if cdp_url:
+            print(f"browser: attached to {cdp_url} (that browser's own window; --headed/--headless do not apply)", file=sys.stderr)
+        elif headless:
+            print(f"browser: headless (add --headed, or {HEADED_ENV}=1 in .env, to watch)", file=sys.stderr)
+        else:
+            print("browser: headed (a window opens; --headless hides it)", file=sys.stderr)
         try:
             if cdp_url:
                 # Attach to a browser the user already runs (Chrome started with --remote-debugging-port). Its
@@ -919,16 +930,13 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None, he
                 trace["browser"] = {"attached": True, "cdp_url": cdp_url,
                                     "storage_state_ignored": bool(spec["browser"]["storage_state"])}
             else:
-                browser = p.chromium.launch(
-                    headless=not headed and spec["browser"]["headless"],
-                    channel=spec["browser"]["channel"],
-                )
+                browser = p.chromium.launch(headless=headless, channel=spec["browser"]["channel"])
                 ctx_kwargs = {"viewport": viewport}
                 if spec["browser"]["storage_state"]:
                     ctx_kwargs["storage_state"] = spec["browser"]["storage_state"]
                 context = browser.new_context(**ctx_kwargs)
                 page = context.new_page()
-                trace["browser"] = {"attached": False}
+                trace["browser"] = {"attached": False, "headless": headless}
         except Exception as e:  # noqa: BLE001 - nothing to trace yet: this is the environment, not the test
             what = (f"could not attach to the browser at {cdp_url} (is Chrome running with --remote-debugging-port?)"
                     if cdp_url else "could not launch the browser")
@@ -1355,7 +1363,11 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("spec")
     ap.add_argument("--out", help="output directory (default runs/<spec id>/<timestamp>)")
-    ap.add_argument("--headed", action="store_true", help="show the browser window")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--headed", action="store_true",
+                      help=f"show the browser window (beats {HEADED_ENV} and the spec's browser.headless)")
+    mode.add_argument("--headless", action="store_true",
+                      help=f"hide it (beats {HEADED_ENV}=1 and the spec); the default when nothing says otherwise")
     ap.add_argument("--screenshots", choices=("all", "key", "none"),
                     help="all = every step, key = terminal and flagged steps only (spec default), none = not even final.png")
     ap.add_argument("--no-screenshots", action="store_true", help="alias for --screenshots none")
@@ -1366,6 +1378,7 @@ def main(argv: list[str]) -> int:
     load_dotenv()  # ./.env, if present; exported variables win
     try:
         spec = load_spec(args.spec)
+        spec["browser"]["headless"] = resolve_headless(spec["browser"]["headless"], headed=args.headed, headless=args.headless)
         if args.cdp_url:
             spec["browser"]["cdp_url"] = args.cdp_url
             problems = validate(spec)
@@ -1390,7 +1403,7 @@ def main(argv: list[str]) -> int:
     out_dir = args.out or os.path.join("runs", spec["id"], datetime.now().strftime("%Y%m%d-%H%M%S"))
     screenshots = {"all": True, "key": "key", "none": False, None: None}["none" if args.no_screenshots else args.screenshots]
     try:
-        trace = run(spec, jev, out_dir, screenshots=screenshots, headed=args.headed)
+        trace = run(spec, jev, out_dir, screenshots=screenshots)
     except BrowserUnavailable as e:
         print(str(e), file=sys.stderr)
         return 2

@@ -312,6 +312,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--out", help="output directory (default runs/suite/<timestamp>)")
     ap.add_argument("--label", default="", help="free-text label stored in results.json")
     ap.add_argument("--run-arg", action="append", default=[], help="extra argument passed through to run_test.py (repeatable)")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--headed", action="store_true", help="every runner shows its browser window (use --workers 1); beats JEV_HEADED")
+    mode.add_argument("--headless", action="store_true", help="every runner hides it; beats JEV_HEADED=1")
     ap.add_argument("--python", default=sys.executable)
     ap.add_argument("--runner", default=RUN_TEST, help=argparse.SUPPRESS)  # the offline tests substitute a fake runner
     args = ap.parse_args(argv[1:])
@@ -332,7 +335,8 @@ def main(argv: list[str]) -> int:
         ids.setdefault(sid, p)
     specs = list(dict.fromkeys(os.path.abspath(p) for p in args.specs))  # the same file twice runs once
     out_root = args.out or os.path.join("runs", "suite", datetime.now().strftime("%Y%m%d-%H%M%S"))
-    report = run_suite(specs, args.repeat, args.workers, out_root, args.run_arg, args.python, args.runner, args.label)
+    run_args = [*args.run_arg, *(["--headed"] if args.headed else []), *(["--headless"] if args.headless else [])]
+    report = run_suite(specs, args.repeat, args.workers, out_root, run_args, args.python, args.runner, args.label)
     print()
     print(render_markdown(report))
     print(f"results: {os.path.join(out_root, 'results.json')}  {os.path.join(out_root, 'results.md')}")

@@ -55,11 +55,17 @@ started from (already-exported variables win; `.env` is git-ignored). Never put 
 (the demo site's public credential below is the one exception): use `${ENV_VAR}` in `data` and list the key under
 `secrets`; better, do the login itself in `setup` so the credential never reaches Jev at all.
 
+Runs are headless unless asked otherwise. `--headed` / `--headless` on `run_test.py` and `run_suite.py` decide for
+one command; `JEV_HEADED=1` in the same `.env` opens a window on every run until removed; the spec's
+`browser.headless` comes last. In Claude Code, `/jev-browser-test headed ...` or `/jev-browser-test headless ...`
+picks the mode for the conversation, and "show me the browser" in a request does the same. The runner prints
+`browser: headed` or `browser: headless (...)` as it starts and records the mode in `trace.browser.headless`.
+
 ## Use
 
 ```bash
 .venv/bin/python scripts/spec.py specs/smoke-login.json                 # validate, no browser
-.venv/bin/python scripts/run_test.py specs/smoke-login.json --headed    # run one spec -> runs/<id>/<ts>/result.json
+.venv/bin/python scripts/run_test.py specs/smoke-login.json --headed    # run one spec, watching -> runs/<id>/<ts>/result.json (--headless: in the background)
 .venv/bin/python scripts/summarize_trace.py runs/smoke-login/<ts> --result        # one run directory: result.json first
 .venv/bin/python scripts/run_suite.py specs/*.json --repeat 3           # many specs x repeats -> results.json + results.md, flaky computed
 .venv/bin/python scripts/report.py runs/smoke-login/<ts>                # one run -> a self-contained report.html

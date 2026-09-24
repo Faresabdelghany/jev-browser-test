@@ -1,6 +1,7 @@
 ---
 name: jev-browser-test
 description: Goal-driven end-to-end browser testing where Claude writes the test spec and judges the result, TypeSafe's Jev decision model picks every click/type/scroll from a numbered element table (jev-ultrafast style, one ~0.3 s request per decision), and Playwright executes. Use this whenever the user wants to test, verify, smoke-test, regression-test or explore a web UI flow (login, signup, checkout, search, forms, CRUD screens, admin panels) with Jev or TypeSafe, mentions jev-ultrafast or browser-use with Jev, asks for "fast/cheap AI browser tests", wants E2E tests that survive selector or layout changes, or needs fuzzy UI assertions like "the error message tells the user their card was declined". Also use it to triage an existing run (a result.json, trace.json or runs/ folder) into PASS / BUG / TEST_ISSUE / FLAKY, to reproduce a bug ticket as a rerunnable spec, or to ask whether a page is flaky. Do not use it for unit tests, API tests, or flows with fully stable selectors where plain Playwright already works.
+argument-hint: "[headed|headless] what to test"
 allowed-tools: Bash(${CLAUDE_SKILL_DIR}/.venv/bin/python ${CLAUDE_SKILL_DIR}/scripts/*)
 ---
 
@@ -85,8 +86,19 @@ URL, test account, the app's wording for success) and state your assumptions inl
 
 ```bash
 python $SKILL/scripts/run_test.py specs/<id>.json            # -> runs/<id>/<ts>/result.json + trace.json + steps/*.png
-python $SKILL/scripts/run_test.py specs/<id>.json --headed   # watch it, when debugging locally
+python $SKILL/scripts/run_test.py specs/<id>.json --headed   # a window opens: when the user wants to watch
 ```
+
+**Browser mode: the user chooses, you pass it on.** Invocation arguments: `$ARGUMENTS`. When their first word is
+`headed` or `headless` (`/jev-browser-test headed test the login`), that is the mode for the rest of the
+conversation and the remaining words are the request. Otherwise read the request itself: "show me", "watch",
+"open the browser", "I want to see it" mean `--headed`; "in the background", "hide the browser" mean
+`--headless`; nothing said means headless, the default. Pass the same flag to `run_suite.py` (a headed suite
+with `--workers 1`: one window at a time). `JEV_HEADED=1` in the user's `.env` is a standing preference the
+runner reads by itself; a flag beats it, and both beat the spec's `browser.headless`. The runner prints
+`browser: headed` or `browser: headless (...)` on stderr as it launches and keeps the mode in
+`trace.browser.headless`, so a window that no run announced is not this runner's. The first time you run in a
+conversation, name the mode in one clause ("headless; say *headed* to watch"); never ask which.
 
 Exit 0 = a pass (or, with `expect`, the declared result); 1 = any other outcome or `undetermined`; 2 = never a
 verdict: a spec problem, a missing key, a browser that would not launch, a start URL that did not load, a setup
@@ -218,6 +230,7 @@ request change nothing), so what *you* control is the number of round trips and 
 | Symptom | Cause / fix |
 |---|---|
 | `TYPESAFE_API_KEY is not set` | Export the key or put it in `.env` in the directory you run from |
+| No window appears, or one appears unannounced | The launch line says which mode ran: `browser: headed` or `browser: headless (...)`. Precedence: `--headed` / `--headless`, then `JEV_HEADED` in `.env`, then the spec's `browser.headless` (default true). A window no run announced belongs to another tool's browser, not to this runner |
 | exit 2 with "Spec problems" | Read the list: a `done_when` naming an unknown check, a check written as a question, a missing `${ENV}`, an `assert` of the wrong shape |
 | exit 2, `reason.phase: navigation` (`Page.goto: Timeout`) | The start URL did not load within `browser.navigation_timeout_ms` (30 s): a slow or unreachable host, or too many parallel workers on a shared one. Environment, never a bug: rerun sequentially, raise the timeout |
 | exit 2, `reason.phase: setup` (`setup[i] failed`) | The selector or `wait_for` in a setup step did not match; fix it or move that step into the goal |

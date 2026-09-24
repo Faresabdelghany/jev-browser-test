@@ -134,6 +134,27 @@ def substitute_env(value, missing: list[str]):
     return value
 
 
+HEADED_ENV = "JEV_HEADED"  # a standing preference in .env or the environment: 1/true/yes/on/headed, 0/false/no/off/headless
+_HEADED_WORDS = {"1", "true", "yes", "on", "headed"}
+_HEADLESS_WORDS = {"0", "false", "no", "off", "headless"}
+
+
+def resolve_headless(spec_headless: bool, headed: bool = False, headless: bool = False, env=None) -> bool:
+    """The browser mode for a launch. A CLI flag (`--headed` / `--headless`) wins; then `JEV_HEADED` in the
+    environment (loaded from .env by then); then the spec's `browser.headless`. An empty or unreadable
+    JEV_HEADED is ignored. Attached mode (`browser.cdp_url`) never looks at this: that browser is already open."""
+    if headed:
+        return False
+    if headless:
+        return True
+    word = ((os.environ if env is None else env).get(HEADED_ENV) or "").strip().lower()
+    if word in _HEADED_WORDS:
+        return False
+    if word in _HEADLESS_WORDS:
+        return True
+    return bool(spec_headless)
+
+
 def load_dotenv(path: str = ".env") -> list[str]:
     """Load KEY=VALUE lines from `path` into os.environ; variables already set win.
 

@@ -1309,6 +1309,7 @@ import json, os, sys, time
 spec_path, out_dir = sys.argv[1], sys.argv[sys.argv.index("--out") + 1]
 spec = json.load(open(spec_path))
 os.makedirs(os.path.join(out_dir, "steps"), exist_ok=True)
+json.dump(sys.argv[1:], open(os.path.join(out_dir, "argv.json"), "w"))  # what the suite passed through
 n = int(os.path.basename(out_dir))  # the repeat number
 if spec["id"] == "truncated" and n == 2:
     open(os.path.join(out_dir, "trace.json"), "w").write('{"spec_id": "truncated", "status": "pass')  # killed mid-write
@@ -1640,6 +1641,74 @@ class ReportTests(unittest.TestCase):
         self.assertIn("runs/smoke/1/trace.json", page)
         # without a result (an old trace) the page still renders
         self.assertIn("<h2>Steps</h2>", render_report({"spec_id": "old", "status": "passed", "steps": []}, None, {}))
+
+
+class BrowserModeTests(unittest.TestCase):
+    """Who decides headed or headless: a CLI flag, then JEV_HEADED in the environment, then the spec."""
+
+    def test_spec_decides_when_nothing_else_is_said(self) -> None:
+        from spec import resolve_headless
+        self.assertTrue(resolve_headless(True, env={}))
+        self.assertFalse(resolve_headless(False, env={}))
+
+    def test_cli_flags_beat_everything(self) -> None:
+        from spec import resolve_headless
+        self.assertFalse(resolve_headless(True, headed=True, env={"JEV_HEADED": "0"}))
+        self.assertTrue(resolve_headless(False, headless=True, env={"JEV_HEADED": "1"}))
+
+    def test_env_beats_the_spec(self) -> None:
+        from spec import resolve_headless
+        for v in ("1", "true", "yes", "on", "headed", " True "):
+            self.assertFalse(resolve_headless(True, env={"JEV_HEADED": v}), v)
+        for v in ("0", "false", "no", "off", "headless"):
+            self.assertTrue(resolve_headless(False, env={"JEV_HEADED": v}), v)
+
+    def test_unreadable_or_empty_env_falls_through_to_the_spec(self) -> None:
+        from spec import resolve_headless
+        self.assertTrue(resolve_headless(True, env={"JEV_HEADED": ""}))
+        self.assertFalse(resolve_headless(False, env={"JEV_HEADED": "maybe"}))
+
+    def test_env_defaults_to_the_process_environment(self) -> None:
+        from spec import resolve_headless
+        with mock.patch.dict(os.environ, {"JEV_HEADED": "1"}):
+            self.assertFalse(resolve_headless(True))
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(resolve_headless(True))
+
+    def test_runner_cli_refuses_both_flags(self) -> None:
+        from run_test import main as run_main
+        with mock.patch("sys.stderr"), self.assertRaises(SystemExit) as cm:
+            run_main(["run_test.py", "spec.json", "--headed", "--headless"])
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_suite_passes_the_mode_flag_to_every_runner(self) -> None:
+        import tempfile
+        from run_suite import main as suite_main
+        tmp = tempfile.mkdtemp(prefix="jev-suite-mode-")
+        runner = os.path.join(tmp, "fake_runner.py")
+        with open(runner, "w", encoding="utf-8") as f:
+            f.write(FAKE_RUNNER)
+        spec_path = os.path.join(tmp, "always-pass.json")
+        with open(spec_path, "w", encoding="utf-8") as f:
+            json.dump({"id": "always-pass", "start_url": "http://x/", "goal": "g"}, f)
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            self.assertEqual(suite_main(["run_suite.py", spec_path, "--repeat", "2", "--out", os.path.join(tmp, "headed"),
+                                         "--runner", runner, "--headed"]), 0)
+            self.assertEqual(suite_main(["run_suite.py", spec_path, "--out", os.path.join(tmp, "headless"),
+                                         "--runner", runner, "--headless", "--run-arg=--no-screenshots"]), 0)
+            with self.assertRaises(SystemExit) as cm:
+                suite_main(["run_suite.py", spec_path, "--runner", runner, "--headed", "--headless"])
+            self.assertEqual(cm.exception.code, 2)
+        for n in ("01", "02"):
+            with open(os.path.join(tmp, "headed", "always-pass", n, "argv.json"), encoding="utf-8") as f:
+                argv = json.load(f)
+            self.assertIn("--headed", argv, argv)
+            self.assertNotIn("--headless", argv)
+        with open(os.path.join(tmp, "headless", "always-pass", "01", "argv.json"), encoding="utf-8") as f:
+            argv = json.load(f)
+        self.assertIn("--headless", argv, argv)
+        self.assertIn("--no-screenshots", argv, argv)  # --run-arg still works alongside
+        self.assertNotIn("--headed", argv)
 
 
 if __name__ == "__main__":
