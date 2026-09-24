@@ -2,11 +2,11 @@
   "id": "hrm-add-employee",
   "comment": "OrangeHRM's public demo (Admin / admin123, printed on its login page): a real admin panel. Login is scripted in setup; Jev then navigates the sidebar (PIM, Add Employee), fills two of three name fields and saves, and the pass is the new employee's Personal Details page. Exercises a slow single-page app with loading overlays (the form's fields are `covered_controls` for a moment after the route change, and again while Save is in flight), a long permanent sidebar of menu entries with its own Search box, and field_value on the saved record. On two workers the suite opened two forms in the same second, both pre-filled with Employee Id 0684, and the second Save was rejected with 'Employee Id already exists' (a race in the app, now the `employee_id_taken` outcome): run it with --workers 1. settle_ms 2500 because the demo's Save takes about four seconds to navigate; the sidebar Search box was where Jev typed the first name before the observer reported covered controls. Budget 24 steps / 240 s (was 16 / 200): in a slow hour of the demo (a module page answering in 9-17 s, the Save's spinner 5-8 s) the flow needs about 18 steps, a slow navigation, a deferred typing and Jev's hesitation on the covered form, the Save's waits and two confirmation looks; 16 ended two runs at the confirmation (done_unverified, budget_exhausted) with the record saved.",
   "start_url": "https://opensource-demo.orangehrmlive.com/web/index.php/auth/login",
-  "goal": "Open PIM from the sidebar, then Add Employee, type the given first name and last name, and click Save, so that the new employee's Personal Details page shows the name 'Jevtest Runner'.",
+  "goal": "Open PIM from the sidebar, then Add Employee, type the given first name and last name, and click Save, so that the new employee's Personal Details page shows the name 'Jevtest Runner${RUN_STAMP}'.",
   "notes": "The left sidebar lists the modules; PIM is the employee module, and its top row has Employee List, Add Employee and Reports. The sidebar's Search box only filters the menu entries: never type into it. After Add Employee is clicked the form takes a moment to load; type the names only once the First Name, Middle Name and Last Name fields are shown, and leave Middle Name and the Employee Id as they are. Do not turn on 'Create Login Details'. A spinner shows for a moment after Save before the Personal Details page appears.",
   "data": {
     "first_name": "Jevtest",
-    "last_name": "Runner"
+    "last_name": "Runner${RUN_STAMP}"
   },
   "setup": [
     {
@@ -40,7 +40,7 @@
   },
   "outcomes": {
     "employee_saved": {
-      "when": "The page heading says 'Personal Details'. The employee name 'Jevtest Runner' is shown",
+      "when": "The page heading says 'Personal Details'. The employee name 'Jevtest Runner${RUN_STAMP}' is shown",
       "verdict": "pass"
     },
     "employee_id_taken": {
@@ -76,7 +76,7 @@
     {
       "field_value": {
         "label": "Last Name",
-        "equals": "Runner"
+        "equals": "Runner${RUN_STAMP}"
       }
     }
   ],

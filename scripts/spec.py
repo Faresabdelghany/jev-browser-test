@@ -530,7 +530,7 @@ def main(argv: list[str]) -> int:
         print(f"  assert: {len(spec['assert'])} assertion(s) on the final page")
     print(f"  data keys: {list(spec['data'])}  secrets: {spec['secrets']}")
     if spec.get("run_stamp"):
-        print(f"  run stamp: {spec['run_stamp']} (a fresh ${{RUN_STAMP}} every run; export RUN_STAMP to pin it)")
+        print(f"  run stamp: {spec['run_stamp']} (this validation's example; every run makes its own ${{RUN_STAMP}}, export RUN_STAMP to pin one)")
     print(f"  budget: {spec['budget']}")
     return 0
 

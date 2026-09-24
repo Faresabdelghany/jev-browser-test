@@ -67,22 +67,25 @@ python $SKILL/scripts/scaffold.py --url https://app.example.com/ \
   --data first_name=Jevtest --data 'last_name=Runner${RUN_STAMP}' \
   --setup 'fill:input[name=username]=Admin' --setup 'fill:input[name=password]=${HRM_PASSWORD}' \
   --setup 'click:button[type=submit]' --setup 'wait_for_url:**/dashboard/**' \
-  --bug "A red 'Required' message is shown under a field after Save" \
+  --bug "required_error=A red 'Required' message is shown under a field after Save" --after 'click:Save' \
   --assert-url '**/viewPersonalDetails/**' --assert-in '.orangehrm-edit-employee-name|Jevtest' --slow --out specs/<id>.json
 ```
 
 Single quotes around anything with `${...}` (the shell must not expand it: the runner does, at run time).
 
 It writes a spec that already validates (goal, data, a `pass` outcome from the goal's "so that" clause, your `bug`
-outcomes with `requires_action`, the standing `app_error`, your assertions and setup steps, `--slow` for a slow
-single-page app), prints `spec.py`'s summary, and leaves nothing invented: no assertion unless you gave one, `${ENV}`
-kept for run time. Then edit the twenty lines that matter, guided by the field notes below; open
+outcomes with `requires_action`, named `name=statement` and held by `--after click:Save` until that click ran, the
+standing `app_error`, your assertions and setup steps, `--slow` for a slow single-page app, `--comment` for the spec's
+own comment in place of the editing guidance), prints `spec.py`'s summary, and leaves nothing invented: no assertion
+unless you gave one, `${ENV}` kept for run time. Then edit the twenty lines that matter, guided by the field notes below; open
 `references/spec-format.md` only for a field the scaffold's `comment` does not explain.
 
 - **goal** — what you would tell a tester in one breath, ending with the visible outcome.
 - **data** — every string the flow might type. Jev chooses *which* value; a missing one surfaces as `BLOCKED`.
   Credentials go through `${ENV_VAR}` + `secrets`, and preferably through `setup` so they never reach Jev. A
-  credential the site itself publishes (a demo account printed on its login page) may be written plainly. Any
+  credential the site itself publishes (a demo account printed on its login page) may be written plainly; a value
+  the test invents that looks like one (a sign-up's new password) stays listed under `secrets` all the same, because
+  the trace and the report travel into tickets. Any
   value the app **keeps** (a username, a last name, a title, an id) gets **`${RUN_STAMP}`** in it
   (`"username": "jev${RUN_STAMP}"`): the runner substitutes a fresh eight-character stamp every run and repeat,
   so nothing collides with what an earlier run created, and `result.run_stamp` says which value it was. Export
@@ -129,7 +132,9 @@ conversation, name the mode in one clause ("headless; say *headed* to watch"); n
 
 Exit 0 = a pass (or, with `expect`, the declared result); 1 = any other outcome or `undetermined`; 2 = never a
 verdict: a spec problem, a missing key, a browser that would not launch, a start URL that did not load, a setup
-step that failed (`result.reason.phase`). Fix a 2 first; it is never a bug.
+step that failed (`result.reason.phase`). Fix a 2 first; it is never a bug. A local app needs its own server
+(`python3 -m http.server` from its folder is outside the skill's pre-approved commands, so it may prompt): start it
+before the first run and stop it when you are done.
 
 **Run once, read, then decide.** One run answers "does this flow work". Rerun only after you read the result: a
 rerun that passes tells you nothing about why the first one failed. A suite (below) answers "is it stable" with
@@ -153,7 +158,9 @@ was gone before the runner looked), `story`, and for `undetermined` the `reason`
 `confirmed_by: recheck` on a spec that has assertions means the pass was not yet in sight when Jev chose DONE
 (the outcome read below 0.8), so the runner took the checking step and saw it there: correct, one request more.
 Open the step table only for `undetermined` or a surprising outcome. Flags worth knowing: `NO-EFFECT` (an
-action landed and the page did not change: the classic dead control; the next step's picture shows it),
+action landed and the page did not change: the classic dead control; the next step's picture shows it; with
+`IN-FLIGHT` beside it the next look showed a blank layer or a toast, so the click landed and the app was working on
+it, a Save on a single-page app, not a dead control),
 `DEFERRED:<outcome>` (true of the page, but its `requires_action` / `after` condition has not happened yet: not
 counted), `COVERED:<n>` (controls on screen but under another layer, so not offered; plain, the layer is blank and the
 form is still loading; `(layer:<m>)`, the layer has controls of its own, a dialog or an open list), `DEFERRED-<OP>:<n>` (a
@@ -163,7 +170,9 @@ page; `DEFER-LIMIT:5` when it then went ahead; `DEFERRED-<OP>:loading` while an 
 live message appeared between the previous observation and this one; Jev saw it in its state for this and the next
 two steps, faded or not), `SLOW-NAV:<s>` (the click landed; the page it asked for answered after the action timeout: a
 slow host, not a failure), `RECHECK:<n>` / `ASSERT-PENDING:<n>` (a pass in sight on a page still busy, looked at again),
-`LOW-CONF`, `STALE`, `EVIDENCE-ASKED`. With the
+`LOW-CONF`, `STALE`, `EVIDENCE-ASKED`. In the operation column, `(not run)` marks a decision the runner turned into
+a wait (a marginal or deferred action, an undecided step) and `AUTO_DONE` a pass the runner confirmed itself when its
+outcome came into sight, without Jev choosing DONE. With the
 default `screenshots: "key"` the terminal step, every flagged step and the step after a no-effect action have a
 `steps/NNN.png`; `--screenshots all` pictures every step on a rerun. The one reading rule: the checks recorded
 in step *n* describe the page **before** action *n*; action *n*'s effect shows in step *n+1*. After a no-effect
@@ -191,7 +200,9 @@ When the verdict is **BUG** and the app's repository is available: locate the co
 the element Jev clicked, the failed check, the visible error text), fix it the way that codebase is fixed, re-run
 the **same spec** against the fixed build (red must turn green with the same actions), and offer the fix, both
 traces and the summary tables as the PR and ticket evidence. Never change the app to make a wrong spec pass, and
-never loosen a spec to get green: that is a TEST_ISSUE wearing a BUG's clothes. **TEST_ISSUE**: the fix is in the
+never loosen a spec to get green: that is a TEST_ISSUE wearing a BUG's clothes. A fix is shown twice: the same spec
+green, and the guard it touched still guarding (one run, or a scripted check, with the input the rule must reject),
+because a fix that deletes a validation also turns red green. **TEST_ISSUE**: the fix is in the
 spec (two revisions, then NEEDS_HUMAN). **FLAKY**: a `wait_for` in `setup`, a longer `navigation_timeout_ms`, or
 an outcome anchored on better text. **NEEDS_HUMAN**: stop and ask the specific question.
 
@@ -222,7 +233,9 @@ Handed a run folder (`result.json`, `trace.json`, screenshots), the answer is in
    is that one rerun, so make it after the spec fix, not before it.
 3. To separate TEST_ISSUE from BUG cheaply, run a **control**: the same spec with a known-good account, or the
    sibling spec known to pass. One run, ~10 Jev calls. Prefer it to reading the app's source, which was not asked
-   for and rarely changes the verdict.
+   for and rarely changes the verdict. The same control settles "test problem or slow host" on a `done_unverified`
+   or timed-out red: the unchanged spec, once; green means the host (FLAKY / environment, both traces attached),
+   the same red again means the spec's timing budget (TEST_ISSUE: raise `navigation_timeout_ms` or `settle_ms`).
 4. One triage = one reading, at most one rerun and one control. Report how many runs you made.
 
 ## Suites: anything longer than one spec

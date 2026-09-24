@@ -1,14 +1,15 @@
 """Scaffold a spec from a URL, a goal and the data values, so the first run costs an edit, not an authoring.
 
     python scripts/scaffold.py --url URL --goal "..." [--data key=value ...] [--out specs/<id>.json]
-        [--id ID] [--secret key ...] [--pass "when"] [--bug "when" ...] [--needs-human "when" ...]
+        [--id ID] [--secret key ...] [--pass "when"] [--bug "[name=]when" ...] [--needs-human "[name=]when" ...] [--after "click:text"]
         [--assert-url GLOB] [--assert-text TEXT ...] [--assert-in "css|text" ...]
         [--setup "fill:css=value" | "click:css" | "press:css=Key" | "select:css=value" | "wait_for:css" | "wait_for_url:glob" | "goto:url" ...]
-        [--notes "..."] [--slow] [--stdout] [--force]
+        [--notes "..."] [--comment "..."] [--slow] [--stdout] [--force]
 
 The result is a spec that validates as the runner loads it (`spec.py` is run on it before it is written): the goal,
 the data, a `pass` outcome (the goal's "so that ..." clause, or `--pass`), one `bug` outcome per `--bug` (with
-`requires_action`, since a wrong message is never on the start page), the standing `app_error` bug outcome, the
+`requires_action`, since a wrong message is never on the start page; `name=when` names it, else its first words do;
+`--after click:Text` holds every bug outcome until that action ran), the standing `app_error` bug outcome, the
 assertions and setup steps given, and only the non-default settings. Nothing is invented: no assertion is emitted
 unless one was given (a trivial one would confirm a pass at first sighting), and a `${ENV}` that is not set yet is
 kept as written and resolved at run time. Keys that look like credentials (password, secret, token, pin) are listed
@@ -63,6 +64,29 @@ def outcome_name(when: str, taken: set[str]) -> str:
     while name in taken:
         name, n = f"{base}_{n}", n + 1
     return name
+
+
+NAMED_RE = re.compile(r"^([a-z][a-z0-9_]*)=(.+)$", re.S)
+AFTER_OPS = ("click", "type", "select")
+
+
+def named(text: str) -> tuple[str | None, str]:
+    """`name=when` gives an outcome its name (a lowercase identifier before the first '='); a bare statement, or an
+    '=' inside a sentence ('total=0 is shown'), is all statement and the name comes from its first words."""
+    m = NAMED_RE.match(text.strip())
+    if m:
+        return m.group(1), m.group(2).strip()
+    return None, text.strip()
+
+
+def parse_after(text: str | None) -> dict | None:
+    """`--after click:Create account` -> {"click": "Create account"}: the action a bug outcome only means something after."""
+    if text is None:
+        return None
+    op, sep, value = text.partition(":")
+    if not sep or op.strip() not in AFTER_OPS or not value.strip():
+        raise ScaffoldError(f"--after wants op:text with op one of {', '.join(AFTER_OPS)}, e.g. 'click:Create account'; got {text!r}")
+    return {op.strip(): value.strip()}
 
 
 def pass_statement(goal: str) -> str:
@@ -149,12 +173,13 @@ def build(args: argparse.Namespace) -> dict:
             raise ScaffoldError(f"--secret {s!r} is not a --data key")
     spec: dict = {
         "id": args.id or slug(goal),
-        "comment": (f"Scaffolded by scripts/scaffold.py on {date.today().isoformat()} from a URL, a goal and {len(data)} data "
+        "comment": args.comment.strip() if args.comment else (f"Scaffolded by scripts/scaffold.py on {date.today().isoformat()} from a URL, a goal and {len(data)} data "
                     f"value(s). Edit before the first run: the pass outcome's `when` (one visible fact per sentence, the app's "
                     f"own words), an `assert` block with at least one exact check on the final page, `notes` for Jev about the "
                     f"page, and put the {RUN_STAMP_VAR} placeholder (a dollar sign and braces around the name) into any data value the app keeps. "
-                    + ("Keys that look like credentials were listed in `secrets`; give them environment-variable placeholders "
-                       "(the form spec-format.md shows under `data`) unless the app publishes them. " if secrets else "")
+                    + ("Keys that look like credentials were listed in `secrets`, so their values are masked in the trace and the report: "
+                       "give real ones environment-variable placeholders (the form spec-format.md shows under `data`) unless the app "
+                       "publishes them, and keep invented ones (a sign-up's new password) listed, since traces travel into tickets. " if secrets else "")
                     + "references/spec-format.md has every field."),
         "start_url": args.url,
         "goal": goal,
@@ -168,11 +193,19 @@ def build(args: argparse.Namespace) -> dict:
     setup = parse_setup(args.setup, args.slow)
     if setup:
         spec["setup"] = setup
+    after = parse_after(args.after)
     outcomes: dict = {"goal_reached": {"when": (args.pass_when or pass_statement(goal)).strip(), "verdict": "pass"}}
-    for when in args.bug:
-        outcomes[outcome_name(when, set(outcomes))] = {"when": when.strip(), "verdict": "bug", "requires_action": True}
-    for when in args.needs_human:
-        outcomes[outcome_name(when, set(outcomes))] = {"when": when.strip(), "verdict": "needs_human"}
+
+    def add(raw: str, outcome: dict) -> None:
+        name, when = named(raw)
+        if name in outcomes or name == "app_error":
+            raise ScaffoldError(f"two outcomes named {name!r} (app_error is the standing one)")
+        outcomes[name or outcome_name(when, set(outcomes))] = {"when": when, **outcome}
+
+    for raw in args.bug:
+        add(raw, {"verdict": "bug", "requires_action": True, **({"after": after} if after else {})})
+    for raw in args.needs_human:
+        add(raw, {"verdict": "needs_human"})
     outcomes["app_error"] = dict(APP_ERROR)
     spec["outcomes"] = outcomes
     assertions: list[dict] = []
@@ -216,14 +249,18 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--data", action="append", default=[], metavar="KEY=VALUE", help="a value Jev may type (repeatable)")
     ap.add_argument("--secret", action="append", default=[], metavar="KEY", help="a data key to mask (credential-like keys are added by themselves)")
     ap.add_argument("--pass", dest="pass_when", metavar="WHEN", help="the pass outcome's statement (default: the goal's 'so that' clause)")
-    ap.add_argument("--bug", action="append", default=[], metavar="WHEN", help="a wrong ending, as a statement about the page (repeatable)")
-    ap.add_argument("--needs-human", action="append", default=[], metavar="WHEN", help="an ending only a human can take further (repeatable)")
+    ap.add_argument("--bug", action="append", default=[], metavar="[NAME=]WHEN",
+                    help="a wrong ending, as a statement about the page (repeatable); name=statement names the outcome, else its first words do")
+    ap.add_argument("--needs-human", action="append", default=[], metavar="[NAME=]WHEN", help="an ending only a human can take further (repeatable)")
+    ap.add_argument("--after", metavar="OP:TEXT",
+                    help="hold every --bug outcome until this action ran (click:Create account, type:..., select:...): a wrong message only counts after the decisive click")
     ap.add_argument("--assert-url", metavar="GLOB", help="url_matches on the final page (** any, * no slash)")
     ap.add_argument("--assert-text", action="append", default=[], metavar="TEXT", help="text_contains on the final page (repeatable)")
     ap.add_argument("--assert-in", action="append", default=[], metavar="CSS|TEXT", help="text_in: the text inside a CSS-selected element (repeatable)")
     ap.add_argument("--setup", action="append", default=[], metavar="STEP",
                     help="a deterministic step before Jev: fill:css=value, click:css, press:css=Key, select:css=value, wait_for:css, wait_for_url:glob, goto:url")
     ap.add_argument("--notes", help="hints Jev reads every step, about the page and the flow")
+    ap.add_argument("--comment", help="the spec's own comment (the ticket, what it checks); default: the scaffold's editing guidance")
     ap.add_argument("--slow", action="store_true", help="the slow single-page-app preset: settle 2500 ms, quiet 200 ms, 45 s navigation, 30 steps / 360 s")
     ap.add_argument("--out", help="where to write (default specs/<id>.json)")
     ap.add_argument("--stdout", action="store_true", help="print the spec instead of writing a file")

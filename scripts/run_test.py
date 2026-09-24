@@ -781,6 +781,14 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
         if status == "assert_failed":
             result["reason"]["outcome_seen"] = (final.get("outcome") or {}).get("name")
             result["reason"]["failed_assertions"] = [a for a in result["assertions"] if not a["ok"]]
+        if status == "done_unverified":
+            # The last look that evaluated the assertions while a pass was in sight: which held (the record's URL) and
+            # which did not yet (the name under a loader). Live, a slow hour: the URL assertion held on the new employee's
+            # page two looks before the run gave up, and only the trace said so.
+            last = next((s for s in reversed(steps) if s.get("assertions_checked")), None)
+            if last:
+                result["reason"]["last_look_step"] = last["n"]
+                result["reason"]["assertions_at_last_look"] = last["assertions_checked"]
         if status == "budget_exhausted" and terminal.get("pending_outcome"):
             # a pass first seen on the final look: the budget ran out before it could be rechecked
             result["reason"]["pending_outcome"] = terminal["pending_outcome"]
@@ -1260,6 +1268,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                             step["recheck_again"] = pending["rechecks"]
                             step["recheck_waited_ms"] = pending["waited_ms"]  # the confirmation's waits so far, against navigation_timeout_ms on a busy page
                             step["assertions_pending"] = [a for a in checked if not a["ok"]]
+                            step["assertions_checked"] = checked  # the whole evaluation: result.reason.assertions_at_last_look if the run ends unverified
                             final.setdefault("first_seen_at_step", n)
                             park(step, "pass in sight but the page is still busy and the assertions do not hold yet; looking again",
                                  wait_entry(n, was["action"], "the page was still busy while the result was being checked; checking again"), sig,
@@ -1310,6 +1319,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                             settle_pass(page, step, obs, passes[0], "AUTO_DONE", jev, assertions=checked)
                             break
                         step["assertions_pending"] = [a for a in checked if not a["ok"]]  # not yet: the recheck decides
+                        step["assertions_checked"] = checked
                     confirm_later(passes[0]["name"], "AUTO_DONE", f"confirming outcome {passes[0]['name']}", "WAIT")
                     continue
 

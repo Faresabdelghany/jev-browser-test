@@ -50,7 +50,7 @@ def _fmt_checks(checks: dict, spec: dict) -> str:
     return " ".join(parts)
 
 
-def _flags(step: dict) -> str:
+def _flags(step: dict, nxt: dict | None = None) -> str:
     f = []
     if step.get("low_confidence"):
         f.append("LOW-CONF")
@@ -114,6 +114,10 @@ def _flags(step: dict) -> str:
         f.append("RETRIED")
     if step.get("error"):
         f.append("ERROR")
+    if "NO-EFFECT" in f and nxt and ((nxt.get("covered_controls") and not nxt.get("layer_controls")) or nxt.get("announcements")):
+        # the next look showed a blank layer over the controls or a toast: the click landed and the app was working on it
+        # (a Save in flight on a single-page app), which a dead control never shows; read NO-EFFECT alone as the dead control
+        f.append("IN-FLIGHT")
     return " ".join(f)
 
 
@@ -164,7 +168,8 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
     lines.append(f"  end:   {final.get('url')}  \"{final.get('title')}\"")
     lines.append("")
     lines.append(f"{'#':>3}  {'operation':<20} {'target / value':<58} {'conf op/tgt/val':<16} checks  flags")
-    for s in trace.get("steps", []):
+    steps = trace.get("steps", [])
+    for i, s in enumerate(steps):
         op = (s.get("operation") or {}).get("choice", "?")
         ex = s.get("executed") or {}
         if ex.get("action") in ("AUTO_DONE", "STOP", "DONE", "BLOCKED"):
@@ -189,7 +194,7 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
         if len(target) > 58:
             target = target[:55] + "..."
         lines.append(
-            f"{s['n']:>3}  {op:<20} {target:<58} {_fmt_conf(s):<16} {_fmt_checks(s.get('checks', {}), spec)}  {_flags(s)}".rstrip()
+            f"{s['n']:>3}  {op:<20} {target:<58} {_fmt_conf(s):<16} {_fmt_checks(s.get('checks', {}), spec)}  {_flags(s, steps[i + 1] if i + 1 < len(steps) else None)}".rstrip()
         )
     lines.append("")
     lines.append("final checks: " + _fmt_checks(final.get("checks", {}), spec))

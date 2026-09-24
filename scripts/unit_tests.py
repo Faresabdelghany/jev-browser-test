@@ -1080,6 +1080,28 @@ class OutcomePolicyTests(unittest.TestCase):
                          outcomes, {**final, "outcome": {"name": "err", "verdict": "bug"}, "seen_at_step": 3}, "out")
         self.assertEqual((r["outcome"], r["outcomes_seen_earlier"]), ("err", []))  # the result itself is not "earlier"
 
+    def test_done_unverified_surfaces_the_assertions_of_the_last_look(self) -> None:
+        # Live (1b69699, a slow hour): the record page stayed under its loader through the confirmation looks and the run
+        # ended done_unverified with result.assertions empty, although step 16 had evaluated them: the URL held (the new
+        # employee's page), the name had not rendered yet. That evaluation is the strongest evidence and belongs in result.json.
+        from run_test import build_result
+        checked = [{"url_matches": "**/viewPersonalDetails/**", "ok": True, "actual": "https://x/viewPersonalDetails/empNumber/339"},
+                   {"text_contains": "Jevtest Runner", "ok": False, "actual": None}]
+        steps = [{"n": 11, "operation": {"choice": "CLICK"}, "executed": {"action": "CLICK", "ok": True}, "decision_confidence": 0.94, "target": {"label": "Save"}},
+                 {"n": 16, "operation": {"choice": "DONE"}, "executed": {"action": "WAIT", "ok": True, "reason": "confirming DONE"},
+                  "pending_outcome": "employee_saved", "recheck_again": 3, "assertions_pending": [checked[1]], "assertions_checked": checked},
+                 {"n": 17, "operation": {"choice": "DONE"}, "executed": {"action": "WAIT", "ok": True, "reason": "confirming DONE"}, "recheck_again": 4},
+                 {"n": 18, "operation": {"choice": "DONE"}, "executed": {"action": "DONE", "ok": True, "confirmed": True}}]
+        trace = {"status": "done_unverified", "steps": steps, "duration_ms": 99500, "usage": {}, "final": {}}
+        final = {"outcome": None, "seen_at_step": None, "confirmed": False, "assertions": [], "adjudication": None}
+        r = build_result(trace, {"id": "hrm"}, {"employee_saved": {"verdict": "pass"}}, final, "out")
+        self.assertEqual(r["outcome"], "undetermined")
+        self.assertEqual(r["reason"]["status"], "done_unverified")
+        self.assertEqual(r["reason"]["last_look_step"], 16)
+        self.assertEqual(r["reason"]["assertions_at_last_look"], checked)
+        r = build_result({**trace, "steps": steps[:1] + steps[3:]}, {"id": "hrm"}, {}, dict(final), "out")
+        self.assertNotIn("assertions_at_last_look", r["reason"])  # no look evaluated them: nothing to surface
+
     def test_suggested_verdict_table(self) -> None:
         from policy import suggested_verdict
         self.assertEqual(suggested_verdict("blocked", ["missing_data_value"]), "test_issue")
@@ -1540,6 +1562,25 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(_flags({"outcome_deferred": ["unchanged"]}), "DEFERRED:unchanged")
         self.assertEqual(_flags({"adjudication_merged": True}), "EVIDENCE-ASKED")
         self.assertEqual(_flags({}), "")
+
+    def test_no_effect_is_read_as_in_flight_when_the_next_look_shows_a_blank_layer_or_a_toast(self) -> None:
+        # Live: a Save on a single-page app changes nothing for 2.5 s, then the spinner covers the form and the toast
+        # says Successfully Saved. To a reader NO-EFFECT alone says "dead control"; the next step says otherwise.
+        from summarize_trace import _flags, summarize
+        save = {"n": 11, "no_effect": True, "executed": {"action": "CLICK", "ok": True}}
+        self.assertEqual(_flags(save, {"covered_controls": 9}), "NO-EFFECT IN-FLIGHT")
+        self.assertEqual(_flags(save, {"announcements": [{"text": "Success Successfully Saved"}]}), "NO-EFFECT IN-FLIGHT")
+        self.assertEqual(_flags(save, {"covered_controls": 3, "layer_controls": 2}), "NO-EFFECT")  # a dialog opened: its own flags say so
+        self.assertEqual(_flags(save, {}), "NO-EFFECT")
+        self.assertEqual(_flags(save), "NO-EFFECT")
+        self.assertEqual(_flags({"executed": {"action": "CLICK", "ok": True}, "page_changed": True}, {"covered_controls": 9}), "")
+        trace = {"spec_id": "x", "status": "done_unverified", "steps": [
+            dict(save, operation={"choice": "CLICK"}, target={"label": "[27] button \"Save\""}),
+            {"n": 12, "operation": {"choice": "WAIT"}, "executed": {"action": "WAIT", "ok": True}, "covered_controls": 9}],
+            "usage": {}, "duration_ms": 1, "spec": {}, "final": {}}
+        table = summarize(trace)
+        self.assertIn("NO-EFFECT IN-FLIGHT", table)
+        self.assertIn("COVERED:9", table)
 
     def test_result_flag_without_result_json(self) -> None:
         import tempfile
@@ -2024,6 +2065,39 @@ class ScaffoldTests(unittest.TestCase):
             {"action": "select", "selector": "select#role", "value": "ESS"}])
         self.assertEqual(spec["browser"], {"settle_ms": 2500, "quiet_ms": 200, "navigation_timeout_ms": 45000})
         self.assertEqual(spec["budget"], {"max_steps": 30, "max_seconds": 360})
+
+    def test_a_named_bug_outcome_keeps_its_name_and_after_holds_every_bug_until_the_action(self) -> None:
+        # Eval 5 (2026-09-24): the scaffold keyed the bug outcome on the statement's first words (a_red_message_says)
+        # and had no way to emit `after`, so both were hand edits on a spec meant to need twenty lines of editing.
+        code, spec, out = self.run_scaffold(
+            "--url", "http://127.0.0.1:8765/", "--goal", "Fill the sign-up form and click Create account, so that a green message says Welcome",
+            "--data", "work_email=jev${RUN_STAMP}@example.com",
+            "--bug", "email_rejected=A red message says Enter a valid work e-mail address.",
+            "--bug", "A message says total=0 is shown",  # an '=' inside a statement is not a name
+            "--needs-human", "captcha=A CAPTCHA is shown",
+            "--after", "click:Create account", "--comment", "QA ticket 412: the confirmation never shows.")
+        self.assertEqual(code, 0, out)
+        assert spec is not None
+        self.assertEqual(spec["outcomes"]["email_rejected"], {"when": "A red message says Enter a valid work e-mail address.", "verdict": "bug",
+                                                              "requires_action": True, "after": {"click": "Create account"}})
+        self.assertEqual(spec["outcomes"]["a_message_says_total"]["when"], "A message says total=0 is shown")
+        self.assertEqual(spec["outcomes"]["a_message_says_total"]["after"], {"click": "Create account"})
+        self.assertEqual(spec["outcomes"]["captcha"], {"when": "A CAPTCHA is shown", "verdict": "needs_human"})  # after is for bug outcomes
+        self.assertNotIn("after", spec["outcomes"]["goal_reached"])
+        self.assertNotIn("after", spec["outcomes"]["app_error"])
+        self.assertEqual(spec["comment"], "QA ticket 412: the confirmation never shows.")
+        code, _, out = self.run_scaffold("--url", "http://x/", "--goal", "Do the thing, so that it is done", "--bug", "email_rejected=A", "--bug", "email_rejected=B")
+        self.assertEqual(code, 2); self.assertIn("email_rejected", out)
+        code, _, out = self.run_scaffold("--url", "http://x/", "--goal", "Do the thing, so that it is done", "--after", "Create account")
+        self.assertEqual(code, 2); self.assertIn("--after", out)
+
+    def test_the_generated_comment_says_an_invented_password_stays_masked(self) -> None:
+        code, spec, out = self.run_scaffold("--url", "http://x/", "--goal", "Sign up with the given values, so that a welcome is shown",
+                                            "--data", "password=Sunny-Harbour-2026")
+        self.assertEqual(code, 0, out)
+        assert spec is not None
+        self.assertEqual(spec["secrets"], ["password"])
+        self.assertIn("invented", spec["comment"])
 
     def test_credential_like_keys_become_secrets_and_a_missing_env_var_is_no_error_at_scaffold_time(self) -> None:
         code, spec, text = self.run_scaffold("--url", "http://x/", "--goal", "Log in so that the dashboard opens",
