@@ -881,3 +881,46 @@ timed out at 40 s; `hrm-leave-assign` run 2: the seed employee's Save navigation
 (6 s), `hrm-pim-add-employee-list` 3/3 (20 s). Thirteen deferrals, eleven steps with a 'Searching....' row counted and
 not offered (`LOADING:n`), six confirmation rechecks, none exhausted. Against the day: 3/15 in the midday slow hour at
 `9edd768`, 11/15 as the demo recovered at `6f9c5be`, 13/15 in a slow hour at `1b69699`, 12/15 at `6deea29`, 13/13 here.
+
+## Skill eval iteration 3 and the observer changes (2026-09-24, late afternoon): `d30a966` → `b92b24f` → `152a7f5`
+
+Three new skill-eval prompts (ids 3–5 in `evals/evals.json`, with-skill arm only, one run each from a clean export of
+`d30a966`; workspace `~/Downloads/jev-browser-test-workspace/iteration-3/`, `benchmark.json`, `review.html`): the
+close-the-loop path on a local sign-up page with a planted inverted e-mail rule (9/11: red, a one-character fix, the same
+spec green in two runs; no check that a malformed e-mail is still rejected after the fix, `secrets` removed on an invented
+password), the triage of the `1b69699` slow-hour `done_unverified` (11/11: not a bug, one control run, FLAKY/environment
+with both traces), and a Recruitment add-candidate-then-search on the slow demo (10/11 after rewording the two
+assertions that assumed a pass, 8/11 as first written: the demo's candidate-name type-ahead answers 'No Records Found'
+for a full name, its API matching one name part, shown by a plain-Playwright probe; BUG; three undetermined runs, no
+declared ending at the two-revision bound). Mean 143k tokens and 795 s a run (iteration 2: 139k, 729 s on the three
+older prompts). The agents' notes became `103c62f` (scaffold `--bug name=`, `--after`, `--comment`; `NO-EFFECT
+IN-FLIGHT`; `reason.assertions_at_last_look`; the SKILL.md and troubleshooting text) and `b92b24f` (form controls and
+buttons below the first screen offered marked `(below the fold)`, icon-only controls named from their class, layer
+controls counted only over the covered region so a fixed top bar above a full-page loader leaves the layer blank, a
+wheel fallback for SCROLL_DOWN, the `--slow` preset at 40 steps / 480 s, a `suggestion_not_found` outcome in the two
+autocomplete examples).
+
+**The seventeen non-OrangeHRM specs at `b92b24f`** (`2026-09-24-examples-suite-b92b24f-seventeen.*`, 3 repeats, 2
+workers, 298 s): ten pass 3/3, three expected 3/3, `shop-checkout-problem-account` bug 3/3, `notify-random` and
+`menu-random` flaky by design, three navigation timeouts on the-internet (its slow hour: `add-remove-elements` 2/2 beside
+one, `menu-random` 1/1 beside one), and `dynamic-controls` 1 pass, 1 timeout, 1 `low_confidence`: Enable was clicked at
+0.54 while the Remove loader still ran, the finished page then showed 'It's enabled!' without 'It's gone!', and the
+two-message pass wording read 0.65–0.67 with DONE hovering at 0.53–0.58. Rerun ×3 on one worker
+(`2026-09-24-dynamic-controls-b92b24f-rerun.*`): 2 pass (both messages on the finished page, 9 requests, 8–16 s), 1
+`low_confidence` in 6.8 s: three undecided looks (WAIT against CLICK Enable) during the Remove loader, on a page the
+observer changes do not touch (no layer, no icon, no control below the fold; the element table is the one earlier
+suites saw). The loader is text and a bar, not a layer, so the undecided looks get no extra turns: the candidate fix
+is to read a visible loading indicator (`role=progressbar`, an id or class saying loading / spinner / progress) as
+`page_loading` too. `wiki-search` stays at 4 requests and 34.3k tokens: the below-fold offer excludes links, so a long
+article's table did not grow. `toolshop-search-cart` 11 requests (was 10).
+
+**The five OrangeHRM specs at `b92b24f`** (`2026-09-24-examples-suite-b92b24f-hrm.*`, 3 repeats, 1 worker, 492 s, a
+normal hour, 0.3–0.5 s a page): `hrm-add-employee` 3/3 (15.0 s, 10 requests, its last name now `Runner${RUN_STAMP}`),
+`hrm-login` 3/3 (6.7 s), `hrm-pim-add-employee-list` 3/3 (23.2 s, 22 requests: the new outcome is one more option in
+the Choice), and the two seeded specs 0/3 in their setup, all six at the same `wait_for a[href*="/leave/"]` after the
+seed: a visitor of the public demo had switched the **Leave module off** (the sidebar listed eleven modules, Leave
+missing). Switched back on through Admin > Configuration > Modules (the demo's default; it resets nightly anyway),
+`hrm-admin-add-user`'s sentinel changed to its own module's link (`152a7f5`), and the two rerun
+(`2026-09-24-examples-suite-152a7f5-hrm-two.*`, 1 worker, 170 s): **`hrm-admin-add-user` 3/3** (26.8 s, 18 requests),
+**`hrm-leave-assign` 3/3** (28.5 s, 23 requests). So at `152a7f5` every OrangeHRM flow passes, 15/15 across the two
+suites once the environment was put back.
