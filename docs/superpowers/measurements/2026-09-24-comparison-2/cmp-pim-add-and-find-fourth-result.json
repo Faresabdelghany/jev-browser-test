@@ -1,0 +1,68 @@
+{
+  "spec_id": "cmp-pim-add-and-find",
+  "outcome": "one_record_found",
+  "verdict": "pass",
+  "note": null,
+  "probability": 1.0,
+  "confidence": 1.0,
+  "seen_at_step": 27,
+  "first_seen_at_step": 27,
+  "confirmed": true,
+  "confirmed_by": "assertions",
+  "path_confidence": 0.52,
+  "reason": null,
+  "evidence": {
+    "line": "(1) Record Found",
+    "present": 0.46,
+    "screenshot": "steps/027.png",
+    "checks": {}
+  },
+  "assertions": [
+    {
+      "text_contains": "(1) Record Found",
+      "ok": true,
+      "actual": "itle\n-- Select --\nSub Unit\n-- Select --\nReset\nSearch\n\n\n Add\n(1) Record Found\nId\nFirst (& Middle) Name\nLast Name\nJob Title\nEmployment Sta"
+    }
+  ],
+  "outcomes_seen_earlier": [],
+  "announcements": [
+    {
+      "step": 17,
+      "text": "Success Successfully Saved",
+      "kind": "live",
+      "tone": "success"
+    }
+  ],
+  "story": [
+    "1 CLICK [8] link \"PIM\"",
+    "2 WAIT",
+    "3 WAIT",
+    "4 CLICK [7] link \"Add Employee\"",
+    "5 WAIT",
+    "6 WAIT",
+    "8 TYPE_TEXT [10] textbox \"Search\" <- first_name",
+    "11 TYPE_TEXT [11] textbox \"First Name\" <- first_name",
+    "12 TYPE_TEXT [13] textbox \"Last Name\" <- last_name",
+    "13 CLICK [18] button \"Save\"",
+    "14 WAIT",
+    "15 WAIT",
+    "16 CLICK [6] link \"Employee List\"",
+    "17 WAIT",
+    "18 WAIT",
+    "19 TYPE_TEXT [16] textbox \"Type for hints...\" in \"Employee Name\" <- last_name",
+    "20 WAIT",
+    "22 CLICK [20] option \"Jevcmp Runnertlv64t4s\"",
+    "23 CLICK [27] button \"Search\""
+  ],
+  "run_stamp": "tlv64t4s",
+  "status": "passed",
+  "duration_ms": 111063,
+  "usage": {
+    "jev_requests": 28,
+    "input_tokens": 106534,
+    "output_tokens": 10171,
+    "model": "jev-1.13.0",
+    "reconnects": 0
+  },
+  "trace": "/private/tmp/claude-501/-Users-fares--warp-worktrees-jev-browser-test-badlands-saguaro/ed7130f2-f5ba-4645-afe7-bc4d58ea5f9e/scratchpad/export-b487e2e/compare/runs/cmp-pim-add-and-find/fourth/trace.json"
+}

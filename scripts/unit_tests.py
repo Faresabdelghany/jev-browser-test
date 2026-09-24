@@ -2020,6 +2020,21 @@ class ScaffoldTests(unittest.TestCase):
         self.assertEqual(spec["secrets"], ["password"])
         self.assertEqual(spec["data"]["password"], "${NOT_SET_ANYWHERE_123}", "written as the placeholder, resolved at run time")
 
+    def test_a_scaffolded_spec_with_plain_credentials_loads_without_a_missing_env_var(self) -> None:
+        """Live: the scaffold's comment named the `${ENV_VAR}` form literally when a key looked like a credential, the
+        loader read it as a placeholder, and the first run of the comparison's login spec ended exit 2 ("missing
+        environment variables: ENV_VAR") although the demo's credentials were written plainly."""
+        import tempfile
+        from spec import load_spec
+        tmp = tempfile.mkdtemp(prefix="jev-scaffold-")
+        code, spec, text = self.run_scaffold("--url", "http://x/", "--goal", "Log in so that the dashboard opens",
+                                             "--data", "username=Admin", "--data", "password=admin123", tmp=tmp)
+        self.assertEqual(code, 0, text)
+        self.assertEqual(spec["secrets"], ["password"])
+        self.assertNotIn("${", spec["comment"], "no placeholder form in the comment: the loader scans the whole spec")
+        loaded = load_spec(os.path.join(tmp, "spec.json"))  # raises ValueError on a missing variable
+        self.assertEqual(loaded["data"]["password"], "admin123")
+
     def test_refuses_to_overwrite_without_force_and_rejects_bad_input(self) -> None:
         import tempfile
         tmp = tempfile.mkdtemp(prefix="jev-scaffold-")
@@ -2162,6 +2177,12 @@ class AssertionsCanWaitTests(unittest.TestCase):
     changed during the pause and shows no pass, bounded by CONFIRM_RECHECKS_MAX; on a settled page a failing
     assertion is the verdict at once."""
 
+    def test_recheck_limit(self) -> None:
+        from run_test import CONFIRM_RECHECKS_BUSY_EXTRA, CONFIRM_RECHECKS_MAX, recheck_limit
+        self.assertEqual((CONFIRM_RECHECKS_MAX, CONFIRM_RECHECKS_BUSY_EXTRA), (2, 2))
+        self.assertEqual(recheck_limit(False), 2)
+        self.assertEqual(recheck_limit(True), 4)
+
     def test_page_busy(self) -> None:
         from run_test import page_busy
         self.assertTrue(page_busy({"covered": 9, "elements": [{"idx": 0}]}), "controls under a layer")
@@ -2177,7 +2198,10 @@ class AssertionsCanWaitTests(unittest.TestCase):
         self.assertTrue(assertions_can_wait(failing, busy=False, page_changed=True, rechecks=0), "the page changed during the pause")
         self.assertTrue(assertions_can_wait(failing, busy=True, page_changed=True, rechecks=CONFIRM_RECHECKS_MAX - 1))
         self.assertFalse(assertions_can_wait(failing, busy=False, page_changed=False, rechecks=0), "a settled page: the failing assertion is the verdict")
-        self.assertFalse(assertions_can_wait(failing, busy=True, page_changed=True, rechecks=CONFIRM_RECHECKS_MAX), "the bound is reached")
+        self.assertFalse(assertions_can_wait(failing, busy=False, page_changed=True, rechecks=CONFIRM_RECHECKS_MAX), "the bound is reached on a page with controls")
+        self.assertTrue(assertions_can_wait(failing, busy=True, page_changed=True, rechecks=CONFIRM_RECHECKS_MAX), "a busy page gets two more looks")
+        self.assertTrue(assertions_can_wait(failing, busy=True, page_changed=False, rechecks=CONFIRM_RECHECKS_MAX + 1))
+        self.assertFalse(assertions_can_wait(failing, busy=True, page_changed=True, rechecks=CONFIRM_RECHECKS_MAX + 2), "the busy bound is reached")
         self.assertFalse(assertions_can_wait(holding, busy=True, page_changed=True, rechecks=0), "every assertion holds: pass now")
         self.assertFalse(assertions_can_wait([], busy=True, page_changed=True, rechecks=0), "no assertions to wait for")
 

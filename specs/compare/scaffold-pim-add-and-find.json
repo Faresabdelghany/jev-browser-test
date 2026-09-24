@@ -1,0 +1,76 @@
+{
+  "id": "scaffold-pim-add-and-find",
+  "comment": "Scaffolded by scripts/scaffold.py on 2026-09-24 from a URL, a goal and 2 data value(s). Edit before the first run: the pass outcome's `when` (one visible fact per sentence, the app's own words), an `assert` block with at least one exact check on the final page, `notes` for Jev about the page, and put ${RUN_STAMP} into any data value the app keeps. references/spec-format.md has every field. Budget 40 steps / 420 s: in a slow hour of the demo the flow ran to 31 steps (two navigations of 10-15 s, the autocomplete answering 'Searching....' for four looks) and the 30-step default ended it one look before the pass.",
+  "start_url": "https://opensource-demo.orangehrmlive.com/web/index.php/auth/login",
+  "goal": "Open PIM from the sidebar, click Add Employee, type the given first name and last name, click Save and wait for the Personal Details page of the new employee; then open Employee List from the top row, type the last name into the Employee Name box, choose the suggestion with that name, click Search, so that the list says (1) Record Found",
+  "data": {
+    "first_name": "Jevcmp",
+    "last_name": "Runner${RUN_STAMP}"
+  },
+  "setup": [
+    {
+      "action": "fill",
+      "selector": "input[name=username]",
+      "value": "Admin"
+    },
+    {
+      "action": "fill",
+      "selector": "input[name=password]",
+      "value": "admin123"
+    },
+    {
+      "action": "click",
+      "selector": "button[type=submit]"
+    },
+    {
+      "action": "wait_for",
+      "url": "**/dashboard/**",
+      "timeout_ms": 45000
+    },
+    {
+      "action": "wait_for",
+      "selector": "a[href*=\"/pim/\"]",
+      "timeout_ms": 30000
+    }
+  ],
+  "outcomes": {
+    "app_error": {
+      "when": "An error page, a stack trace or 'something went wrong' text is shown",
+      "verdict": "bug"
+    },
+    "one_record_found": {
+      "when": "The Employee List says (1) Record Found. The row shows the given first and last name",
+      "verdict": "pass"
+    },
+    "required_error": {
+      "when": "A red 'Required' message is shown under a field after Save",
+      "verdict": "bug",
+      "requires_action": true,
+      "note": "both required names were provided in data"
+    },
+    "no_records": {
+      "when": "The Employee List says No Records Found",
+      "verdict": "bug",
+      "requires_action": true,
+      "after": {
+        "click": "Search"
+      },
+      "note": "the employee saved a moment earlier is not found by the filter"
+    }
+  },
+  "assert": [
+    {
+      "text_contains": "(1) Record Found"
+    }
+  ],
+  "browser": {
+    "settle_ms": 2500,
+    "quiet_ms": 200,
+    "navigation_timeout_ms": 45000
+  },
+  "budget": {
+    "max_steps": 40,
+    "max_seconds": 420
+  },
+  "notes": "The left sidebar lists the modules; its Search box only filters the menu: never type into it. PIM's top row has Employee List, Add Employee and Reports. After Add Employee the form takes a moment to load: type the names only once First Name, Middle Name and Last Name are shown; leave Middle Name and Employee Id alone and do not turn on Create Login Details. After Save a spinner shows before the Personal Details page appears; wait for it and click nothing else. On the Employee List page type the last name into the Employee Name box, wait for the suggestion with that name and click it before Search; the result count is written above the table as '(1) Record Found'. On the Employee List page the rows of the table below the filter are clickable and open other employees: never click a row. After typing into Employee Name a list of suggestions drops down under the box after a moment (on a slow day a few seconds): wait for the suggestion that shows the given first and last name and click that suggestion, then Search."
+}

@@ -219,6 +219,16 @@ def run_setup(page, spec: dict, results: list[dict] | None = None) -> list[dict]
 
 WAIT_BACKOFF_MAX = 4  # lever F4: consecutive WAITs on an unchanged page pause settle_ms x 1, 2, 4, 4, ... (never more than x4)
 CONFIRM_RECHECKS_MAX = 2  # a confirmation look at a page that changed during the pause and shows no pass looks again, this many times at most
+CONFIRM_RECHECKS_BUSY_EXTRA = 2  # ... and this many more while the page is busy (covered controls, an empty document): a slow app renders in stages
+
+
+def recheck_limit(busy: bool) -> int:
+    """How many confirmation looks may park again: CONFIRM_RECHECKS_MAX on a page with controls and nothing over them,
+    two more while the page is busy. Live: a slow demo's Save went covered form, empty shell, then the record's page
+    under its own loading overlay with the fields not yet filled, three busy looks in a row, and the bound of two
+    ended the run assert_failed one look before the fields rendered. A dialog that stays is still found: it is busy
+    and unchanged, so it costs the extra looks and then ends done_unverified as before."""
+    return CONFIRM_RECHECKS_MAX + (CONFIRM_RECHECKS_BUSY_EXTRA if busy else 0)
 WAIT_POLL_MS = 100  # a WAIT re-reads the page's fingerprint this often and ends as soon as the page has changed
 NO_EFFECT_ACTIONS = {"CLICK", "TYPE_TEXT", "SELECT", "PRESS_ENTER"}  # an executed one of these that changed nothing is flagged
 NAVIGATION_PENDING_MARKER = "waiting for scheduled navigations to finish"  # Playwright's call log after "click action done"
@@ -260,7 +270,7 @@ def assertions_can_wait(checked: list[dict], busy: bool, page_changed: bool, rec
     (CONFIRM_RECHECKS_MAX). Live: a Save's toast announced the pass while the overlay still covered the form and the
     URL was still the form's; the assertions were run there and the run ended `assert_failed` two seconds before the
     page it asserted arrived. On a settled page a failing assertion is the verdict at once."""
-    return any(not a["ok"] for a in checked) and (busy or page_changed) and rechecks < CONFIRM_RECHECKS_MAX
+    return any(not a["ok"] for a in checked) and (busy or page_changed) and rechecks < recheck_limit(busy)
 
 
 def wait_for_change(page, before: dict | None, wait_ms: int) -> dict:
@@ -1196,7 +1206,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                         pre = {**merged_adj, "answers": answers} if merged_adj and merged_adj["name"] == passes[0]["name"] else None
                         settle_pass(page, step, obs, passes[0], was["action"], jev, pre, assertions=checked or None)
                         break
-                    if (sig != was["sig"] or page_busy(obs)) and was["rechecks"] < CONFIRM_RECHECKS_MAX:
+                    if (sig != was["sig"] or page_busy(obs)) and was["rechecks"] < recheck_limit(page_busy(obs)):
                         # The page changed during the pause, or is still busy (covered controls, an empty shell), and shows
                         # no pass yet: this is not the settled page, so the look has not ruled out timing. Look again,
                         # pausing settle_ms x 2, x 4 (ending the moment the page changes again), until two consecutive looks

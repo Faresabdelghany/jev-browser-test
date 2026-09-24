@@ -1,0 +1,54 @@
+{
+  "id": "scaffold-login",
+  "comment": "Scaffolded by scripts/scaffold.py on 2026-09-24 from a URL, a goal and 2 data values, for the Jev-versus-Playwright-CLI comparison. The demo prints its credentials on the login page, so they are written plainly (the password still masked through secrets).",
+  "start_url": "https://opensource-demo.orangehrmlive.com/web/index.php/auth/login",
+  "goal": "Type the given username and password into the login form and click Login, so that the Dashboard opens: the topbar heading says Dashboard and the left sidebar lists PIM",
+  "data": {
+    "username": "Admin",
+    "password": "admin123"
+  },
+  "secrets": [
+    "password"
+  ],
+  "outcomes": {
+    "app_error": {
+      "when": "An error page, a stack trace or 'something went wrong' text is shown",
+      "verdict": "bug"
+    },
+    "dashboard_open": {
+      "when": "The topbar heading says Dashboard. The left sidebar lists PIM",
+      "verdict": "pass"
+    },
+    "invalid_credentials": {
+      "when": "The login page says Invalid credentials",
+      "verdict": "bug",
+      "requires_action": true,
+      "note": "the credentials in data are the ones the page prints"
+    }
+  },
+  "assert": [
+    {
+      "url_matches": "**/dashboard/**"
+    },
+    {
+      "text_contains": "Dashboard"
+    }
+  ],
+  "browser": {
+    "settle_ms": 2500,
+    "quiet_ms": 200,
+    "navigation_timeout_ms": 45000
+  },
+  "budget": {
+    "max_steps": 12,
+    "max_seconds": 150
+  },
+  "notes": "The login page prints the demo's credentials; the form has a Username box, a Password box and a Login button. After Login an empty shell shows for a moment before the Dashboard renders. The page is an empty shell for a moment before the form renders (setup waits for the Username box).",
+  "setup": [
+    {
+      "action": "wait_for",
+      "selector": "input[name=username]",
+      "timeout_ms": 40000
+    }
+  ]
+}

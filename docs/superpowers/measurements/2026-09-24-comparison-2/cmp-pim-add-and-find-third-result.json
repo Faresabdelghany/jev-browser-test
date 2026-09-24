@@ -1,0 +1,67 @@
+{
+  "spec_id": "cmp-pim-add-and-find",
+  "outcome": "undetermined",
+  "verdict": null,
+  "note": null,
+  "probability": null,
+  "confidence": null,
+  "seen_at_step": null,
+  "first_seen_at_step": null,
+  "confirmed": false,
+  "confirmed_by": null,
+  "path_confidence": 0.55,
+  "reason": {
+    "status": "budget_exhausted",
+    "blocked_reason": "nothing",
+    "stuck_reason": null,
+    "suggested_verdict": "test_issue"
+  },
+  "evidence": {
+    "line": null,
+    "present": null,
+    "screenshot": "steps/final.png",
+    "checks": {}
+  },
+  "assertions": [],
+  "outcomes_seen_earlier": [],
+  "announcements": [
+    {
+      "step": 16,
+      "text": "Success Successfully Saved",
+      "kind": "live",
+      "tone": "success"
+    }
+  ],
+  "story": [
+    "2 CLICK [8] link \"PIM\"",
+    "3 WAIT",
+    "4 CLICK [7] link \"Add Employee\"",
+    "5 WAIT",
+    "6 WAIT",
+    "7 TYPE_TEXT [10] textbox \"Search\" <- first_name",
+    "11 TYPE_TEXT [11] textbox \"First Name\" <- first_name",
+    "12 TYPE_TEXT [13] textbox \"Last Name\" <- last_name",
+    "13 CLICK [18] button \"Save\"",
+    "14 WAIT",
+    "15 WAIT",
+    "19 CLICK [6] link \"Employee List\"",
+    "20 WAIT",
+    "21 WAIT",
+    "22 WAIT",
+    "23 TYPE_TEXT [16] textbox \"Type for hints...\" in \"Employee Name\" <- last_name",
+    "24 WAIT",
+    "29 CLICK [20] option \"Jevcmp Runnertlv5zy1e\"",
+    "30 CLICK [27] button \"Search\""
+  ],
+  "run_stamp": "tlv5zy1e",
+  "status": "budget_exhausted",
+  "duration_ms": 144809,
+  "usage": {
+    "jev_requests": 31,
+    "input_tokens": 118061,
+    "output_tokens": 10184,
+    "model": "jev-1.13.0",
+    "reconnects": 0
+  },
+  "trace": "/private/tmp/claude-501/-Users-fares--warp-worktrees-jev-browser-test-badlands-saguaro/ed7130f2-f5ba-4645-afe7-bc4d58ea5f9e/scratchpad/export-b487e2e/compare/runs/cmp-pim-add-and-find/third/trace.json"
+}

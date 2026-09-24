@@ -452,8 +452,8 @@ def start_slow_site(delay_ms: int) -> str:
 # A save that is confirmed before it is finished: Save covers the form with a saving overlay at once, a toast
 # announces the save 250 ms in (the pass is in sight), and the saved record's heading arrives at 900 ms (the toast
 # goes with the overlay). A confirmation look between the two sees the pass on a page whose assertions do not hold yet.
-# ?shell=1: the record's page arrives as a single-page app renders it, an empty document at 900 ms and the heading at
-# 1500 ms, so a look in between finds no controls at all.
+# ?shell=1: the record's page arrives as a single-page app renders it, an empty document at 900 ms, its frame under a
+# loading overlay at 1500 ms and the record at 2200 ms, so the confirmation looks find no controls, then covered ones.
 SAVING_PAGE = """<!doctype html><html><head><title>Saving</title></head><body>
 <h1 id="heading">Add Employee</h1>
 <form><label>First Name <input id="fn" value="Jevtest"></label> <label>Last Name <input id="ln" value="Runner"></label>
@@ -469,9 +469,13 @@ SAVING_PAGE = """<!doctype html><html><head><title>Saving</title></head><body>
      t.textContent = 'Saved successfully'; document.getElementById('toasts').appendChild(t);
    }, 250);
    if (location.search.includes('shell=1')) {
-     // the saved record's page as a single-page app renders it: an empty document first (900 ms), the heading later (1500 ms)
+     // the saved record's page as a single-page app renders it: an empty document first (900 ms), then its frame under a
+     // loading overlay with the heading not yet the record's (1500 ms), then the record with the overlay gone (2200 ms)
      setTimeout(() => { document.body.innerHTML = '<div id="app"></div>'; }, 900);
-     setTimeout(() => { document.getElementById('app').innerHTML = '<h1>Personal Details</h1><p>Jevtest Runner</p>'; }, 1500);
+     setTimeout(() => { document.getElementById('app').innerHTML = '<h1 id="h">Loading...</h1><form><label>First Name <input></label> <label>Last Name <input></label> <button type="button">Save</button></form>'
+       + '<div id="ov" style="position:fixed;left:0;top:0;width:100%;height:320px;background:rgba(255,255,255,.6)"></div>'; }, 1500);
+     setTimeout(() => { document.getElementById('ov').remove(); document.getElementById('h').textContent = 'Personal Details';
+       document.getElementById('app').insertAdjacentHTML('beforeend', '<p>Jevtest Runner</p><p>Saved successfully</p>'); }, 2200);
      return;
    }
    setTimeout(() => { o.remove(); document.getElementById('toasts').textContent = ''; document.getElementById('heading').textContent = 'Personal Details'; }, 900);
@@ -1441,10 +1445,11 @@ def main() -> int:
     if "ASSERT-PENDING:1" not in summarize(trace, out) or "RECHECK:1" not in summarize(trace, out):
         failures.append("pass while saving: the summary should flag RECHECK:1 and ASSERT-PENDING:1 on the parked look")
 
-    # 4o. the same save whose record page arrives as an empty shell first (?shell=1): the second confirmation look
-    #     finds no controls and no text, the same signature as it would keep for a while; an empty document is a page
-    #     still on its way (page_busy), so it parks a second time and the third look passes. Live: the Personal Details
-    #     page of a slow demo was an empty document for two looks and the run ended assert_failed on it.
+    # 4o. the same save whose record page arrives in stages (?shell=1): the second confirmation look finds an empty
+    #     document (no controls, no text), the third the page's frame under a loading overlay with the heading not yet
+    #     the record's; both are pages still on their way (page_busy), so the look parks again each time, past the bound
+    #     of two that a page with controls gets, and the fourth look passes. Live: a slow demo's Save went covered form,
+    #     empty shell, covered record page, and the bound of two ended the run assert_failed one look before the fields.
     shell_spec = dict(saving_spec, start_url="file://" + saving_html + "?shell=1")
     jev = FakeJev("toast")
     out = os.path.join(tmp, "run-pass-while-saving-shell")
@@ -1455,15 +1460,15 @@ def main() -> int:
     waited = [s for s in steps if s.get("assertions_pending")]
     if trace["status"] != "passed" or trace["outcome"] != "saved":
         failures.append(f"pass while saving, shell: expected passed/saved after two rechecks, got {trace['status']}/{trace.get('outcome')} ({trace.get('error')})")
-    if len(waited) != 2 or [w.get("recheck_again") for w in waited] != [1, 2] or not waited[0].get("covered_controls") \
-            or waited[1].get("elements") or waited[1].get("covered_controls") or waited[1].get("visible_text"):
-        failures.append(f"pass while saving, shell: the first parked look is the covered form, the second the empty shell (no controls, no text): "
-                        f"{[(s.get('n'), s.get('recheck_again'), s.get('covered_controls'), len(s.get('elements') or []), repr(s.get('visible_text'))) for s in waited]}")
+    if len(waited) != 3 or [w.get("recheck_again") for w in waited] != [1, 2, 3] or not waited[0].get("covered_controls") \
+            or waited[1].get("elements") or waited[1].get("covered_controls") or waited[1].get("visible_text") or not waited[2].get("covered_controls"):
+        failures.append(f"pass while saving, shell: the parked looks are the covered form, the empty shell (no controls, no text) and the covered frame: "
+                        f"{[(s.get('n'), s.get('recheck_again'), s.get('covered_controls'), len(s.get('elements') or []), repr(s.get('visible_text'))[:40]) for s in waited]}")
     if trace["result"].get("confirmed_by") != "recheck" or not all(a.get("ok") for a in trace["result"].get("assertions", [])):
         failures.append(f"pass while saving, shell: the pass should be confirmed by the recheck with the assertion holding: "
                         f"{trace['result'].get('confirmed_by')} {trace['result'].get('assertions')}")
-    if "RECHECK:2" not in summarize(trace, out):
-        failures.append("pass while saving, shell: the summary should flag RECHECK:2 on the second parked look")
+    if "RECHECK:3" not in summarize(trace, out):
+        failures.append("pass while saving, shell: the summary should flag RECHECK:3 on the third parked look")
 
     # 5. a low-confidence DONE is a WAIT, not a verdict -> the flow continues and passes
     spec = base_spec(url)

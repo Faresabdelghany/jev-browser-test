@@ -1,0 +1,47 @@
+{
+  "spec_id": "cmp-pim-add-and-find",
+  "outcome": "undetermined",
+  "verdict": null,
+  "note": null,
+  "probability": null,
+  "confidence": null,
+  "seen_at_step": null,
+  "first_seen_at_step": null,
+  "confirmed": false,
+  "confirmed_by": null,
+  "path_confidence": 0.59,
+  "reason": {
+    "status": "low_confidence",
+    "blocked_reason": "control_not_on_page",
+    "stuck_reason": null,
+    "suggested_verdict": "bug"
+  },
+  "evidence": {
+    "line": null,
+    "present": null,
+    "screenshot": "steps/final.png",
+    "checks": {}
+  },
+  "assertions": [],
+  "outcomes_seen_earlier": [],
+  "announcements": [],
+  "story": [
+    "1 CLICK [8] link \"PIM\"",
+    "2 WAIT",
+    "3 CLICK [7] link \"Add Employee\"",
+    "4 WAIT",
+    "5 WAIT",
+    "6 TYPE_TEXT [10] textbox \"Search\" <- first_name"
+  ],
+  "run_stamp": "tlv5paha",
+  "status": "low_confidence",
+  "duration_ms": 78867,
+  "usage": {
+    "jev_requests": 10,
+    "input_tokens": 24140,
+    "output_tokens": 2390,
+    "model": "jev-1.13.0",
+    "reconnects": 0
+  },
+  "trace": "/private/tmp/claude-501/-Users-fares--warp-worktrees-jev-browser-test-badlands-saguaro/ed7130f2-f5ba-4645-afe7-bc4d58ea5f9e/scratchpad/export-b487e2e/compare/runs/cmp-pim-add-and-find/first/trace.json"
+}

@@ -152,8 +152,9 @@ def build(args: argparse.Namespace) -> dict:
         "comment": (f"Scaffolded by scripts/scaffold.py on {date.today().isoformat()} from a URL, a goal and {len(data)} data "
                     f"value(s). Edit before the first run: the pass outcome's `when` (one visible fact per sentence, the app's "
                     f"own words), an `assert` block with at least one exact check on the final page, `notes` for Jev about the "
-                    f"page, and put ${{{RUN_STAMP_VAR}}} into any data value the app keeps. "
-                    + ("Keys that look like credentials were listed in `secrets`; give them `${ENV_VAR}` values. " if secrets else "")
+                    f"page, and put the {RUN_STAMP_VAR} placeholder (a dollar sign and braces around the name) into any data value the app keeps. "
+                    + ("Keys that look like credentials were listed in `secrets`; give them environment-variable placeholders "
+                       "(the form spec-format.md shows under `data`) unless the app publishes them. " if secrets else "")
                     + "references/spec-format.md has every field."),
         "start_url": args.url,
         "goal": goal,
