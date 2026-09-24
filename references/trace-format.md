@@ -141,7 +141,7 @@ environment failure (or a spec file is missing / two files share an id).
 |---|---|---|
 | `passed` | An outcome with verdict `pass` was seen, survived the settle-and-recheck, and every assertion held | PASS (sanity-check `evidence.line` and `final.png` once) |
 | `outcome` | A declared outcome with another verdict was seen; `result.outcome` names it, `result.verdict` is its pre-declared verdict | That verdict. The outcome name is always in the result, so a mislabelled verdict is visible and is a one-line spec fix |
-| `assert_failed` | A pass outcome was confirmed but an assertion did not hold on the final page (`result.reason.failed_assertions` has the actual values) | Claude judges: the app is wrong (BUG) or the assertion is (TEST_ISSUE). Never loosen an assertion to get green without saying so |
+| `assert_failed` | A pass outcome was confirmed but an assertion did not hold on the final page (`result.reason.failed_assertions` has the actual values). A pass sighted while the page was still busy (covered controls, or changed during the pause) is looked at again first, twice at most (`assertions_pending`, `recheck_again`) | Claude judges: the app is wrong (BUG) or the assertion is (TEST_ISSUE). Never loosen an assertion to get green without saying so. If the last steps carry `RECHECK:2 ASSERT-PENDING`, the page took longer than seven `settle_ms` to settle: raise `settle_ms` |
 | `done_unverified` | Jev said DONE confidently; the runner settled, re-observed (again while the page kept changing between looks, `recheck_again` on those steps, twice at most), and no pass outcome is visible | Either the outcome wording is off (test issue) or the app did not do what it claims (bug). Look at `final.png`. Timing is ruled out by the recheck unless the last two steps still carry `recheck_again`: then the page never held still, raise `settle_ms` |
 | `blocked` | Jev chose BLOCKED (`result.reason.blocked_reason` says why; right after a click that changed nothing, `reason.stuck_reason` says why that was) | Usually a test issue: missing `data` value, missing precondition, wrong start page. Sometimes a real bug: the needed control is not rendered, or a control that does nothing (`stuck_reason: control_had_no_effect` → BUG) |
 | `never_violated` | (Runs before the results contract only.) A `never` check crossed its threshold; today this ends as `outcome` with `never_<check>` | Often a product bug. Confirm the error is real in the screenshot, and that the preceding action was reasonable |
@@ -186,7 +186,8 @@ environment failure (or a spec file is missing / two files share an id).
       "elements": [ { "idx": 3, "role": "button", "name": "Add to cart", "x": 116, "y": 151, "w": 79, "h": 21, ... } ],
       "truncated_elements": 0, "visible_text": "first 600 chars of the viewport-first text Jev saw...",
       "covered_controls": 3,                                         // only when > 0: controls on screen but under another layer (a loading overlay, a dialog), counted, not offered; Jev sees the count in its state; flag COVERED:3
-      "recheck_again": 1,                                            // a confirmation look (after a pass sighting or DONE) that found the page changed during the pause with no pass visible: it parked and looked again (1, then 2; CONFIRM_RECHECKS_MAX)
+      "recheck_again": 1,                                            // a confirmation look (after a pass sighting or DONE) that found the page changed during the pause with no pass visible: it parked and looked again (1, then 2; CONFIRM_RECHECKS_MAX); flag RECHECK:1
+      "assertions_pending": [ { "url_matches": "**/x", "ok": false, "actual": "..." } ],  // a pass in sight on a page still busy (covered controls, or changed during the pause) whose assertions do not hold yet: parked again instead of assert_failed; flag ASSERT-PENDING:1
       "offered_operations": ["CLICK", "TYPE_TEXT", "WAIT", "DONE", "BLOCKED"],
       "operation": { "choice": "CLICK", "confidence": 0.91, "top_probabilities": { "CLICK": 0.9, "DONE": 0.05 } },
       "target": { "question": "click_target", "choice": "3", "element": 3, "label": "[3] button \"Add to cart\"",
@@ -222,6 +223,7 @@ environment failure (or a spec file is missing / two files share an id).
       "retried": true,                                               // only when the request was re-sent
       "stale": "target [3] changed: disabled",                       // only when the page changed during the decision; nothing was executed
       "executed": { "action": "CLICK", "ok": true, "error": null, "element": 3 },
+      //   "slow_navigation": { "ended": "navigated", "ms": 9640, "action_timeout_ms": 8000 } when the action landed but the navigation it started outlasted action_timeout_ms (flag SLOW-NAV:9.6s; Jev's history says ok)
       //   a WAIT's executed carries "wait_ms", its ceiling (a WAIT chosen again on an unchanged page: settle_ms x 1, 2, 4, then 4; "wait_streak" on the step),
       //   and "wait": { "ended": "changed" | "timeout" | "navigated", "ms": 412 }: the WAIT ended as soon as the page's fingerprint changed, else at the ceiling
       "settle": { "ended": "quiet", "ms": 118 },                     // how the post-action wait ended: quiet | options | options_timeout | cap | navigated
@@ -277,6 +279,11 @@ Notes that matter when judging:
   The terminal step has no `page_changed` (nothing was observed after it).
 - `executed.ok == false` means Playwright could not perform the action Jev chose (timeout, detached element).
   One failure is noise; the same failure repeating is a real signal (element not clickable → possible bug).
+- `executed.slow_navigation` means the action was performed and only the navigation it started was outstanding
+  when `action_timeout_ms` ran out (Playwright's log: "click action done", then "waiting for scheduled navigations
+  to finish"); the runner waited for the page (the rest of `navigation_timeout_ms`; `ended` says how the wait ended,
+  `ms` the action's total) and Jev's history says the action landed. A slow host, not a failure; the same field on
+  a `setup` click record. Live: OrangeHRM's demo answering a module page in 9-12 s.
 - `executed.forced == true` means the click needed `force=True` because a transparent overlay intercepted it.
   Worth a look: an invisible layer blocking clicks is a classic UI bug.
 - `executed.dispatched == true` means the target was a form control under its own styled box (a hidden

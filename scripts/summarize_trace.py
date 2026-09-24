@@ -61,6 +61,8 @@ def _flags(step: dict) -> str:
         f.append("FORCED-CLICK")
     if ex.get("dispatched"):
         f.append("DISPATCHED-CLICK")
+    if ex.get("slow_navigation"):
+        f.append(f"SLOW-NAV:{ex['slow_navigation'].get('ms', 0) / 1000:.1f}s")  # the action landed; its navigation outlasted action_timeout_ms
     if step.get("repeat_count", 0) > 1:
         f.append(f"REPEAT×{step['repeat_count']}")
     if step.get("never_violated"):
@@ -69,6 +71,10 @@ def _flags(step: dict) -> str:
         f.append("OUTCOME:" + step["outcome_seen"])
     if step.get("pending_outcome"):
         f.append("PENDING:" + step["pending_outcome"])
+    if step.get("recheck_again"):
+        f.append(f"RECHECK:{step['recheck_again']}")  # the confirmation look found the page still changing or busy and parked again
+    if step.get("assertions_pending"):
+        f.append(f"ASSERT-PENDING:{len(step['assertions_pending'])}")  # a pass in sight whose assertions do not hold yet on this busy page
     if step.get("final_look"):
         f.append("FINAL-LOOK")
     if step.get("outcome_unconfirmed"):

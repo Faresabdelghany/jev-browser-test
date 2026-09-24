@@ -16,11 +16,13 @@ Run this after installing to confirm Playwright + Chromium work before spending 
 """
 from __future__ import annotations
 
+import http.server
 import json
 import os
 import re
 import sys
 import tempfile
+import threading
 import time
 
 from run_test import run, exit_code
@@ -407,6 +409,68 @@ COVERED_PAGE = """<!doctype html><html><head><title>Covered</title></head><body>
 </body></html>"""
 
 
+# A site whose module page answers late: the link is a real navigation, and /module sleeps `delay_ms` before it
+# answers. With `action_timeout_ms` below the delay Playwright performs the click and then times out waiting for
+# the navigation it scheduled: the runner must read that as a landed, slow click, not a failed one.
+SLOW_LINK_PAGE = """<!doctype html><html><head><title>Modules</title></head><body>
+<h1>Modules</h1>
+<nav><a id="pim" href="/module">PIM</a></nav>
+</body></html>"""
+MODULE_PAGE = """<!doctype html><html><head><title>PIM</title></head><body>
+<h1>PIM</h1><p>Employee List</p>
+</body></html>"""
+
+
+class _SlowSite(http.server.BaseHTTPRequestHandler):
+    delay_ms = 1000
+
+    def log_message(self, *args) -> None:  # noqa: D401 - quiet
+        pass
+
+    def do_GET(self) -> None:  # noqa: N802 - the handler's name is the protocol's
+        if self.path.startswith("/module"):
+            time.sleep(self.delay_ms / 1000)
+            body = MODULE_PAGE
+        else:
+            body = SLOW_LINK_PAGE
+        data = body.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def start_slow_site(delay_ms: int) -> str:
+    """Serve SLOW_LINK_PAGE at / and MODULE_PAGE at /module (after delay_ms) on a free local port; the base URL."""
+    handler = type("SlowSiteHandler", (_SlowSite,), {"delay_ms": delay_ms})
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{server.server_address[1]}"
+
+
+# A save that is confirmed before it is finished: Save covers the form with a saving overlay at once, a toast
+# announces the save 250 ms in (the pass is in sight), and the saved record's heading arrives at 900 ms (the toast
+# goes with the overlay). A confirmation look between the two sees the pass on a page whose assertions do not hold yet.
+SAVING_PAGE = """<!doctype html><html><head><title>Saving</title></head><body>
+<h1 id="heading">Add Employee</h1>
+<form><label>First Name <input id="fn" value="Jevtest"></label> <label>Last Name <input id="ln" value="Runner"></label>
+<button id="save" type="button" onclick="saveRecord()">Save</button></form>
+<div id="toasts"></div>
+<script>
+ function saveRecord(){  // not save(): inside a form the handler's scope resolves `save` to the button named save
+   const o = document.createElement('div'); o.id = 'saving';
+   o.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:320px;background:rgba(255,255,255,.6)';
+   document.body.appendChild(o);
+   setTimeout(() => {
+     const t = document.createElement('div'); t.className = 'app-toast app-toast--success'; t.setAttribute('aria-live', 'polite');
+     t.textContent = 'Saved successfully'; document.getElementById('toasts').appendChild(t);
+   }, 250);
+   setTimeout(() => { o.remove(); document.getElementById('toasts').textContent = ''; document.getElementById('heading').textContent = 'Personal Details'; }, 900);
+ }
+</script></body></html>"""
+
+
 def covered_check(url: str) -> list[str]:
     """A form under a loading overlay: its controls are counted as covered and not offered; once the overlay is gone
     they are offered and the count is zero. No Jev involved."""
@@ -644,6 +708,8 @@ class FakeJev:
             return "We use cookies"  # true until the banner's Accept button is clicked
         if "typed:" in s:
             return "Typed: Jevtest"  # the covered fixture echoes what went into First Name
+        if "employee list" in s:
+            return "Employee List"  # the slow site's module page
         if "saved successfully" in s:
             return "Saved successfully"  # the toast fixture's message, gone before the observation
         return None
@@ -760,6 +826,8 @@ class FakeJev:
             op, target = "BLOCKED", None   # gave up right after the dead click: "something else" is in the way
         elif self.mode in ("dead_click", "blocked_after_dead_click") and self._find(clicks, "Apply filter"):
             op, target = "CLICK", ("click_target", self._find(clicks, "Apply filter"))  # a button that does nothing
+        elif self._find(clicks, '"PIM"'):
+            op, target = "CLICK", ("click_target", self._find(clicks, '"PIM"'))           # the slow site's module link
         elif self._find(clicks, '"Start"'):
             op, target = "CLICK", ("click_target", self._find(clicks, '"Start"'))       # the loading fixture
         elif "Loading..." in text:
@@ -1295,6 +1363,75 @@ def main() -> int:
         failures.append(f"toast: result.announcements should list both with their step: {trace['result']['announcements']}")
     if 'ANNOUNCED:"Saved successfully" +1' not in summarize(trace, out):
         failures.append("toast: the summary should flag the announcement on step 2")
+
+    # 4m. a click whose navigation outlasts action_timeout_ms: the module page answers after 1 s, the action timeout
+    #     is 300 ms. Playwright performs the click and times out waiting for the navigation it scheduled; the runner
+    #     reads that, waits for the page (the navigation budget) and records the click as executed and slow, so Jev's
+    #     history never says it failed. Live: every OrangeHRM sidebar click of a slow hour ended ACTION-FAILED and the
+    #     "failed" clicks dragged every later decision of the run below the confidence gate.
+    slow_site = start_slow_site(delay_ms=1000)
+    slow_spec = base_spec(slow_site + "/")
+    slow_spec.update({"goal": "Open PIM so that the page says Employee List", "data": {}, "secrets": [], "checks": {},
+                      "done_when": [], "never": [],
+                      "outcomes": {"opened": {"when": "The page says Employee List", "verdict": "pass"}},
+                      "assert": [{"text_contains": "Employee List"}]})
+    slow_spec["browser"].update({"action_timeout_ms": 300, "navigation_timeout_ms": 5000, "settle_ms": 300, "quiet_ms": 50})
+    jev = FakeJev()
+    out = os.path.join(tmp, "run-slow-navigation")
+    trace = run(slow_spec, jev, out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    first = trace["steps"][0] if trace["steps"] else {}
+    ex = first.get("executed") or {}
+    slow = ex.get("slow_navigation") or {}
+    if trace["status"] != "passed" or trace["outcome"] != "opened":
+        failures.append(f"slow navigation: expected passed/opened, got {trace['status']}/{trace.get('outcome')} ({trace.get('error')})")
+    if ex.get("action") != "CLICK" or ex.get("ok") is not True or ex.get("error"):
+        failures.append(f"slow navigation: the click landed and must be recorded as executed: {ex}")
+    if slow.get("ended") not in ("changed", "navigated") or slow.get("action_timeout_ms") != 300 or not 800 <= slow.get("ms", 0) < 5000:
+        failures.append(f"slow navigation: the click should carry how its navigation arrived and when: {slow}")
+    if first.get("page_changed") is not True:
+        failures.append(f"slow navigation: the next observation is the module page, so the click changed the page: {first.get('page_changed')}")
+    states = step_states(jev)
+    click = next((a for a in states[-1]["recent_actions"] if a.get("operation") == "CLICK"), {}) if states else {}
+    if click.get("ok") is not True or "error" in click:
+        failures.append(f"slow navigation: Jev's history should say the click landed: {click}")
+    if "SLOW-NAV:" not in summarize(trace, out) or "ACTION-FAILED" in summarize(trace, out):
+        failures.append("slow navigation: the summary should flag SLOW-NAV and not ACTION-FAILED")
+
+    # 4n. a pass in sight on a page that is still busy: Save covers the form at once, the toast comes at 250 ms, the
+    #     saved record's heading at 900 ms. Jev says DONE on the covered page before the toast; the confirmation look
+    #     sees the toast (the pass) while the overlay still covers the form and the heading is not there, so the
+    #     assertion does not hold yet: the runner looks again (RECHECK, ASSERT-PENDING) instead of ending assert_failed,
+    #     and the next look passes with the assertion holding. Live: an OrangeHRM Save ended assert_failed on
+    #     'Successfully Saved' two seconds before the Personal Details page it asserted arrived.
+    saving_html = os.path.join(tmp, "saving.html")
+    with open(saving_html, "w", encoding="utf-8") as f:
+        f.write(SAVING_PAGE)
+    saving_spec = base_spec("file://" + saving_html)
+    saving_spec.update({"goal": "Click Save so that the Personal Details page is shown", "data": {}, "secrets": [], "checks": {},
+                        "done_when": [], "never": [],
+                        "outcomes": {"saved": {"when": "A toast says Saved successfully", "verdict": "pass"}},
+                        "assert": [{"text_contains": "Personal Details"}]})
+    saving_spec["browser"]["settle_ms"], saving_spec["browser"]["quiet_ms"] = 400, 50
+    jev = FakeJev("toast")
+    out = os.path.join(tmp, "run-pass-while-saving")
+    trace = run(saving_spec, jev, out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    steps = trace["steps"]
+    waited = [s for s in steps if s.get("assertions_pending")]
+    if trace["status"] != "passed" or trace["outcome"] != "saved":
+        failures.append(f"pass while saving: expected passed/saved after a recheck, got {trace['status']}/{trace.get('outcome')} ({trace.get('error')})")
+    if len(waited) != 1 or waited[0].get("recheck_again") != 1 or not waited[0].get("covered_controls") \
+            or (waited[0].get("executed") or {}).get("action") != "WAIT" or waited[0].get("pending_outcome") != "saved":
+        failures.append(f"pass while saving: one confirmation look should see the pass on the covered page with the assertion pending and park again: "
+                        f"{[(s.get('n'), s.get('assertions_pending'), s.get('recheck_again'), s.get('covered_controls'), (s.get('executed') or {}).get('action')) for s in steps]}")
+    if trace["result"].get("confirmed_by") != "recheck" or not all(a.get("ok") for a in trace["result"].get("assertions", [])):
+        failures.append(f"pass while saving: the pass should be confirmed by the recheck with every assertion holding: "
+                        f"{trace['result'].get('confirmed_by')} {trace['result'].get('assertions')}")
+    if "ASSERT-PENDING:1" not in summarize(trace, out) or "RECHECK:1" not in summarize(trace, out):
+        failures.append("pass while saving: the summary should flag RECHECK:1 and ASSERT-PENDING:1 on the parked look")
 
     # 5. a low-confidence DONE is a WAIT, not a verdict -> the flow continues and passes
     spec = base_spec(url)

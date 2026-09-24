@@ -158,7 +158,9 @@ action landed and the page did not change: the classic dead control; the next st
 counted), `COVERED:<n>` (controls on screen but under a loading overlay or a dialog, so not offered: the form is still
 loading), `DEFERRED-<OP>:<n>` (a marginal click or typing on such a page turned into one wait), `ANNOUNCED:"…"` (a toast or
 live message appeared between the previous observation and this one; Jev saw it in its state for this and the next
-two steps, faded or not), `LOW-CONF`, `STALE`, `EVIDENCE-ASKED`. With the
+two steps, faded or not), `SLOW-NAV:<s>` (the click landed; the page it asked for answered after the action timeout: a
+slow host, not a failure), `RECHECK:<n>` / `ASSERT-PENDING:<n>` (a pass in sight on a page still busy, looked at again),
+`LOW-CONF`, `STALE`, `EVIDENCE-ASKED`. With the
 default `screenshots: "key"` the terminal step, every flagged step and the step after a no-effect action have a
 `steps/NNN.png`; `--screenshots all` pictures every step on a rerun. The one reading rule: the checks recorded
 in step *n* describe the page **before** action *n*; action *n*'s effect shows in step *n+1*. After a no-effect

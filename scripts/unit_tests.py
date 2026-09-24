@@ -2037,6 +2037,149 @@ class ScaffoldTests(unittest.TestCase):
             self.assertEqual(code, 2, (bad, text))
 
 
+PLAYWRIGHT_SLOW_NAVIGATION_LOG = (
+    "TimeoutError: Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(\"[data-jev-idx=\\\"8\\\"]\").first\n"
+    "    - locator resolved to <a data-jev-idx=\"8\" class=\"oxd-main-menu-item\" href=\"/web/index.php/pim/viewPimModule\">…</a>\n"
+    "  - attempting click action\n    - waiting for element to be visible, enabled and stable\n    - element is visible, enabled and stable\n"
+    "    - scrolling into view if needed\n    - done scrolling\n    - performing click action\n    - click action done\n"
+    "    - waiting for scheduled navigations to finish\n"
+)
+PLAYWRIGHT_UNSTABLE_LOG = (
+    "TimeoutError: Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(\"[data-jev-idx=\\\"3\\\"]\").first\n"
+    "  - attempting click action\n    - waiting for element to be visible, enabled and stable\n"
+)
+
+
+class SlowNavigationTests(unittest.TestCase):
+    """A click that starts a navigation is performed at once; Playwright then waits for the navigation to commit, and on
+    a slow server that wait, not the element, runs out `action_timeout_ms`. Live (OrangeHRM's demo answering a module
+    page in 9-12 s): every sidebar click of the run ended `TimeoutError: Locator.click: Timeout 8000ms exceeded`, the
+    page arrived a second later anyway, the history told Jev the click had failed, and every later decision of the run
+    read 0.2-0.5 (five specs, thirteen runs of fifteen red). The runner now reads Playwright's own account: an action
+    whose log says it was performed with only its navigation outstanding has landed; the runner waits for the page
+    (up to the navigation budget) and reports the action as executed, slow."""
+
+    class Locator:
+        def __init__(self, error: str | None) -> None:
+            self.error, self.clicks = error, 0
+            self.first = self
+
+        def click(self, **kw) -> None:
+            self.clicks += 1
+            if self.error:
+                raise Exception(self.error)
+
+    class Page:
+        def __init__(self, error: str | None) -> None:
+            self.loc = SlowNavigationTests.Locator(error)
+
+        def locator(self, selector: str):
+            self.selector = selector
+            return self.loc
+
+    SPEC = {"browser": {"action_timeout_ms": 8000, "navigation_timeout_ms": 45000, "settle_ms": 400, "quiet_ms": 200}, "data": {}}
+
+    def test_navigation_pending_reads_playwrights_call_log(self) -> None:
+        from run_test import navigation_pending
+        self.assertTrue(navigation_pending(PLAYWRIGHT_SLOW_NAVIGATION_LOG))
+        self.assertFalse(navigation_pending(PLAYWRIGHT_UNSTABLE_LOG), "the element never held still: the click was not performed")
+        self.assertFalse(navigation_pending("Error: locator.click: Element is not attached to the DOM"))
+        self.assertFalse(navigation_pending(None))
+        self.assertFalse(navigation_pending(""))
+
+    def test_a_landed_click_whose_navigation_outlasts_the_timeout_is_executed_and_slow(self) -> None:
+        import run_test
+        page = self.Page(PLAYWRIGHT_SLOW_NAVIGATION_LOG)
+        with mock.patch.object(run_test, "wait_for_change", return_value={"ended": "navigated", "ms": 1640}) as waited:
+            res = run_test.execute(page, self.SPEC, "CLICK", {"element": 8, "label": '[8] link "PIM"'}, None, None, before={"url": "u"})
+        self.assertTrue(res["ok"], res)
+        self.assertIsNone(res["error"])
+        self.assertEqual(res["element"], 8)
+        self.assertEqual(res["slow_navigation"], {"ended": "navigated", "ms": 9640, "action_timeout_ms": 8000})
+        self.assertEqual(page.loc.clicks, 1, "the click is not repeated: it landed")
+        waited.assert_called_once_with(page, {"url": "u"}, 37000)  # the navigation budget, less what the click spent
+
+    def test_a_navigation_that_never_arrives_is_still_a_landed_action(self) -> None:
+        import run_test
+        page = self.Page(PLAYWRIGHT_SLOW_NAVIGATION_LOG)
+        with mock.patch.object(run_test, "wait_for_change", return_value={"ended": "timeout", "ms": 37000}):
+            res = run_test.execute(page, self.SPEC, "CLICK", {"element": 8, "label": "x"}, None, None, before={"url": "u"})
+        self.assertTrue(res["ok"], "Playwright performed the click; the next observation says whether the page changed (NO-EFFECT if not)")
+        self.assertEqual(res["slow_navigation"]["ended"], "timeout")
+
+    def test_without_a_fingerprint_the_runner_does_not_wait(self) -> None:
+        import run_test
+        page = self.Page(PLAYWRIGHT_SLOW_NAVIGATION_LOG)
+        with mock.patch.object(run_test, "wait_for_change") as waited:
+            res = run_test.execute(page, self.SPEC, "CLICK", {"element": 8, "label": "x"}, None, None, before=None)
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["slow_navigation"], {"ended": "unknown", "ms": 8000, "action_timeout_ms": 8000})
+        waited.assert_not_called()
+
+    def test_a_genuine_timeout_stays_a_failed_action(self) -> None:
+        import run_test
+        page = self.Page(PLAYWRIGHT_UNSTABLE_LOG)
+        with mock.patch.object(run_test, "wait_for_change") as waited:
+            res = run_test.execute(page, self.SPEC, "CLICK", {"element": 3, "label": "x"}, None, None, before={"url": "u"})
+        self.assertFalse(res["ok"])
+        self.assertIn("Timeout 8000ms exceeded", res["error"])
+        self.assertNotIn("slow_navigation", res)
+        waited.assert_not_called()
+
+    def test_history_and_summary_of_a_slow_action(self) -> None:
+        from run_test import history_entry
+        from summarize_trace import _flags
+        executed = {"action": "CLICK", "ok": True, "error": None, "element": 8, "slow_navigation": {"ended": "navigated", "ms": 9640, "action_timeout_ms": 8000}}
+        entry = history_entry(1, "CLICK", {"element": 8, "label": '[8] link "PIM"'}, None, executed)
+        self.assertTrue(entry["ok"], "Jev is told the click landed")
+        self.assertNotIn("error", entry)
+        self.assertEqual(_flags({"executed": executed}), "SLOW-NAV:9.6s")
+        self.assertEqual(_flags({"executed": {"action": "CLICK", "ok": False, "error": "TimeoutError: ..."}}), "ACTION-FAILED")
+
+    def test_a_setup_click_tolerates_a_slow_navigation(self) -> None:
+        import run_test
+        page = self.Page(PLAYWRIGHT_SLOW_NAVIGATION_LOG)
+        spec = {**self.SPEC, "setup": [{"action": "click", "selector": "a.pim"}]}
+        with mock.patch.object(run_test, "settle", return_value={"ended": "quiet", "ms": 1}), \
+                mock.patch.object(run_test, "fingerprint", return_value={"url": "u"}), \
+                mock.patch.object(run_test, "wait_for_change", return_value={"ended": "navigated", "ms": 900}) as waited:
+            recs = run_test.run_setup(page, spec)
+        self.assertEqual(len(recs), 1)
+        self.assertTrue(recs[0]["ok"], recs)
+        self.assertEqual(recs[0]["slow_navigation"], {"ended": "navigated", "ms": 8900, "action_timeout_ms": 8000})
+        waited.assert_called_once_with(page, {"url": "u"}, 37000)
+        failing = self.Page(PLAYWRIGHT_UNSTABLE_LOG)
+        with mock.patch.object(run_test, "settle", return_value={"ended": "quiet", "ms": 1}), mock.patch.object(run_test, "fingerprint", return_value={"url": "u"}):
+            with self.assertRaises(RuntimeError):
+                run_test.run_setup(failing, spec)
+
+
+class AssertionsCanWaitTests(unittest.TestCase):
+    """A pass in sight whose assertions do not hold yet, on a page that is still busy, is not the verdict: live, a Save's
+    toast ('Successfully Saved') announced the pass while the saving overlay still covered the form and the URL was
+    still the form's; the assertions were run on that page and the run ended `assert_failed` two seconds before the
+    Personal Details page it asserted arrived. The confirmation look now waits again, as it does for a page that
+    changed during the pause and shows no pass, bounded by CONFIRM_RECHECKS_MAX; on a settled page a failing
+    assertion is the verdict at once."""
+
+    def test_wait_while_the_page_is_busy_and_an_assertion_fails(self) -> None:
+        from run_test import CONFIRM_RECHECKS_MAX, assertions_can_wait
+        failing = [{"url_matches": "**/x", "ok": False}, {"text_contains": "a", "ok": True}]
+        holding = [{"url_matches": "**/x", "ok": True}]
+        self.assertTrue(assertions_can_wait(failing, covered=9, page_changed=False, rechecks=0), "controls under the saving overlay")
+        self.assertTrue(assertions_can_wait(failing, covered=0, page_changed=True, rechecks=0), "the page changed during the pause")
+        self.assertTrue(assertions_can_wait(failing, covered=9, page_changed=True, rechecks=CONFIRM_RECHECKS_MAX - 1))
+        self.assertFalse(assertions_can_wait(failing, covered=0, page_changed=False, rechecks=0), "a settled page: the failing assertion is the verdict")
+        self.assertFalse(assertions_can_wait(failing, covered=9, page_changed=True, rechecks=CONFIRM_RECHECKS_MAX), "the bound is reached")
+        self.assertFalse(assertions_can_wait(holding, covered=9, page_changed=True, rechecks=0), "every assertion holds: pass now")
+        self.assertFalse(assertions_can_wait([], covered=9, page_changed=True, rechecks=0), "no assertions to wait for")
+
+    def test_the_summary_flags_the_pending_assertions(self) -> None:
+        from summarize_trace import _flags
+        self.assertEqual(_flags({"recheck_again": 1, "assertions_pending": [{"url_matches": "**/x", "ok": False}]}), "RECHECK:1 ASSERT-PENDING:1")
+        self.assertEqual(_flags({"recheck_again": 2}), "RECHECK:2")
+
+
 class _FixedRand:
     def __init__(self, chars: str) -> None:
         self.chars = list(chars)

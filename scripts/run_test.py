@@ -181,6 +181,7 @@ def run_setup(page, spec: dict, results: list[dict] | None = None) -> list[dict]
     for i, step in enumerate(spec["setup"]):
         act = step["action"]
         rec = {"n": i, "action": act, "selector": step.get("selector"), "ok": True, "error": None}
+        before = fingerprint(page) if act in ("click", "press", "select") else None  # to tell a slow navigation from a failure
         try:
             if act == "goto":
                 page.goto(step["url"], wait_until="domcontentloaded", timeout=spec["browser"]["navigation_timeout_ms"])
@@ -203,6 +204,11 @@ def run_setup(page, spec: dict, results: list[dict] | None = None) -> list[dict]
                     page.wait_for_url(step["url"], timeout=t)
             settle(page, spec)
         except Exception as e:  # noqa: BLE001 - we want every failure in the trace
+            if navigation_pending(str(e)):
+                rec["slow_navigation"] = await_navigation(page, spec, before, timeout)  # landed; the page is on its way
+                settle(page, spec)
+                results.append(rec)
+                continue
             rec["ok"] = False
             rec["error"] = f"{type(e).__name__}: {str(e)[:300]}"
             results.append(rec)
@@ -215,6 +221,39 @@ WAIT_BACKOFF_MAX = 4  # lever F4: consecutive WAITs on an unchanged page pause s
 CONFIRM_RECHECKS_MAX = 2  # a confirmation look at a page that changed during the pause and shows no pass looks again, this many times at most
 WAIT_POLL_MS = 100  # a WAIT re-reads the page's fingerprint this often and ends as soon as the page has changed
 NO_EFFECT_ACTIONS = {"CLICK", "TYPE_TEXT", "SELECT", "PRESS_ENTER"}  # an executed one of these that changed nothing is flagged
+NAVIGATION_PENDING_MARKER = "waiting for scheduled navigations to finish"  # Playwright's call log after "click action done"
+
+
+def navigation_pending(error: str | None) -> bool:
+    """Did a timed-out action land, with only the navigation it started outstanding? Playwright performs the click
+    ("click action done" in its call log) and then waits for the scheduled navigation to commit; on a slow server that
+    wait, not the element, is what runs out `action_timeout_ms`. Live (OrangeHRM's demo answering a module page in
+    9-12 s): every sidebar click of the run ended `TimeoutError: Locator.click: Timeout 8000ms exceeded`, the page
+    arrived a second later anyway, the history told Jev the click had failed, and every later decision read 0.2-0.5.
+    A log that stops at "waiting for element to be visible, enabled and stable" is a click that was never performed."""
+    return bool(error) and NAVIGATION_PENDING_MARKER in error
+
+
+def await_navigation(page, spec: dict, before: dict | None, spent_ms: int) -> dict:
+    """The rest of a landed action whose navigation outlasted `action_timeout_ms`: wait for the page to change (the
+    fingerprint Jev decided on, polled every WAIT_POLL_MS; a destroyed document counts) for what is left of the
+    navigation budget. Returns {"ended": "changed" | "navigated" | "timeout" | "unknown", "ms": the action's total,
+    "action_timeout_ms": spent_ms}; without a fingerprint to compare against nothing is waited for ("unknown")."""
+    budget = max(spec["browser"]["navigation_timeout_ms"] - spent_ms, 0)
+    if before is None or budget == 0:
+        return {"ended": "unknown", "ms": spent_ms, "action_timeout_ms": spent_ms}
+    waited = wait_for_change(page, before, budget)
+    return {"ended": waited["ended"], "ms": spent_ms + waited["ms"], "action_timeout_ms": spent_ms}
+
+
+def assertions_can_wait(checked: list[dict], covered: int, page_changed: bool, rechecks: int) -> bool:
+    """A pass is in sight but an assertion does not hold: is the page still busy, so that this look has not ruled out
+    timing? Yes while controls sit under another layer (a saving overlay) or the page changed during the pause, and
+    the recheck bound (CONFIRM_RECHECKS_MAX) is not reached. Live: a Save's toast announced the pass while the
+    overlay still covered the form and the URL was still the form's; the assertions were run there and the run ended
+    `assert_failed` two seconds before the page it asserted arrived. On a settled page a failing assertion is the
+    verdict at once."""
+    return any(not a["ok"] for a in checked) and (covered > 0 or page_changed) and rechecks < CONFIRM_RECHECKS_MAX
 
 
 def wait_for_change(page, before: dict | None, wait_ms: int) -> dict:
@@ -291,8 +330,14 @@ def execute(page, spec: dict, operation: str, target: dict | None, value_key: st
         else:
             raise RuntimeError(f"unknown operation {operation}")
     except Exception as e:  # noqa: BLE001
-        res["ok"] = False
-        res["error"] = f"{type(e).__name__}: {str(e)[:300]}"
+        if navigation_pending(str(e)):
+            # The action was performed; the page it asked for has not answered within action_timeout_ms. Wait for it
+            # (what is left of the navigation budget) and report the action as landed, slow: Jev's history must not
+            # say a click failed when the page then arrives.
+            res["slow_navigation"] = await_navigation(page, spec, before, timeout)
+        else:
+            res["ok"] = False
+            res["error"] = f"{type(e).__name__}: {str(e)[:300]}"
     return res
 
 
@@ -1125,8 +1170,23 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     was = pending
                     pending = None
                     if passes:
+                        checked = check_assertions(spec, page, obs, secret_values) if spec["assert"] else []
+                        if assertions_can_wait(checked, obs.get("covered", 0), sig != was["sig"], was["rechecks"]):
+                            # The pass is in sight (a toast announced the save) but the page is still busy, controls under
+                            # the saving overlay or changed during the pause, and the assertions do not hold yet (the URL
+                            # still the form's): not the settled page. Look again, as for a page that shows no pass yet.
+                            pending = {**was, "sig": sig, "rechecks": was["rechecks"] + 1}
+                            step["pending_outcome"] = passes[0]["name"]
+                            step["recheck_again"] = pending["rechecks"]
+                            step["assertions_pending"] = [a for a in checked if not a["ok"]]
+                            final.setdefault("first_seen_at_step", n)
+                            park(step, "pass in sight but the page is still busy and the assertions do not hold yet; looking again",
+                                 wait_entry(n, was["action"], "the page was still busy while the result was being checked; checking again"), sig,
+                                 wait_ms=spec["browser"]["settle_ms"] * min(2 ** pending["rechecks"], WAIT_BACKOFF_MAX),
+                                 before=obs.get("fingerprint"))
+                            continue
                         pre = {**merged_adj, "answers": answers} if merged_adj and merged_adj["name"] == passes[0]["name"] else None
-                        settle_pass(page, step, obs, passes[0], was["action"], jev, pre)
+                        settle_pass(page, step, obs, passes[0], was["action"], jev, pre, assertions=checked or None)
                         break
                     if sig != was["sig"] and was["rechecks"] < CONFIRM_RECHECKS_MAX:
                         # The page changed during the pause and shows no pass yet: this is not the settled page, so
