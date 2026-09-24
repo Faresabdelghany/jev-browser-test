@@ -102,7 +102,7 @@ format, rubric and runner design.
 
 ## Examples
 
-`specs/examples/` holds eighteen specs against public sites: the nine the real-application trial ran
+`specs/examples/` holds nineteen specs against public sites: the nine the real-application trial ran
 (`docs/superpowers/plans/2026-09-22-handoff-after-real-app.md`), one more, and eight added on 2026-09-24 to reach
 flows the first ten did not (`docs/superpowers/plans/2026-09-24-handoff-after-more-examples.md`; they found four
 runner defects, fixed in `4bd7429` and the commit after `14ecee9`). Their latest suite run, at `14ecee9` with 3
@@ -128,6 +128,7 @@ requests over 54 runs, 228 s on 2 workers; the ten older specs read as at `0a872
 | `login-logout` | the-internet.herokuapp.com/login | Jev types the published username and password, logs in, logs out | a credential typed by Jev and masked through `secrets`, a two-page flow, `text_in` on `#flash` | pass 3/3, 6 requests, "You logged out of the secure area!" |
 | `table-sort-due` | the-internet.herokuapp.com/tables | click the Due header of Example 1 | headers with no affordance at all (no role, tabindex, onclick or pointer cursor): not in Jev's table, so the run ends undetermined by `low_confidence`, `stuck` or `blocked`; an `expect` on the outcome only; `text_in` on the cells because `text_order` would be fooled by the second table | expected 3/3 (undetermined; `low_confidence` 3/3 with the footer link named in `notes`), 4 requests |
 | `hrm-add-employee` | opensource-demo.orangehrmlive.com, Admin / admin123 | login in `setup`, PIM, Add Employee, two names, Save | a slow admin single-page app: forms under loading overlays (`covered_controls`), a sidebar with its own Search box, NO-EFFECT while Save is in flight, `field_value` on the saved record, `settle_ms` 2500; on 2 workers two forms opened in the same second share the pre-filled Employee Id and the second Save is rejected (`employee_id_taken`, a race in the app): run it on one worker | pass 1/3 at `14ecee9` (two workers: the id collision and a confirmation look that landed on a loading overlay); **pass 3/3 at `9139e22` on one worker**, 10 requests, "Jevtest Runner" |
+| `hrm-login` | opensource-demo.orangehrmlive.com, Admin / admin123 | Jev types the credentials the page prints and logs in, so the Dashboard opens | the same admin single-page app's login driven by Jev end to end: an empty shell before the app renders (`wait_for` the Username field in `setup`; without it step 1 had nothing to act on and was waited out), the spinner after Login waited out as an undecided step, `text_in` on the topbar breadcrumb because the sidebar also says Dashboard | pass 2/2 (headless), 6 requests, 7.7 s, "PIM" |
 | `toolshop-search-cart` | practicesoftwaretesting.com | search, open a product from the results, add to cart, open the cart | a search box with its own button, card links, a toast and a header badge, `field_value` on the cart's quantity field | pass 3/3, 10 requests, "Proceed to checkout" |
 
 The shop and HRM specs' credentials are the demo accounts the sites print on their own login pages. Run them all

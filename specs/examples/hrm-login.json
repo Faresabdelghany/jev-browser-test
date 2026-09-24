@@ -1,0 +1,73 @@
+{
+  "id": "hrm-login",
+  "comment": "OrangeHRM's public demo login, driven by Jev end to end (hrm-add-employee scripts the same login in setup). The credentials are the ones the login page prints (Admin / admin123); the password is still listed in secrets to exercise masking on a value Jev types. A slow single-page app: the login page is an empty shell until the app renders (setup waits for the Username field, otherwise step 1 has nothing to act on), and a spinner covers the page after Login before the Dashboard route appears, hence settle_ms 2500 and a 45 s navigation timeout. text_in on the topbar breadcrumb because the sidebar and widgets also mention 'Dashboard'.",
+  "start_url": "https://opensource-demo.orangehrmlive.com/web/index.php/auth/login",
+  "goal": "Log in with the given username and password so that the Dashboard opens: the topbar heading says 'Dashboard' and the left sidebar lists the modules (Admin, PIM, Leave, Time).",
+  "notes": "The login page has a Username field, a Password field and a Login button; it also prints the demo credentials as text, which is not a control. After Login a loading spinner shows for a moment before the Dashboard appears: wait for it. Do not click 'Forgot your password?'.",
+  "data": {
+    "username": "Admin",
+    "password": "admin123"
+  },
+  "secrets": [
+    "password"
+  ],
+  "setup": [
+    {
+      "action": "wait_for",
+      "selector": "input[name=\"username\"]",
+      "timeout_ms": 30000
+    }
+  ],
+  "checks": {
+    "on_login_page": "The page heading says 'Login' and Username and Password fields are shown",
+    "loading": "A loading spinner is shown and no page heading yet"
+  },
+  "outcomes": {
+    "dashboard_shown": {
+      "when": "The topbar heading says 'Dashboard'. The left sidebar lists PIM among the modules",
+      "verdict": "pass"
+    },
+    "login_rejected": {
+      "when": "A red 'Invalid credentials' message is shown above the login form",
+      "verdict": "bug",
+      "requires_action": true,
+      "note": "the credentials are the ones the page itself prints"
+    },
+    "required_error": {
+      "when": "A red 'Required' message is shown under the Username or the Password field",
+      "verdict": "bug",
+      "requires_action": true,
+      "note": "both values were provided in data: a field was left empty or the form lost the typed value"
+    },
+    "app_error": {
+      "when": "An error page, a stack trace or 'something went wrong' text is shown",
+      "verdict": "bug"
+    }
+  },
+  "assert": [
+    {
+      "url_matches": "**/dashboard/**"
+    },
+    {
+      "text_in": {
+        "selector": ".oxd-topbar-header-breadcrumb",
+        "contains": "Dashboard"
+      }
+    },
+    {
+      "element_present": {
+        "role": "link",
+        "name": "PIM"
+      }
+    }
+  ],
+  "browser": {
+    "settle_ms": 2500,
+    "quiet_ms": 200,
+    "navigation_timeout_ms": 45000
+  },
+  "budget": {
+    "max_steps": 10,
+    "max_seconds": 150
+  }
+}
