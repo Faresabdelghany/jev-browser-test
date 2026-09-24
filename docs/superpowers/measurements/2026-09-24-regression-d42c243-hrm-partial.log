@@ -1,0 +1,7 @@
+hrm-add-employee 1/3: undetermined (done_unverified) 77205 ms
+hrm-add-employee 2/3: undetermined (assert_failed) 77097 ms
+hrm-add-employee 3/3: undetermined (budget_exhausted) 82519 ms
+hrm-admin-add-user 1/3: environment failure (exit 2) 110041 ms
+hrm-admin-add-user 2/3: user_listed (pass) 152428 ms
+hrm-admin-add-user 3/3: environment failure (exit 2) 53539 ms
+hrm-leave-assign 1/3: undetermined (low_confidence) 142155 ms

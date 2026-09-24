@@ -661,3 +661,83 @@ clean export of `8fea73d`, the deferral widened to clicks.
   three: the very shape of round 2's Leave failure, caught one step earlier). Requests a run barely moved across the
   rounds (PIM 17 → 16 → 16, Leave 23 → 19 → 22, admin 18 → 18 → 19): a deferral costs one request and saves the
   wandering it prevents.
+
+## Regression suite after the OrangeHRM fixes (2026-09-24, midday): twenty-two specs at `9edd768`, a slow hour, `d42c243`, `0e2bc07`
+
+Today's runner changes (the observer dropping a pointer wrapper around one control, the covered count in the
+fingerprint, the deferral of any marginal action on a covered page) touch every spec, and the morning's rounds had
+rerun only the three new OrangeHRM specs. This is the full suite: `specs/examples/*.json --repeat 3`, the seventeen
+non-`hrm-*` specs on two workers and the five `hrm-*` specs on one worker, each from a clean export
+(`2026-09-24-regression-<commit>-{examples,hrm}.{json,md}`).
+
+**At `9edd768`, the seventeen read exactly as at `14ecee9` / `9139e22`** (`2026-09-24-regression-9edd768-examples.md`,
+240 s on two workers): twelve pass 3/3 with the same request counts and evidence lines, `forgot-password`,
+`shop-checkout-error-account` and `table-sort-due` expected 3/3, `shop-checkout-problem-account` bug 3/3, the two pages
+that vary by design computed flaky (`menu-random` entry missing 2 / all 1, `notify-random` success 2 / failure 1), and
+one environment failure (`login-logout` run 3: `Page.goto: Timeout 30000ms`, a Heroku cold start; the other two runs
+passed). No verdict moved.
+
+**The five OrangeHRM specs went 3/15** (`2026-09-24-regression-9edd768-hrm.md`, 1,254 s on one worker): `hrm-login`
+pass 3/3, the four others 0/3, twelve runs `low_confidence` and one `assert_failed`. The demo had entered a slow hour
+(its login page 5–7 s to serve by `curl`, against 0.9 s; a module page 9–17 s), and every red run has the same first
+step: the sidebar click flagged `ACTION-FAILED` with `TimeoutError: Locator.click: Timeout 8000ms exceeded`, and the
+next observation on the page the click asked for. Playwright performs the click ("click action done" in its call
+log) and then waits for the navigation it scheduled; on this host that wait, not the element, ran out
+`action_timeout_ms`. The history then told Jev the click had failed while the page showed it had worked, and every
+later decision of the run read 0.2–0.5 (five to eight `LOW-CONF` steps a run, wall-clock 68–126 s against 19–33 s
+in the morning's round 3). The one `assert_failed` (add-employee run 3) confirmed `employee_saved` on the toast
+'Successfully Saved' while the saving overlay still covered the form (`COVERED:9`) and the URL was still the form's,
+two seconds before the Personal Details page arrived.
+
+**`d42c243`** reads Playwright's account (`navigation_pending`: the marker "waiting for scheduled navigations to
+finish"), waits for the page for the rest of `navigation_timeout_ms` and records the click as executed and slow
+(`executed.slow_navigation`, flag `SLOW-NAV:<s>`; the same tolerance on a scripted `setup` click), and parks a
+confirmation look again when the pass is in sight on a page still covered or changed during the pause but the
+assertions do not hold yet (`assertions_can_wait`, flags `RECHECK:n ASSERT-PENDING:n`). Nine unit tests on the real
+1.63 call log, selftest 4m (a local site whose module page answers after 1 s) and 4n (a save whose toast comes under
+the overlay), both red on the `9edd768` scripts. Rerun in the same hour:
+
+- The seventeen (`2026-09-24-regression-d42c243-examples.md`, 249 s): no failed and no slow action in 51 runs, the same
+  verdicts, `login-logout` 3/3 this time, and two runs worth the trace. `dynamic-controls` run 2 (a 28 s cold start)
+  never showed "It's gone!" after Remove: the trace's text carries "It's enabled!" alone through steps 10–12, Jev read
+  `both_done` at 0.56–0.60 and DONE at 0.36–0.47, and the run ended `low_confidence` (suggested bug): the right hedge
+  on a page the app had left half done. `table-sort-due` run 2: Jev clicked the footer link at 0.55 (`NO-EFFECT`, it
+  opens a tab) and `not_sorted`, a bug outcome with `requires_action`, then read as the ending against the spec's
+  `expect`; the two bug outcomes describe the table after the Due header was clicked and the header is the one
+  control Jev cannot see, so they now carry `after: {click: Due}` (`0e2bc07`).
+- The five (`2026-09-24-regression-d42c243-hrm-partial.log`; the suite was stopped after seven runs to make room for
+  the next commit): every sidebar click is `SLOW-NAV` now (13.3 / 17.2 / 12.4 s on the PIM link) and Jev's history
+  says it landed, but `hrm-add-employee` still 0/3 with new endings. Run 2 saw `employee_saved` on the Personal Details
+  URL while the document was still empty (no controls, no text, one signature for two looks) and ended `assert_failed`
+  on it. Runs 1 and 3 reached the Save's confirmation on the last of their 16 steps (a slow navigation, the deferred
+  sidebar typing and two hesitations on the covered form, two waits while the Save was in flight) and ended
+  `done_unverified` / `budget_exhausted` with the record saved. `hrm-admin-add-user`: pass in 152 s, and two
+  environment failures at `setup[10]`, the seed employee's Save taking more than 45 s to reach its Personal Details
+  page; `hrm-leave-assign` run 1 `low_confidence` in 142 s.
+
+**`0e2bc07`**: a busy page is one with covered controls or none at all (`page_busy`), and both confirmation branches
+(a pass in sight whose assertions do not hold, a DONE with no pass yet) park again on it, bounded by
+`CONFIRM_RECHECKS_MAX` (selftest 4o: the record page arriving as an empty shell first, two parked looks, then the
+pass). `hrm-add-employee` gets `max_steps` 24 / `max_seconds` 240 (its comment counts the slow hour's steps), and
+`table-sort-due` the `after` above. The reruns at this commit follow below; the five OrangeHRM specs were held until
+the demo's login page answered in under 1.5 s again, because a `setup` step that waits 45 s for a Save is the
+host's failure, never the flow's.
+
+**The seventeen at `0e2bc07`** (`2026-09-24-regression-0e2bc07-examples.md`, 219 s on two workers; no failed action, no
+slow navigation, no recheck in 51 runs): the same twelve pass 3/3, the three expected 3/3 (`table-sort-due` with the
+`after`: `low_confidence` 3/3 at 4 requests), `shop-checkout-problem-account` bug 3/3, `menu-random` all 2 / missing 1,
+`notify-random` failure 3/3 (its coin), and `dynamic-controls` undetermined 2/3: both runs ended `done_unverified` on
+a page that showed both messages and passed every assertion, Jev reading `both_done` at 0.77–0.79 (the third run 0.82,
+pass). The two-message wording has always sat at the gate on this page (the row in README "Examples" recorded 0.81 at
+`14ecee9`): the text "Wait for it..." stays on the page after each loading bar. The outcome now names the buttons' new
+captions with the messages, and the notes say what "Wait for it..." means: 3/3, `both_done` 0.96–0.97, 9 requests
+(`runs/suite/dyn-sharpened` of the export; the spec change is in the commit after `0e2bc07`).
+
+| spec | `9edd768` | `d42c243` | `0e2bc07` |
+|---|---|---|---|
+| twelve flows (`add-remove-elements`, `load-wait`, `login-logout`, `modal-close`, `shop-add-second-item`, `shop-checkout`, `todo-add-filter`, `toolshop-search-cart`, `web-form-submit`, `wiki-search`, and see below) | pass 3/3 (one `login-logout` run a Heroku `Page.goto` timeout) | pass 3/3 | pass 3/3 |
+| `dynamic-controls` | pass 3/3 | flaky: pass 2, `low_confidence` 1 (the app never rendered "It's gone!" after a 28 s cold start) | flaky: pass 1, `done_unverified` 2 (`both_done` 0.77–0.79 on the finished page); **3/3 at 0.96–0.97 with the sharpened wording** |
+| `forgot-password`, `shop-checkout-error-account` | expected 3/3 | expected 3/3 | expected 3/3 |
+| `table-sort-due` | expected 3/3 | flaky: expected 2, `not_sorted` 1 (the footer link at 0.55) | expected 3/3 (`after`) |
+| `shop-checkout-problem-account` | bug 3/3 | bug 3/3 | bug 3/3 |
+| `menu-random` / `notify-random` (vary by design) | flaky 2/1 · flaky 2/1 | flaky 2/1 · flaky 1/2 | flaky 2/1 · bug 3/3 |
