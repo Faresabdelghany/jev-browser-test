@@ -608,3 +608,56 @@ runner changes below touches a run that never hesitates.
   at 1.00); (3) a Save that navigated during the confirmation look raised "Execution context was destroyed" and the
   run ended `error` / suggested `flaky` for a flow that had saved: the observation is retried on the new document;
   (4) the single confirmation look described above.
+
+## OrangeHRM fixes (2026-09-24, morning): the three new specs, rounds 1–3 at `f06f818`, `989ab2f`, `8fea73d`
+
+`2026-09-24-claude-cost-comparison.md`: the Jev-versus-Playwright-CLI comparison of 04:04–04:12 (its Jev runs and the
+Playwright CLI snapshots are the re-measurable half; the Claude-token figures are the session's report).
+`2026-09-24-hrm-three-suite-round1.json` / `.md`: `run_suite.py` over `hrm-admin-add-user`, `hrm-leave-assign` and
+`hrm-pim-add-employee-list`, `--repeat 3 --workers 1`, from a clean export of `f06f818` (the commit that added the
+specs on `${RUN_STAMP}`, after the run stamp, the deferred typing, the toast capture, the `after` option and the
+scaffold). `2026-09-24-hrm-three-suite-round2.json` / `.md`: the same from a clean export of `989ab2f`, the observer
+fix that round 1 forced, which exposed the next defect. `2026-09-24-hrm-three-suite.json` / `.md`: round 3, from a
+clean export of `8fea73d`, the deferral widened to clicks.
+
+| spec | round 1 (`f06f818`) | round 2 (`989ab2f`) | round 3 (`8fea73d`) | requests / run (r1 · r2 · r3) | evidence |
+|---|---|---|---|---:|---|
+| `hrm-admin-add-user` | **pass 3/3**, 27.4 s median | **pass 3/3**, 26.5 s | **pass 3/3**, 33.3 s | 18 · 18 · 19 | the username (`jev<stamp>`) or the employee name, 3/3 |
+| `hrm-leave-assign` | **flaky**: pass 2/3, `low_confidence` 1/3, 28.3 s | **undetermined 3/3** (`low_confidence`), 42.7 s | **pass 3/3**, 29.7 s | 23 · 19 · 22 | "(1) Record Found" on every pass |
+| `hrm-pim-add-employee-list` | **pass 3/3**, 19.2 s | **pass 3/3**, 19.2 s | **pass 3/3**, 18.6 s | 17 · 16 · 16 | "(1) Record Found" 3/3 |
+
+- **Every run had its own stamp** (`result.run_stamp`, eight base-36 characters): nine runs, nine distinct usernames /
+  last names, no "Already exists", no second record found, no cleanup run.
+- **The typing deferral fired live** (PIM run 1, step 3: `TYPE_TEXT` into the sidebar's `Search` at 0.68 with nine
+  controls covered, `TYPE-DEFERRED:9`; the wait ended when the overlay lifted and step 4 typed First Name at 0.94).
+  In the two other PIM runs the form was already shown when Jev first typed. Before the deferral every PIM run of the
+  night typed the first name into the sidebar filter first.
+- **Toasts were captured in every run** ("Success Successfully Saved", `live`, tone `success`: the seeded employee's
+  save during `setup` lands on step 1, and the Leave assignment's own save 0.35 s before the observation after Ok).
+  The Leave pass rested on the table row, not on the toast; the capture is evidence in the trace for now.
+- **The one red run** (Leave 2/3) was neither the stamp nor the toast: after Ok the Assign Leave form is shown again,
+  emptied, and Jev had to click the Leave List tab; OrangeHRM builds its top-row tabs as an `<li>` with `cursor:
+  pointer` around an `<a>` of the same caption, so the observer offered every tab twice (`clickable "Leave List"`,
+  `link "Leave List"`) and Jev split its choice 0.57 / 0.25, then hesitated toward re-filling the form, three undecided
+  steps on one page. The spec had also said Ok redirects to the Leave List (it does not). `989ab2f` drops a pointer
+  wrapper whose only content is one offered control (a click on the control bubbles to it anyway) and corrects the
+  spec's account of the page after Ok. In run 1 of the same round Jev clicked the link at 0.62 and passed; the
+  duplicate was a coin the runner should not have offered.
+- `after: {click: Search}` on `no_records` did not need to fire (the outcome never crossed 0.8 before Search in these
+  runs); it is the guard against the night's early firing, kept.
+- **Round 2 lost all three Leave runs**, and to the same step: after Assign the form's controls sit under a spinner
+  (`COVERED:7`) for a moment before the 'Balance not sufficient' dialog opens; Jev, seeing the form and the goal's next
+  clause, clicked the Leave List tab at 0.63 / 0.74 (operation / target) while that request was in flight, the dialog
+  never came, and it then hesitated over the two unnamed calendar icons until `low_confidence`. In round 1 the same
+  pick was split across the duplicate tab (0.57 / 0.25) and refused, and the wait let the dialog appear: the duplicate
+  had been hiding the premature click. `8fea73d` widens the covered-page deferral from typing to any marginal CLICK /
+  TYPE_TEXT / SELECT (`thresholds.covered_action_confidence`, flag `DEFERRED-<OP>:n`): that click, at 0.63 with seven
+  controls covered, becomes one wait that ends when the dialog opens. The spec's goal now also says to wait for the
+  dialog and click nothing else before it.
+- **Round 3: all nine runs passed**, 100% agreement on each spec, nine distinct stamps, 243 s of wall-clock on one
+  worker (`2026-09-24-hrm-three-suite.md`). The Leave runs clicked Ok at 0.93–0.97 the step the dialog was on screen
+  (the goal now names the wait) and needed no deferral; the PIM runs used it five times in nine (`DEFERRED-TYPE_TEXT:9`
+  on the sidebar filter in two runs, `DEFERRED-CLICK:9` on the Employee List tab while the Save was in flight in all
+  three: the very shape of round 2's Leave failure, caught one step earlier). Requests a run barely moved across the
+  rounds (PIM 17 → 16 → 16, Leave 23 → 19 → 22, admin 18 → 18 → 19): a deferral costs one request and saves the
+  wandering it prevents.
