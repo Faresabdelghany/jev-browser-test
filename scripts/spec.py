@@ -108,11 +108,13 @@ DEFAULTS = {
         "max_low_confidence_steps": 3,
         "max_repeat": 3,
         "max_stale": 3,  # consecutive decisions invalidated by the page changing -> unstable_page
-        # A TYPE_TEXT decided below this while controls sit under another layer (covered_controls > 0: a form still
-        # loading) is deferred once per page: one wait ending when the page changes, then Jev decides again. Live,
-        # the first name went into the sidebar's menu filter at 0.54-0.67 in every PIM run while the form's fields
-        # were covered; the confident typings into the right fields read 0.84-0.99. 0 turns the deferral off.
-        "covered_type_confidence": 0.8,
+        # A CLICK / TYPE_TEXT / SELECT decided below this while controls sit under another layer (covered_controls > 0:
+        # a form still loading, a request in flight) is deferred once per page: one wait ending when the page changes,
+        # then Jev decides again. Live, the first name went into the sidebar's menu filter at 0.54-0.67 in every PIM
+        # run while the form's fields were covered (the right fields read 0.84-0.99), and a Leave flow clicked the
+        # Leave List tab at 0.74 while the spinner before the 'Balance not sufficient' dialog covered the form, three
+        # runs of three. 0 turns the deferral off.
+        "covered_action_confidence": 0.8,
     },
     "browser": {
         "headless": True,
@@ -369,7 +371,7 @@ def validate(spec: dict) -> list[str]:
     if cdp is not None and not (isinstance(cdp, str) and cdp.startswith(("http://", "https://", "ws://", "wss://"))):
         errors.append("'browser.cdp_url' must be an http(s):// or ws(s):// URL of a browser's remote-debugging endpoint")
     t = spec.get("thresholds", {})
-    for k in ("check_true", "never_true", "outcome_true", "min_confidence", "covered_type_confidence"):
+    for k in ("check_true", "never_true", "outcome_true", "min_confidence", "covered_action_confidence"):
         v = t.get(k, 0.5)
         if not (isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= v <= 1.0):
             errors.append(f"'thresholds.{k}' must be a number between 0 and 1")

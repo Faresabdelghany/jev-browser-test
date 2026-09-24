@@ -207,7 +207,7 @@ environment failure (or a spec file is missing / two files share an id).
       //   appear, so a toast gone before the runner looked is here); kind = alert | status | log | live (aria-live) | toast (a toast-like class name),
       //   tone = success | error | warning | info when the class names say; also on the history entry of the last executed action ("announced":
       //   [texts]) and in Jev's state for this and the next two steps; flag ANNOUNCED:"…"
-      "type_deferred": 9,                                            // a TYPE_TEXT below thresholds.covered_type_confidence while 9 controls were covered: not executed, executed is a runner WAIT ending when the page changes (once per page signature); flag TYPE-DEFERRED:9
+      "action_deferred": { "operation": "TYPE_TEXT", "covered": 9 },  // a CLICK / TYPE_TEXT / SELECT below thresholds.covered_action_confidence while 9 controls were covered: not executed, executed is a runner WAIT ending when the page changes (once per page signature); flag DEFERRED-TYPE_TEXT:9
       "no_effect": true,                                             // this step's executed CLICK/TYPE_TEXT/SELECT/PRESS_ENTER changed nothing (page_changed false): flag NO-EFFECT
       "after_no_effect": true,                                       // this observation is the page the previous action failed to change (a key-mode picture)
       "adjudication_merged": true,                                   // the confirming step: the evidence questions rode in this request (state.lines added)

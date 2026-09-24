@@ -57,8 +57,9 @@ never echo the key back, never write it into a spec.
 
 ### 1. Write the spec
 
-Scaffold it, then edit; do not author it by hand (measured: writing three specs from the format reference cost
-~50k tokens of reading and drafting on a first run, the scaffold's edit is a fraction of that):
+Scaffold it, then edit; do not author it by hand (measured on 2026-09-24: a first run that read this skill and the
+format reference and wrote three specs by hand cost ~72k Claude tokens, against ~19k for driving the same two flows
+step by step with a snapshot tool; a rerun of the finished specs cost ~6k):
 
 ```bash
 python $SKILL/scripts/scaffold.py --url https://app.example.com/ \
@@ -71,9 +72,6 @@ python $SKILL/scripts/scaffold.py --url https://app.example.com/ \
 ```
 
 Single quotes around anything with `${...}` (the shell must not expand it: the runner does, at run time).
-
-```
-```
 
 It writes a spec that already validates (goal, data, a `pass` outcome from the goal's "so that" clause, your `bug`
 outcomes with `requires_action`, the standing `app_error`, your assertions and setup steps, `--slow` for a slow
@@ -158,7 +156,7 @@ Open the step table only for `undetermined` or a surprising outcome. Flags worth
 action landed and the page did not change: the classic dead control; the next step's picture shows it),
 `DEFERRED:<outcome>` (true of the page, but its `requires_action` / `after` condition has not happened yet: not
 counted), `COVERED:<n>` (controls on screen but under a loading overlay or a dialog, so not offered: the form is still
-loading), `TYPE-DEFERRED:<n>` (a marginal typing on such a page turned into one wait), `ANNOUNCED:"…"` (a toast or
+loading), `DEFERRED-<OP>:<n>` (a marginal click or typing on such a page turned into one wait), `ANNOUNCED:"…"` (a toast or
 live message appeared between the previous observation and this one; Jev saw it in its state for this and the next
 two steps, faded or not), `LOW-CONF`, `STALE`, `EVIDENCE-ASKED`. With the
 default `screenshots: "key"` the terminal step, every flagged step and the step after a no-effect action have a
@@ -263,13 +261,15 @@ keys or two same-named elements wants keys named like the app's labels, or a `no
 - `references/spec-format.md` (every field), `troubleshooting.md` (symptom → fix), `suites.md` (agreement, flakiness,
   reports), `trace-format.md`, `verdict-rubric.md`, `runner-design.md`.
 - `specs/smoke-login.json`, `specs/smoke-login-badpw.json` (the demo-site smoke specs); `specs/examples/*.json`,
-  nineteen specs against public sites: a shop checkout in four variants (two with the accounts the site documents as
+  twenty-two specs against public sites: a shop checkout in four variants (two with the accounts the site documents as
   broken, one of them an `expect` spec), an encyclopedia search with a real autocomplete, a todo app, a 5 s loader,
   a random notification (`text_in` on the notification), a modal on load, a menu that drops an entry at random, a
   static web form (select, checkbox, radio, the GET query asserted), add/remove elements (a count asserted with
   `text_in` `equals`), two asynchronous controls with loaders, a forgot-password form that answers with a server
   error (expected-red), a Jev-typed login and logout, an admin panel's own login typed by Jev, sortable table headers with no affordance (an expected
   TEST_ISSUE: what a control Jev cannot see looks like), an admin panel's Add Employee behind loading overlays
-  (`covered_controls`, `settle_ms` raised for a slow demo), a shop's search-to-cart. Copy one as the starting point
-  for your own app. README.md "Examples" has the table.
+  (`covered_controls`, `settle_ms` raised for a slow demo), a shop's search-to-cart, and three more admin-panel flows
+  (a user with a role and a password, a leave assignment confirmed by toasts, an employee added then found in a list)
+  that keep their data unique with `${RUN_STAMP}`. Copy one as the starting point for your own app. README.md
+  "Examples" has the table.
 - `assets/spec.example.json` — a realistic spec with login in `setup` and a Jev-driven goal.

@@ -58,7 +58,7 @@ outcome seen (fail_fast → `outcome`; an outcome held back by `requires_action`
 instead) → a pending pass confirmed (`passed` / `assert_failed`) or not
 (`done_unverified` after Jev's DONE; carry on after an auto sighting) → a pass outcome seen (`auto_done` →
 WAIT, recheck next step) → invalid `operation` after the retry (`error`) → low-confidence streak → a marginal
-TYPE_TEXT while controls are covered (→ one WAIT per page, ending when the page changes) →
+CLICK / TYPE_TEXT / SELECT while controls are covered (→ one WAIT per page, ending when the page changes) →
 freshness guard (stale → WAIT and re-observe; `max_stale` in a row → `unstable_page`) → DONE (→ WAIT,
 recheck next step) / BLOCKED chosen → repeat detection (`stuck`) → execute → settle → next step.
 
@@ -275,9 +275,12 @@ The controls the occlusion test rejects are counted as `covered` (Jev sees `cove
 off a form moves no tagged node and no text, yet it is the change every WAIT on such a page is waiting for, so
 the whole-page comparison (`wait_for_change`, DONE / BLOCKED / PRESS_ENTER) reads a different count as a change
 (selftest `covered_check`, scenario 4i: the deferral wait ended at 629 ms, the overlay's lifetime, instead of its
-1500 ms ceiling). A marginal TYPE_TEXT on such a page (below `thresholds.covered_type_confidence`) is deferred once:
-the form the value belongs in is still loading and the one free field, a sidebar filter, is not it; a layer that
-stays is a dialog, and the next decision on the same page is executed (scenarios 4i, 4j).
+1500 ms ceiling). A marginal CLICK, TYPE_TEXT or SELECT on such a page (below `thresholds.covered_action_confidence`)
+is deferred once: the page is busy, the form the value belongs in is still loading and the one free field, a sidebar
+filter, is not it, or the request that opens the confirmation dialog is still in flight and the tab Jev moves on to
+is not yet due (live: three Leave runs of three clicked the Leave List tab at 0.74 under the spinner that precedes the
+'Balance not sufficient' dialog, once the duplicate tab no longer split that choice); a layer that stays is a dialog,
+and the next decision on the same page is executed (scenarios 4i, 4j).
 
 Executing a click on a control that something sits on top of dispatches the click on the control itself
 (`executed.dispatched`), because a forced pointer click lands on the styled box and is swallowed; other

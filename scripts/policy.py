@@ -384,11 +384,15 @@ def deferred_outcomes(seen: list[dict], outcomes: dict, history: list[dict]) -> 
     return deferred
 
 
-def defer_typing(operation: str, covered: int, confidence: float, threshold: float) -> bool:
-    """Is this a marginal TYPE_TEXT on a page where controls sit under another layer? Then the loop defers it once:
-    the form the value belongs in is probably still loading, and the one free field (a sidebar filter) is not it.
-    A confident typing (>= threshold) is executed; so is any typing once nothing is covered."""
-    return operation == "TYPE_TEXT" and covered > 0 and confidence < threshold
+DEFERRABLE = {"CLICK", "TYPE_TEXT", "SELECT"}  # the actions a covered page can make Jev misplace
+
+
+def defer_action(operation: str, covered: int, confidence: float, threshold: float) -> bool:
+    """Is this a marginal action on a page where controls sit under another layer? Then the loop defers it once: the
+    page is busy (a form still loading behind an overlay, a request in flight before a dialog opens), the form the
+    value belongs in is not the one free field, and the tab Jev is moving on to is not yet due. A confident action
+    (>= threshold) is executed; so is any action once nothing is covered."""
+    return operation in DEFERRABLE and covered > 0 and confidence < threshold
 
 
 def suggested_verdict(status: str, typed: list[str | None]) -> str | None:

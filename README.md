@@ -64,6 +64,7 @@ picks the mode for the conversation, and "show me the browser" in a request does
 ## Use
 
 ```bash
+.venv/bin/python scripts/scaffold.py --url URL --goal '... so that <the visible outcome>' --data key=value --out specs/<id>.json   # a valid spec to edit
 .venv/bin/python scripts/spec.py specs/smoke-login.json                 # validate, no browser
 .venv/bin/python scripts/run_test.py specs/smoke-login.json --headed    # run one spec, watching -> runs/<id>/<ts>/result.json (--headless: in the background)
 .venv/bin/python scripts/summarize_trace.py runs/smoke-login/<ts> --result        # one run directory: result.json first
@@ -91,10 +92,13 @@ page with a pre-declared verdict), and exact expectations checked in code at the
 }
 ```
 
-The run writes `result.json`: `outcome` (one of the declared names, or `undetermined` with a typed reason
-and a suggested verdict), `verdict`, the page line that states it (selected by Jev, copied verbatim), the
-assertions, how the pass was confirmed (`confirmed_by`: the assertions holding on the sighting page, or a
-settle-and-recheck), and the story of the actions. Exit code 0 = an outcome with verdict `pass` (or, for a spec
+Any value the app keeps gets `${RUN_STAMP}` (`"last_name": "Runner${RUN_STAMP}"`): the runner substitutes a
+fresh eight-character stamp every run, so repeats and parallel workers never collide, and `result.run_stamp` says
+which. The run writes `result.json`: `outcome` (one of the declared names, or `undetermined` with a typed reason
+and a suggested verdict), `verdict`, the page line that states it (selected by Jev, copied verbatim; a toast that
+had faded is quoted as `live message: …`), the assertions, how the pass was confirmed (`confirmed_by`: the
+assertions holding on the sighting page, or a settle-and-recheck), `announcements` (every toast and live message
+the page showed, with the step it preceded), and the story of the actions. Exit code 0 = an outcome with verdict `pass` (or, for a spec
 with `expect`, the declared result), 1 = anything else, 2 = never a verdict: a spec or environment problem, a
 start URL that did not load, a setup step that failed. `SKILL.md` tells Claude how to write specs and how to act on a result
 (PASS / BUG / TEST_ISSUE / FLAKY / NEEDS_HUMAN); `references/` has the spec format, trace and result
@@ -102,10 +106,13 @@ format, rubric and runner design.
 
 ## Examples
 
-`specs/examples/` holds nineteen specs against public sites: the nine the real-application trial ran
-(`docs/superpowers/plans/2026-09-22-handoff-after-real-app.md`), one more, and eight added on 2026-09-24 to reach
+`specs/examples/` holds twenty-two specs against public sites: the nine the real-application trial ran
+(`docs/superpowers/plans/2026-09-22-handoff-after-real-app.md`), one more, eight added on 2026-09-24 to reach
 flows the first ten did not (`docs/superpowers/plans/2026-09-24-handoff-after-more-examples.md`; they found four
-runner defects, fixed in `4bd7429` and the commit after `14ecee9`). Their latest suite run, at `14ecee9` with 3
+runner defects, fixed in `4bd7429` and the commit after `14ecee9`), and four OrangeHRM flows added later that day
+(`hrm-login`, `hrm-admin-add-user`, `hrm-leave-assign`, `hrm-pim-add-employee-list`), which forced the run stamp,
+the deferred typing, the toast capture and the `after` outcome option
+(`docs/superpowers/plans/2026-09-24-handoff-after-orangehrm-fixes.md`). Their latest suite run, at `14ecee9` with 3
 repeats each on 2 workers, is `docs/superpowers/measurements/2026-09-24-examples-suite-eighteen.md` (359 Jev
 requests over 54 runs, 228 s on 2 workers; the ten older specs read as at `0a8727c`).
 
@@ -130,11 +137,16 @@ requests over 54 runs, 228 s on 2 workers; the ten older specs read as at `0a872
 | `hrm-add-employee` | opensource-demo.orangehrmlive.com, Admin / admin123 | login in `setup`, PIM, Add Employee, two names, Save | a slow admin single-page app: forms under loading overlays (`covered_controls`), a sidebar with its own Search box, NO-EFFECT while Save is in flight, `field_value` on the saved record, `settle_ms` 2500; on 2 workers two forms opened in the same second share the pre-filled Employee Id and the second Save is rejected (`employee_id_taken`, a race in the app): run it on one worker | pass 1/3 at `14ecee9` (two workers: the id collision and a confirmation look that landed on a loading overlay); **pass 3/3 at `9139e22` on one worker**, 10 requests, "Jevtest Runner" |
 | `hrm-login` | opensource-demo.orangehrmlive.com, Admin / admin123 | Jev types the credentials the page prints and logs in, so the Dashboard opens | the same admin single-page app's login driven by Jev end to end: an empty shell before the app renders (`wait_for` the Username field in `setup`; without it step 1 had nothing to act on and was waited out), the spinner after Login waited out as an undecided step, `text_in` on the topbar breadcrumb because the sidebar also says Dashboard | pass 2/2 (headless), 6 requests, 7.7 s, "PIM" |
 | `toolshop-search-cart` | practicesoftwaretesting.com | search, open a product from the results, add to cart, open the cart | a search box with its own button, card links, a toast and a header badge, `field_value` on the cart's quantity field | pass 3/3, 10 requests, "Proceed to checkout" |
+| `hrm-pim-add-employee-list` | opensource-demo.orangehrmlive.com | login in `setup`; PIM, Add Employee, two names, Save, Personal Details; Employee List, the name through the autocomplete, Search: exactly one record | `${RUN_STAMP}` in the last name (a fresh record every run), the 'Searching....' placeholder row named in `notes`, a marginal typing into the sidebar filter deferred while the form loads (`DEFERRED-TYPE_TEXT`), a two-sentence pass statement | HRM_PIM_ROW |
+| `hrm-admin-add-user` | opensource-demo.orangehrmlive.com | `setup` seeds an employee with plain Playwright; Jev opens Admin, Add, picks a role and a status from custom dropdowns, the employee through the autocomplete, types a username and a password twice, saves, finds the row | passwords through `secrets`, custom (non-`<select>`) dropdowns, `${RUN_STAMP}` in the username and the employee name, `min_confidence` 0.6 against a transient autocomplete row | HRM_ADMIN_ROW |
+| `hrm-leave-assign` | opensource-demo.orangehrmlive.com | `setup` seeds an employee; Jev assigns a day of leave (autocomplete, a typed date in the demo's yyyy-dd-mm format, a leave type, Assign, Ok in the 'Balance not sufficient' dialog), then filters the Leave List by status Scheduled and employee and searches: one record | the flow whose decisive facts were toasts ('Successfully Saved', 'Failed to Submit: No Working Days Selected'), now captured as `announcements`; `no_records` with `after: {click: Search}` (it fired on the unfiltered list before Search); a calendar popup that eats the next click, named in `notes` | HRM_LEAVE_ROW |
 
 The shop and HRM specs' credentials are the demo accounts the sites print on their own login pages. Run them all
 with `scripts/run_suite.py specs/examples/*.json --repeat 3 --workers 2` (the-internet is a free Heroku app: a cold
 start can add 25 s to a run's navigation, which the runner reports as such), one with `scripts/run_test.py
-specs/examples/<id>.json --headed`, and `hrm-add-employee` on its own with `--workers 1`. Copy one as the starting point for your own application, and keep specs for
+specs/examples/<id>.json --headed`, and the `hrm-*` specs on one worker (`--workers 1`: the demo pre-fills the next
+Employee Id when a form opens, and two forms opened in the same second collide). `specs/compare/` holds the three
+specs of the Jev-versus-Playwright-CLI comparison (`docs/superpowers/measurements/2026-09-24-claude-cost-comparison.md`). Copy one as the starting point for your own application, and keep specs for
 a private application under `specs/local/` (git-ignored).
 
 ## What it does with Jev's confidence
@@ -220,6 +232,7 @@ outcomes, evidence lines and sighting steps in every run.
 ```
 SKILL.md                    instructions Claude Code loads (the skill: this folder)
 .claude-plugin/             plugin.json + marketplace.json: the same folder installable as a single-skill plugin
+scripts/scaffold.py         URL + goal + data values -> a spec that validates, to edit (the first-run cost lever)
 scripts/run_test.py         the loop
 scripts/observe.py          page → numbered element table + freshness fingerprint (semantic, label-proxy and cursor:pointer passes)
 scripts/policy.py           state + questions for Jev, answer validation and parsing
@@ -232,8 +245,8 @@ scripts/report.py           one run -> a single static report.html (steps, proba
 scripts/bench.py            run a spec N times; medians of wall, Jev, browser, tokens, confidence
 scripts/selftest.py         offline: fake Jev, local pages, one case per terminal status and guard
 scripts/unit_tests.py       stdlib unittest for the pure parts (client, validation, criteria, bench)
-references/                 spec-format, trace-format, verdict-rubric, runner-design
-specs/                      the two smoke specs; specs/examples/ ten public-site specs (see Examples)
+references/                 spec-format, troubleshooting, suites, trace-format, verdict-rubric, runner-design
+specs/                      the two smoke specs; specs/examples/ twenty-two public-site specs (see Examples); specs/compare/ the comparison's three
 docs/superpowers/           design spec, plans, and the measurement files every number above comes from
 ```
 

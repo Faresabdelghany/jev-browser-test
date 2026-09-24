@@ -36,7 +36,7 @@ from observe import (
 )
 from policy import (
     ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, announcement_lines, build_adjudication, build_questions, build_reason_questions,
-    build_state, defer_typing, deferred_outcomes, evidence_line_keys, is_field, quoted_pick, read_checks, read_choice,
+    build_state, defer_action, deferred_outcomes, evidence_line_keys, is_field, quoted_pick, read_checks, read_choice,
     read_outcome, recent_announcements, resolve_target, seen_outcomes, suggested_verdict, validate_choice,
 )
 from spec import (HEADED_ENV, UNDETERMINED, effective_outcomes, load_dotenv, load_spec, match_expect, resolve_headless,
@@ -726,7 +726,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     wait_streak, last_wait_sig = 0, None  # lever F4: consecutive Jev WAITs on the same page signature
     after_no_effect = False  # the last executed action changed nothing: the next step shows that page (a key picture)
     low_streak, last_low_sig = 0, None  # consecutive undecided (low-confidence) steps on one page signature
-    type_deferred_sig: str | None = None  # the page signature a marginal TYPE_TEXT under a covering layer was deferred on
+    deferred_sig: str | None = None  # the page signature a marginal action was deferred on while controls were covered
     announced_raw: list[dict] = []  # messages the page reported through ANNOUNCE_FUNCTION since the last observation
     all_announcements: list[dict] = []  # every announcement of the run, each with the step it preceded
     stale_streak = 0
@@ -780,7 +780,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         return bool(step.get("never_violated") or step.get("low_confidence") or step.get("stale")
                     or step.get("outcome_seen") or step.get("pending_outcome") or step.get("outcome_unconfirmed")
                     or step.get("repeat_count", 0) >= 2 or step.get("after_no_effect") or step.get("outcome_deferred")
-                    or step.get("type_deferred"))
+                    or step.get("action_deferred"))
 
     def capture(page, step: dict, terminal: bool = False) -> None:
         """Screenshot policy. Taken after Jev's answer and before execution, so the picture is the page
@@ -1224,17 +1224,19 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     continue
                 low_streak, last_low_sig = 0, None
 
-                if (obs.get("covered") and sig != type_deferred_sig
-                        and defer_typing(operation, obs["covered"], min(confs), th["covered_type_confidence"])):
-                    # A marginal typing while controls sit under another layer: the form is probably still loading and
-                    # the one free field is not it (live: the first name went into the sidebar's menu filter in every
-                    # PIM run). Wait once, ending the moment the page changes; on the same page the next decision is
-                    # executed, whatever it is (a layer that stays is a dialog, and its field is the field).
-                    type_deferred_sig = sig
-                    step["type_deferred"] = obs["covered"]
-                    park(step, f"typing deferred: {obs['covered']} controls are under another layer; waiting for the form",
-                         wait_entry(n, "WAIT", f"typing deferred: {obs['covered']} controls were under another layer (a form "
-                                               f"still loading?); the page was given time to finish"), sig,
+                if (obs.get("covered") and sig != deferred_sig
+                        and defer_action(operation, obs["covered"], min(confs), th["covered_action_confidence"])):
+                    # A marginal action while controls sit under another layer: the page is busy (a form still loading,
+                    # a request in flight before a dialog opens) and the free control Jev picked is probably not the one
+                    # (live: the first name went into the sidebar's menu filter in every PIM run; a Leave flow clicked
+                    # the next tab at 0.74 before the confirmation dialog had opened, three runs of three). Wait once,
+                    # ending the moment the page changes; on the same page the next decision is executed, whatever it
+                    # is (a layer that stays is a dialog, and its controls are the controls).
+                    deferred_sig = sig
+                    step["action_deferred"] = {"operation": operation, "covered": obs["covered"]}
+                    park(step, f"{operation} deferred: {obs['covered']} controls are under another layer; waiting for the page",
+                         wait_entry(n, "WAIT", f"{operation} deferred: {obs['covered']} controls were under another layer (the page "
+                                               f"still loading or a request in flight?); the page was given time to finish"), sig,
                          wait_ms=spec["browser"]["settle_ms"], before=obs.get("fingerprint"))
                     continue
 

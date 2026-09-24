@@ -81,8 +81,9 @@ def _flags(step: dict) -> str:
         f.append("DEFERRED:" + ",".join(step["outcome_deferred"]))  # true of the page, but no action was taken yet (requires_action)
     if step.get("covered_controls"):
         f.append(f"COVERED:{step['covered_controls']}")  # controls on screen under another layer (a loading overlay, a dialog): not offered
-    if step.get("type_deferred"):
-        f.append(f"TYPE-DEFERRED:{step['type_deferred']}")  # a marginal TYPE_TEXT while that many controls were covered: one wait instead
+    if step.get("action_deferred"):
+        d = step["action_deferred"]  # a marginal action while that many controls were covered: one wait instead
+        f.append(f"DEFERRED-{d.get('operation')}:{d.get('covered')}")
     if step.get("announcements"):
         # what the page announced (a toast, a live message) between the previous observation and this one; the first message shown
         first = step["announcements"][0].get("text") or ""

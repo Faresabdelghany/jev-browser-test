@@ -1843,30 +1843,34 @@ class AfterOutcomeTests(unittest.TestCase):
         self.assertEqual(deferred_outcomes(seen, outcomes, [click_reset, click_search]), [])
 
 
-class DeferTypingTests(unittest.TestCase):
-    """A marginal TYPE_TEXT while controls sit under another layer (a loading overlay) is one wait, not a typing:
-    live, the first name went into the sidebar's menu filter in every PIM run because the form's own fields were
-    still covered and the filter was the only free box."""
+class DeferActionTests(unittest.TestCase):
+    """A marginal action while controls sit under another layer (a loading overlay) is one wait, not an action: live,
+    the first name went into the sidebar's menu filter in every PIM run because the form's own fields were still
+    covered and the filter was the only free box; and a Leave flow clicked the Leave List tab at 0.74 while the
+    form's controls were covered by the spinner that precedes the 'Balance not sufficient' dialog, three runs of three."""
 
     def test_threshold_default_and_bounds(self) -> None:
         from spec import validate
-        self.assertEqual(DEFAULTS["thresholds"]["covered_type_confidence"], 0.8)
-        self.assertEqual(validate(_merge(SPEC, {"thresholds": {"covered_type_confidence": 0.0}})), [])
-        self.assertEqual(validate(_merge(SPEC, {"thresholds": {"covered_type_confidence": 1}})), [])
-        self.assertTrue(any("covered_type_confidence" in p for p in validate(_merge(SPEC, {"thresholds": {"covered_type_confidence": 1.5}}))))
-        self.assertTrue(any("covered_type_confidence" in p for p in validate(_merge(SPEC, {"thresholds": {"covered_type_confidence": "0.8"}}))))
+        self.assertEqual(DEFAULTS["thresholds"]["covered_action_confidence"], 0.8)
+        self.assertEqual(validate(_merge(SPEC, {"thresholds": {"covered_action_confidence": 0.0}})), [])
+        self.assertEqual(validate(_merge(SPEC, {"thresholds": {"covered_action_confidence": 1}})), [])
+        self.assertTrue(any("covered_action_confidence" in p for p in validate(_merge(SPEC, {"thresholds": {"covered_action_confidence": 1.5}}))))
+        self.assertTrue(any("covered_action_confidence" in p for p in validate(_merge(SPEC, {"thresholds": {"covered_action_confidence": "0.8"}}))))
 
-    def test_defer_typing_only_for_a_marginal_type_text_on_a_covered_page(self) -> None:
-        from policy import defer_typing
-        self.assertTrue(defer_typing("TYPE_TEXT", covered=9, confidence=0.65, threshold=0.8))
-        self.assertFalse(defer_typing("TYPE_TEXT", covered=0, confidence=0.65, threshold=0.8), "nothing is covered: the free field is the field")
-        self.assertFalse(defer_typing("TYPE_TEXT", covered=9, confidence=0.8, threshold=0.8), "a confident typing is executed")
-        self.assertFalse(defer_typing("CLICK", covered=9, confidence=0.65, threshold=0.8), "only typing is deferred")
-        self.assertFalse(defer_typing("TYPE_TEXT", covered=9, confidence=0.65, threshold=0.0), "threshold 0 turns it off")
+    def test_defer_action_for_a_marginal_click_typing_or_select_on_a_covered_page(self) -> None:
+        from policy import defer_action
+        for op in ("TYPE_TEXT", "CLICK", "SELECT"):
+            self.assertTrue(defer_action(op, covered=9, confidence=0.65, threshold=0.8), op)
+            self.assertFalse(defer_action(op, covered=0, confidence=0.65, threshold=0.8), "nothing is covered: the page is not busy")
+            self.assertFalse(defer_action(op, covered=9, confidence=0.8, threshold=0.8), "a confident action is executed")
+            self.assertFalse(defer_action(op, covered=9, confidence=0.65, threshold=0.0), "threshold 0 turns it off")
+        for op in ("WAIT", "DONE", "BLOCKED", "SCROLL_DOWN", "PRESS_ENTER"):
+            self.assertFalse(defer_action(op, covered=9, confidence=0.65, threshold=0.8), op)
 
-    def test_type_deferred_reaches_the_summary_flags(self) -> None:
+    def test_action_deferred_reaches_the_summary_flags(self) -> None:
         from summarize_trace import _flags
-        self.assertEqual(_flags({"type_deferred": 9}), "TYPE-DEFERRED:9")
+        self.assertEqual(_flags({"action_deferred": {"operation": "TYPE_TEXT", "covered": 9}}), "DEFERRED-TYPE_TEXT:9")
+        self.assertEqual(_flags({"action_deferred": {"operation": "CLICK", "covered": 7}}), "DEFERRED-CLICK:7")
 
 
 class AnnouncementTests(unittest.TestCase):

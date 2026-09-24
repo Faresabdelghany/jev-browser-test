@@ -1208,9 +1208,9 @@ def main() -> int:
     first, second = (steps + [{}, {}])[:2]
     if trace["status"] != "passed" or trace["outcome"] != "typed":
         failures.append(f"type while covered: expected passed/typed, got {trace['status']}/{trace.get('outcome')} ({trace.get('error')})")
-    if first.get("type_deferred") != 3 or (first.get("executed") or {}).get("action") != "WAIT" or first.get("low_confidence"):
+    if first.get("action_deferred") != {"operation": "TYPE_TEXT", "covered": 3} or (first.get("executed") or {}).get("action") != "WAIT" or first.get("low_confidence"):
         failures.append(f"type while covered: the marginal typing on the covered page should be deferred as a WAIT, not refused as low confidence: "
-                        f"{first.get('type_deferred')} {first.get('executed')} low={first.get('low_confidence')}")
+                        f"{first.get('action_deferred')} {first.get('executed')} low={first.get('low_confidence')}")
     if ((first.get("executed") or {}).get("wait") or {}).get("ended") != "changed":
         failures.append(f"type while covered: the deferral wait should end the moment the overlay goes: {(first.get('executed') or {}).get('wait')}")
     if (second.get("executed") or {}).get("action") != "TYPE_TEXT" or '"First Name"' not in (second.get("target") or {}).get("label", "") or second.get("covered_controls"):
@@ -1220,8 +1220,8 @@ def main() -> int:
     recent = step_states(jev)[1]["recent_actions"] if len(step_states(jev)) > 1 else []
     if not (recent and recent[-1].get("operation") == "WAIT" and "deferred" in (recent[-1].get("reason") or "")):
         failures.append(f"type while covered: Jev's history should say the typing was deferred: {recent}")
-    if "TYPE-DEFERRED:3" not in summarize(trace, out):
-        failures.append("type while covered: the summary should flag TYPE-DEFERRED:3")
+    if "DEFERRED-TYPE_TEXT:3" not in summarize(trace, out):
+        failures.append("type while covered: the summary should flag DEFERRED-TYPE_TEXT:3")
 
     # 4j. the layer never lifts (?stay=1: a modal that is the page now): the deferral fires once per page, and the
     #     same marginal typing on the same page is then executed (into Search, the only field there is).
@@ -1231,10 +1231,10 @@ def main() -> int:
     print(summarize(trace, out))
     print()
     steps = trace["steps"]
-    if len(steps) < 2 or steps[0].get("type_deferred") != 3 or (steps[1].get("executed") or {}).get("action") != "TYPE_TEXT" \
-            or '"Search"' not in (steps[1].get("target") or {}).get("label", "") or steps[1].get("type_deferred"):
+    if len(steps) < 2 or (steps[0].get("action_deferred") or {}).get("covered") != 3 or (steps[1].get("executed") or {}).get("action") != "TYPE_TEXT" \
+            or '"Search"' not in (steps[1].get("target") or {}).get("label", "") or steps[1].get("action_deferred"):
         failures.append(f"layer stays: the typing should be deferred once and then executed into Search: "
-                        f"{[(s.get('type_deferred'), (s.get('executed') or {}).get('action'), (s.get('target') or {}).get('label')) for s in steps]}")
+                        f"{[(s.get('action_deferred'), (s.get('executed') or {}).get('action'), (s.get('target') or {}).get('label')) for s in steps]}")
 
     # 4k. `after` on an outcome: "the cookie banner is shown" is true of the start page, but the outcome counts only
     #     after a click on Accept cookies; step 1 records it as deferred (like requires_action) and the run goes on
