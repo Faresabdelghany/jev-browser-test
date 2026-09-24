@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Northwind Tools — Create your account</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --ink:#1f2933; --muted:#616e7c; --line:#d9e2ec; --brand:#2b6cb0; --ok:#2f855a; --bad:#c53030; }
+  body { margin:0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--ink); background:#f5f7fa; }
+  header { background:#fff; border-bottom:1px solid var(--line); padding:14px 24px; font-weight:600; display:flex; justify-content:space-between; }
+  header nav a { margin-left:18px; color:var(--muted); text-decoration:none; font-weight:400; }
+  header nav a[aria-current] { color:var(--ink); font-weight:600; }
+  main { max-width:520px; margin:40px auto; padding:0 16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:28px; position:relative; }
+  h1 { font-size:22px; margin:0 0 6px; }
+  p.lead { margin:0 0 20px; color:var(--muted); }
+  label { display:block; font-size:14px; font-weight:600; margin:14px 0 4px; }
+  input[type=text], input[type=email], input[type=password] { width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid var(--line); border-radius:6px; font-size:16px; }
+  .check { display:flex; gap:8px; align-items:flex-start; margin-top:16px; font-size:14px; }
+  .check label { margin:0; font-weight:400; }
+  button { margin-top:20px; width:100%; padding:12px; border:0; border-radius:6px; background:var(--brand); color:#fff; font-size:16px; font-weight:600; cursor:pointer; }
+  button[disabled] { opacity:.6; cursor:default; }
+  .msg { margin-top:16px; padding:12px 14px; border-radius:6px; font-size:15px; display:none; }
+  .msg.error { display:block; background:#fff5f5; color:var(--bad); border:1px solid #feb2b2; }
+  .msg.success { display:block; background:#f0fff4; color:var(--ok); border:1px solid #9ae6b4; }
+  .overlay { position:absolute; inset:0; background:rgba(255,255,255,.75); border-radius:10px; display:none; }
+  .overlay.on { display:block; }
+  .toast { position:fixed; top:18px; right:18px; background:#1f2933; color:#fff; padding:10px 14px; border-radius:6px; font-size:14px; opacity:0; transition:opacity .3s; pointer-events:none; }
+  .toast.show { opacity:1; }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin:30px 0; }
+</style>
+</head>
+<body>
+<header>
+  <span>Northwind Tools</span>
+  <nav><a href="#">Catalogue</a><a href="#">Pricing</a><a href="#" aria-current="page">Sign up</a></nav>
+</header>
+<main>
+  <div class="card">
+    <h1>Create your account</h1>
+    <p class="lead">Free for 30 days. No card needed.</p>
+    <form id="signup" novalidate>
+      <label for="name">Full name</label>
+      <input id="name" name="name" type="text" autocomplete="name">
+      <label for="email">Work e-mail</label>
+      <input id="email" name="email" type="email" autocomplete="email">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="new-password">
+      <label for="confirm">Confirm password</label>
+      <input id="confirm" name="confirm" type="password" autocomplete="new-password">
+      <div class="check">
+        <input id="terms" name="terms" type="checkbox">
+        <label for="terms">I agree to the Terms of Service and the Privacy Policy</label>
+      </div>
+      <button id="submit" type="submit">Create account</button>
+      <div id="message" class="msg" role="alert"></div>
+    </form>
+    <div id="overlay" class="overlay" aria-hidden="true"></div>
+  </div>
+</main>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<footer>© 2026 Northwind Tools</footer>
+<script src="app.js"></script>
+</body>
+</html>

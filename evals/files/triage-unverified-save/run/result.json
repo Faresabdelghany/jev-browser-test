@@ -1,0 +1,61 @@
+{
+  "spec_id": "hrm-add-employee",
+  "outcome": "undetermined",
+  "verdict": null,
+  "note": null,
+  "probability": null,
+  "confidence": null,
+  "seen_at_step": null,
+  "first_seen_at_step": null,
+  "confirmed": false,
+  "confirmed_by": null,
+  "path_confidence": 0.68,
+  "reason": {
+    "status": "done_unverified",
+    "blocked_reason": null,
+    "stuck_reason": null,
+    "suggested_verdict": null
+  },
+  "evidence": {
+    "line": null,
+    "present": null,
+    "screenshot": "steps/final.png",
+    "checks": {
+      "on_add_form": 0.32,
+      "required_error": 0.17
+    }
+  },
+  "assertions": [],
+  "outcomes_seen_earlier": [],
+  "announcements": [
+    {
+      "step": 15,
+      "text": "Success Successfully Saved",
+      "kind": "live",
+      "tone": "success"
+    }
+  ],
+  "story": [
+    "1 CLICK [8] link \"PIM\"",
+    "2 WAIT",
+    "3 WAIT",
+    "4 CLICK [7] link \"Add Employee\"",
+    "5 WAIT",
+    "6 WAIT",
+    "9 TYPE_TEXT [14] textbox \"First Name\" <- first_name",
+    "10 TYPE_TEXT [16] textbox \"Last Name\" <- last_name",
+    "11 CLICK [27] button \"Save\"",
+    "12 WAIT"
+  ],
+  "run_stamp": null,
+  "status": "done_unverified",
+  "duration_ms": 99496,
+  "usage": {
+    "jev_requests": 18,
+    "input_tokens": 62742,
+    "output_tokens": 6638,
+    "model": "jev-1.13.0",
+    "reconnects": 0
+  },
+  "trace": "runs/suite/hrm-1b69699-slow/hrm-add-employee/03/trace.json"
+}

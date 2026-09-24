@@ -275,6 +275,6 @@ keys or two same-named elements wants keys named like the app's labels, or a `no
   TEST_ISSUE: what a control Jev cannot see looks like), an admin panel's Add Employee behind loading overlays
   (`covered_controls`, `settle_ms` raised for a slow demo), a shop's search-to-cart, and three more admin-panel flows
   (a user with a role and a password, a leave assignment confirmed by toasts, an employee added then found in a list)
-  that keep their data unique with `${RUN_STAMP}`. Copy one as the starting point for your own app. README.md
-  "Examples" has the table.
+  that keep their data unique with `${RUN_STAMP}`. Copy one as the starting point for your own app.
+  `specs/examples/README.md` has the table.
 - `assets/spec.example.json` — a realistic spec with login in `setup` and a Jev-driven goal.

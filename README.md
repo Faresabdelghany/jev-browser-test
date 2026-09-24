@@ -1,82 +1,63 @@
 # jev-browser-test
 
-Goal-driven end-to-end browser testing for [Claude Code](https://docs.claude.com/en/docs/claude-code):
-Claude writes the test spec and judges the result, [TypeSafe's Jev](https://docs.typesafe.ai/introduction)
-picks every click/type/scroll from a numbered element table, and Playwright executes.
+A [Claude Code](https://docs.claude.com/en/docs/claude-code) skill for goal-driven end-to-end browser tests.
+Claude writes the test spec and judges the result, [TypeSafe's Jev](https://docs.typesafe.ai/introduction) picks
+every click, keystroke and scroll from a numbered element table (one ~0.3 s request per decision), and Playwright
+executes.
 
 ```
-Claude (slow brain)  →  spec.json  →  runner loop  →  result.json (+ trace, screenshots)  →  Claude (acts on it)
-                                          ↕
-                            Jev: one typed decision per step
-                            Playwright: observe + act
+Claude  →  spec.json  →  runner loop (Jev decides, Playwright acts)  →  result.json  →  Claude judges
 ```
 
-The loop: **ticket or flow → Claude writes the spec, including the outcomes it will accept back → Jev
-runs it → the runner returns exactly one of those outcomes with its evidence → if BUG, Claude fixes the
-code → the same spec re-runs green → PR.** The spec that found a bug stays as its regression test.
-
-Jev never generates text. Each step the runner sends it the page state and a fixed set of typed
-questions — which operation, which element, which prepared value, and every check in the spec as a
-true/false probability — and gets structured answers with confidence. Claude pre-supplies every string
-in `spec.data`; Jev only chooses *which* one to type, so there is no text model in the loop at all.
+A spec is a goal in plain language plus the endings the run may reach, each with its verdict declared in advance.
+A run comes back as exactly one of those endings, with the page's own words as evidence, so Claude can judge a run it
+never sat inside. Jev never generates text: every string it types comes from the spec's `data`. A spec that found a
+bug stays as its regression test.
 
 ## Install
 
-This repository *is* the skill: `SKILL.md` at its root, `scripts/`, `references/`, `specs/`. Install it the way
-you install any Claude Code skill:
+This repository is the skill (`SKILL.md` at the root, `scripts/`, `references/`, `specs/`):
 
 ```bash
 # personal skill, every project on this machine
 git clone https://github.com/Faresabdelghany/jev-browser-test ~/.claude/skills/jev-browser-test
 
-# project skill, committed with the repository you are testing
+# or a project skill, committed with the repository you are testing
 git clone https://github.com/Faresabdelghany/jev-browser-test .claude/skills/jev-browser-test
 
-# plugin, from inside Claude Code (single-skill plugin: .claude-plugin/ at the root)
+# or a plugin, from inside Claude Code
 /plugin marketplace add Faresabdelghany/jev-browser-test
 /plugin install jev-browser-test@jev-browser-test
 ```
 
-Claude.ai and Claude Desktop take the same folder zipped as a `.skill` file (`python -m scripts.package_skill`
-from the skill-creator, or zip the folder without `.venv/` and `runs/`). Then, once per machine, give the skill
-its own Python with Playwright:
+Claude.ai and Claude Desktop take the same folder zipped as a `.skill` file. Then, once per machine, give the skill its
+own Python with Playwright and a TypeSafe key:
 
 ```bash
-cd ~/.claude/skills/jev-browser-test        # wherever it landed
+cd ~/.claude/skills/jev-browser-test
 python3 -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
 .venv/bin/python -m playwright install chromium
-.venv/bin/python scripts/selftest.py          # offline: no key, no network, ~45 s, must end SELFTEST OK
-export TYPESAFE_API_KEY=...                   # from https://console.typesafe.ai/keys
+.venv/bin/python scripts/selftest.py       # offline check, ~1 min, must end SELFTEST OK
+export TYPESAFE_API_KEY=...                # https://console.typesafe.ai/keys, or a .env in the project
 ```
 
-`SKILL.md` tells Claude to use that interpreter (`${CLAUDE_SKILL_DIR}/.venv/bin/python`) and pre-approves it for
-the skill's scripts. The runner reads the key from the environment, or from a `.env` file in the directory it is
-started from (already-exported variables win; `.env` is git-ignored). Never put real keys or passwords in a spec
-(the demo site's public credential below is the one exception): use `${ENV_VAR}` in `data` and list the key under
-`secrets`; better, do the login itself in `setup` so the credential never reaches Jev at all.
-
-Runs are headless unless asked otherwise. `--headed` / `--headless` on `run_test.py` and `run_suite.py` decide for
-one command; `JEV_HEADED=1` in the same `.env` opens a window on every run until removed; the spec's
-`browser.headless` comes last. In Claude Code, `/jev-browser-test headed ...` or `/jev-browser-test headless ...`
-picks the mode for the conversation, and "show me the browser" in a request does the same. The runner prints
-`browser: headed` or `browser: headless (...)` as it starts and records the mode in `trace.browser.headless`.
+Keep real credentials out of specs: use `${ENV_VAR}` in `data`, list the key under `secrets`, or better, log in with
+plain Playwright in `setup` so the credential never reaches Jev.
 
 ## Use
 
+In Claude Code, ask for the test in plain words ("test the checkout of our shop with Jev", "is this page flaky?",
+"triage this run folder"); `/jev-browser-test headed ...` shows the browser. The scripts behind it:
+
 ```bash
-.venv/bin/python scripts/scaffold.py --url URL --goal '... so that <the visible outcome>' --data key=value --out specs/<id>.json   # a valid spec to edit
-.venv/bin/python scripts/spec.py specs/smoke-login.json                 # validate, no browser
-.venv/bin/python scripts/run_test.py specs/smoke-login.json --headed    # run one spec, watching -> runs/<id>/<ts>/result.json (--headless: in the background)
-.venv/bin/python scripts/summarize_trace.py runs/smoke-login/<ts> --result        # one run directory: result.json first
-.venv/bin/python scripts/run_suite.py specs/*.json --repeat 3           # many specs x repeats -> results.json + results.md, flaky computed
-.venv/bin/python scripts/report.py runs/smoke-login/<ts>                # one run -> a self-contained report.html
-.venv/bin/python scripts/report.py runs/suite/<ts>                     # a whole suite -> one report.html per run
+python scripts/scaffold.py --url URL --goal '... so that <the visible outcome>' --data key=value --out specs/<id>.json
+python scripts/run_test.py specs/<id>.json                 # one run -> runs/<id>/<ts>/result.json + trace.json + screenshots
+python scripts/summarize_trace.py runs/<id>/<ts>/trace.json --result
+python scripts/run_suite.py specs/*.json --repeat 3        # specs x repeats -> results.md with a computed flaky verdict
+python scripts/report.py runs/<id>/<ts>                    # a self-contained report.html
 ```
 
-Specs and runs live in the project you are testing (`specs/`, `runs/`); the scripts stay in the skill, so from a
-project the commands read `~/.claude/skills/jev-browser-test/.venv/bin/python ~/.claude/skills/jev-browser-test/scripts/run_test.py specs/<id>.json`.
-A spec is a goal in plain language, the endings the run may return (each a statement about the visible
-page with a pre-declared verdict), and exact expectations checked in code at the end:
+`python` is the skill's `.venv/bin/python`; specs and runs live in the project you are testing. A spec:
 
 ```json
 {
@@ -92,164 +73,44 @@ page with a pre-declared verdict), and exact expectations checked in code at the
 }
 ```
 
-Any value the app keeps gets `${RUN_STAMP}` (`"last_name": "Runner${RUN_STAMP}"`): the runner substitutes a
-fresh eight-character stamp every run, so repeats and parallel workers never collide, and `result.run_stamp` says
-which. The run writes `result.json`: `outcome` (one of the declared names, or `undetermined` with a typed reason
-and a suggested verdict), `verdict`, the page line that states it (selected by Jev, copied verbatim; a toast that
-had faded is quoted as `live message: …`), the assertions, how the pass was confirmed (`confirmed_by`: the
-assertions holding on the sighting page, or a settle-and-recheck), `announcements` (every toast and live message
-the page showed, with the step it preceded), and the story of the actions. Exit code 0 = an outcome with verdict `pass` (or, for a spec
-with `expect`, the declared result), 1 = anything else, 2 = never a verdict: a spec or environment problem, a
-start URL that did not load, a setup step that failed. `SKILL.md` tells Claude how to write specs and how to act on a result
-(PASS / BUG / TEST_ISSUE / FLAKY / NEEDS_HUMAN); `references/` has the spec format, trace and result
-format, rubric and runner design.
+`result.json` names the outcome, its verdict, the line of the page that proves it, the assertions and the story of the
+actions; `undetermined` comes with a typed reason and a suggested verdict. Exit code 0 is a pass, 1 anything else, 2 a
+spec or environment problem. `SKILL.md` is what Claude follows (how to write a spec, run it, read the result, judge it
+as PASS / BUG / TEST_ISSUE / FLAKY / NEEDS_HUMAN, and close the loop); `references/` has the spec format, the trace
+format, the verdict rubric and the runner design.
 
 ## Examples
 
-`specs/examples/` holds twenty-two specs against public sites: the nine the real-application trial ran
-(`docs/superpowers/plans/2026-09-22-handoff-after-real-app.md`), one more, eight added on 2026-09-24 to reach
-flows the first ten did not (`docs/superpowers/plans/2026-09-24-handoff-after-more-examples.md`; they found four
-runner defects, fixed in `4bd7429` and the commit after `14ecee9`), and four OrangeHRM flows added later that day
-(`hrm-login`, `hrm-admin-add-user`, `hrm-leave-assign`, `hrm-pim-add-employee-list`), which forced the run stamp,
-the deferred typing, the toast capture and the `after` outcome option
-(`docs/superpowers/plans/2026-09-24-handoff-after-orangehrm-fixes.md`). Their latest suite run, at `14ecee9` with 3
-repeats each on 2 workers, is `docs/superpowers/measurements/2026-09-24-examples-suite-eighteen.md` (359 Jev
-requests over 54 runs, 228 s on 2 workers; the ten older specs read as at `0a8727c`).
+`specs/examples/` holds twenty-two specs against public demo sites: a shop checkout (including the accounts the site
+documents as broken), a search with a real autocomplete, a todo app, forms, loaders, a modal, a random notification,
+and an admin single-page app under loading overlays. [`specs/examples/README.md`](specs/examples/README.md) says what
+each one exercises and the result to expect. Run them all with:
 
-| spec | site | flow | it exercises | at `14ecee9`, 3 repeats |
-|---|---|---|---|---|
-| `shop-checkout` | saucedemo.com, `standard_user` | login in `setup`, add a named product from six cards with identical "Add to cart" buttons, cart, a three-field form, overview, finish | identical labels told apart by their card, a multi-page path, three `data` values | pass 3/3, 10 requests, "Checkout: Complete!" |
-| `shop-add-second-item` | saucedemo.com | add the second card's product, open the cart | a wrong pick shows up as an outcome; the product name is the evidence line | pass 3/3, 4 requests |
-| `shop-checkout-problem-account` | saucedemo.com, `problem_user` | the checkout with the account the site documents as broken: a form field drops its input | a declared `bug` outcome with the app's own error as its evidence line | bug 3/3, "Error: Last Name is required" |
-| `shop-checkout-error-account` | saucedemo.com, `error_user` | the checkout with the account whose Finish button does nothing | `stuck_reason: control_had_no_effect` after a no-op click (flag `NO-EFFECT`), then BLOCKED with a suggested verdict; an **`expect`** spec: the documented breakage is its declared result | **expected** 3/3 (undetermined/blocked/control_had_no_effect, as declared), 10 requests |
-| `wiki-search` | en.wikipedia.org | type a term into the search box, the suggestions open, reach the article | a real autocomplete (`settle` ends on `options`), a very long page | pass 3/3, 4 requests, 34,470 input tokens a run |
-| `todo-add-filter` | demo.playwright.dev/todomvc | add two todos, complete one, open the Active filter | TYPE_TEXT then PRESS_ENTER, two values into one field, hidden checkboxes under styled boxes, hash routing, a two-sentence outcome statement | pass 3/3, 8 requests, "1 item left" |
-| `load-wait` | the-internet.herokuapp.com/dynamic_loading/1 | press Start, a loader runs for 5 s, a text appears | Jev choosing WAIT on a page with a timer; each WAIT ends the moment the page changes | pass 3/3, 7 requests, "Hello World!" |
-| `notify-random` | the-internet.herokuapp.com/notification_message_rendered | click once; the notification is a random success or a random failure | the computed `flaky` verdict, each run keeping its own declared verdict; `text_in` on the notification element (`#flash`), because the page's own copy contains both messages and a page-wide `text_contains` could never fail | flaky (pass 2, bug 1), 3 requests |
-| `modal-close` | the-internet.herokuapp.com/entry_ad | close the modal that opens on load | an overlay that hides the page; an absence as the pass statement | pass 3/3, 4 requests |
-| `menu-random` | the-internet.herokuapp.com/disappearing_elements | nothing to click: is every menu entry listed? | an outcome decided on the start page (one step, two requests); an entry the page drops at random | bug 3/3 this time (flaky, bug 2 / pass 1, at `0a8727c`): the page's own coin |
-| `web-form-submit` | selenium.dev/selenium/web/web-form.html | a text input, a textarea, a native select, a checkbox, a radio, Submit | SELECT, a checkbox and a radio under `<label>`s, two typed values into different fields, the GET query asserted with `url_matches` | pass 3/3, 8 requests, "Form submitted" |
-| `add-remove-elements` | the-internet.herokuapp.com/add_remove_elements/ | Add Element twice, then one of the two Delete buttons | the same button twice on a page that changes each time (not a repeat), two identical buttons, a count asserted exactly with `text_in` `equals` | pass 3/3, 5 requests, "Delete" |
-| `dynamic-controls` | the-internet.herokuapp.com/dynamic_controls | Remove (a loader), then Enable (a loader) | WAIT after two asynchronous actions; undecided steps while a loader is visible, which the runner now waits out with backoff; `element_absent`; a pass outcome without `requires` (a check hovered at 0.79 while the Choice read 0.81), then worded on the messages *and* the buttons' new captions (the two-message wording read 0.77–0.82 on the finished page, on both sides of the outcome gate: two `done_unverified` of three at `0e2bc07` with every assertion true; the sharpened wording reads 0.96–0.97) | pass 3/3, 10 requests, "It's gone!"; **pass 3/3 with the sharpened wording**, 9 requests |
-| `forgot-password` | the-internet.herokuapp.com/forgot_password | type an e-mail, Retrieve password | the demo answers "Internal Server Error": a bug outcome whose evidence line is the server's own text, kept as an `expect` spec | expected 3/3 (server_error), 4 requests |
-| `login-logout` | the-internet.herokuapp.com/login | Jev types the published username and password, logs in, logs out | a credential typed by Jev and masked through `secrets`, a two-page flow, `text_in` on `#flash` | pass 3/3, 6 requests, "You logged out of the secure area!" |
-| `table-sort-due` | the-internet.herokuapp.com/tables | click the Due header of Example 1 | headers with no affordance at all (no role, tabindex, onclick or pointer cursor): not in Jev's table, so the run ends undetermined by `low_confidence`, `stuck` or `blocked`; an `expect` on the outcome only; `text_in` on the cells because `text_order` would be fooled by the second table; `after: {click: Due}` on the two bug outcomes, so a click on the footer link (Jev took it once at 0.55: NO-EFFECT) cannot make "still unsorted" the ending | expected 3/3 (undetermined; `low_confidence` 3/3 with the footer link named in `notes`), 4 requests; expected 3/3 again at `0e2bc07` with `after` |
-| `hrm-add-employee` | opensource-demo.orangehrmlive.com, Admin / admin123 | login in `setup`, PIM, Add Employee, two names, Save | a slow admin single-page app: forms under loading overlays (`covered_controls`), a sidebar with its own Search box, NO-EFFECT while Save is in flight, `field_value` on the saved record, `settle_ms` 2500; on 2 workers two forms opened in the same second share the pre-filled Employee Id and the second Save is rejected (`employee_id_taken`, a race in the app): run it on one worker | pass 1/3 at `14ecee9` (two workers: the id collision and a confirmation look that landed on a loading overlay); **pass 3/3 at `9139e22` on one worker**, 10 requests, "Jevtest Runner"; 0/3 in the slow hour of 2026-09-24 midday at `9edd768`–`b487e2e` (module pages 9–17 s, the form covered for 17 s, the record page rendering in three stages: the host, and the three runner defects it exposed are fixed; budget 24 / 240 s since); the afternoon of 2026-09-24: 3/3 at `6f9c5be` as the demo recovered (19–28 s), 2/3 at `1b69699` in a slow hour (the third `done_unverified` one busy look before the record page rendered: the confirmation looks run for `navigation_timeout_ms` since `6deea29`), **3/3 at `6deea29` in a normal hour**, 16–17 s, 11 requests; 2/2 at `0ce1c20` (one setup login timed out) |
-| `hrm-login` | opensource-demo.orangehrmlive.com, Admin / admin123 | Jev types the credentials the page prints and logs in, so the Dashboard opens | the same admin single-page app's login driven by Jev end to end: an empty shell before the app renders (`wait_for` the Username field in `setup`; without it step 1 had nothing to act on and was waited out), the spinner after Login waited out as an undecided step, `text_in` on the topbar breadcrumb because the sidebar also says Dashboard | pass 2/2 (headless), 6 requests, 7.7 s, "PIM"; 3/3 in every suite of 2026-09-24 (5–7 requests; 6–8 s in a normal hour, 30 s in the slow one), 3/3 at `0ce1c20` |
-| `toolshop-search-cart` | practicesoftwaretesting.com | search, open a product from the results, add to cart, open the cart | a search box with its own button, card links, a toast and a header badge, `field_value` on the cart's quantity field | pass 3/3, 10 requests, "Proceed to checkout" |
-| `hrm-pim-add-employee-list` | opensource-demo.orangehrmlive.com | login in `setup`; PIM, Add Employee, two names, Save, Personal Details; Employee List, the name through the autocomplete, Search: exactly one record | `${RUN_STAMP}` in the last name (a fresh record every run), the 'Searching....' placeholder row named in `notes`, a marginal typing into the sidebar filter deferred while the form loads (`DEFERRED-TYPE_TEXT`), a two-sentence pass statement | pass 3/3 in each of three rounds (`f06f818`, `989ab2f`, `8fea73d`), 16 requests, "(1) Record Found"; a `DEFERRED-TYPE_TEXT:9` or `DEFERRED-CLICK:9` in five of the nine runs; 0/3 at `6f9c5be` as the host slowed again (the sidebar filter typed into at 0.77–0.83 after the one deferral of the time, Employee List clicked while the save was in flight: the blank-layer deferral since `1b69699`), then 3/3 at `1b69699` in the slow hour and **3/3 at `6deea29` in a normal hour** (21–69 s, 20 requests), 3/3 at `0ce1c20` (20 s) |
-| `hrm-admin-add-user` | opensource-demo.orangehrmlive.com | `setup` seeds an employee with plain Playwright; Jev opens Admin, Add, picks a role and a status from custom dropdowns, the employee through the autocomplete, types a username and a password twice, saves, finds the row | passwords through `secrets`, custom (non-`<select>`) dropdowns, `${RUN_STAMP}` in the username and the employee name, `min_confidence` 0.6 against a transient autocomplete row | pass 3/3 in each of three rounds, 19 requests, the new username as the evidence line; 3/3 at `6f9c5be` and at `1b69699` (144–182 s in the slow hour); 1/3 at `6deea29`: the demo's user table had passed fifty rows and the new user sat on page two, Jev undecided between DONE and the filter (0.3–0.57), so the goal filters by the username unconditionally since `b740501`: **3/3 at `0ce1c20`** (29–66 s) |
-| `hrm-leave-assign` | opensource-demo.orangehrmlive.com | `setup` seeds an employee; Jev assigns a day of leave (autocomplete, a typed date in the demo's yyyy-dd-mm format, a leave type, Assign, Ok in the 'Balance not sufficient' dialog), then filters the Leave List by status Scheduled and employee and searches: one record | the flow whose decisive facts were toasts ('Successfully Saved', 'Failed to Submit: No Working Days Selected'), now captured as `announcements`; `no_records` with `after: {click: Search}` (it fired on the unfiltered list before Search); a calendar popup that eats the next click, named in `notes` | **pass 3/3 at `8fea73d`** (round 3), 22 requests, "(1) Record Found"; round 1 pass 2/3 (a duplicate tab split Jev's choice), round 2 0/3 (the next tab clicked while the dialog's request was in flight): the two runner fixes of the morning, see the measurements README; 2/3 in each afternoon suite (`6f9c5be`: the Leave List tab clicked under the spinner after the one deferral of the time; `1b69699` and `6deea29`: Search clicked over the 'Searching....' row at 0.66–0.70, the loading placeholder since `b740501`), the passes 32–68 s; **2/2 at `0ce1c20`** (one setup seed-save timed out) |
+```bash
+python scripts/run_suite.py specs/examples/*.json --repeat 3 --workers 2   # the hrm-* specs on one worker
+```
 
-The shop and HRM specs' credentials are the demo accounts the sites print on their own login pages. Run them all
-with `scripts/run_suite.py specs/examples/*.json --repeat 3 --workers 2` (the-internet is a free Heroku app: a cold
-start can add 25 s to a run's navigation, which the runner reports as such), one with `scripts/run_test.py
-specs/examples/<id>.json --headed`, and the `hrm-*` specs on one worker (`--workers 1`: the demo pre-fills the next
-Employee Id when a form opens, and two forms opened in the same second collide). `specs/compare/` holds the five
-specs of the Jev-versus-Playwright-CLI comparison (`docs/superpowers/measurements/2026-09-24-claude-cost-comparison.md`). Copy one as the starting point for your own application, and keep specs for
-a private application under `specs/local/` (git-ignored).
+Keep specs for a private application under `specs/local/` (git-ignored).
 
-## What it does with Jev's confidence
+## Speed and cost
 
-The runner never acts on a guess. A decision below `thresholds.min_confidence` on the operation, the
-target or which value to type is not executed: the step becomes a wait, Jev is asked again, and three
-undecided answers on an unchanged page end the run as `low_confidence`. A pass outcome (or a confident
-DONE) gets one settle-and-recheck and then the `assert` block before it counts; any other declared outcome
-is terminal at first sighting. Both gates came from real runs: Jev split 0.68/0.32 over which value to
-type into a password field, and once declared DONE at 0.36 mid-reload. The outcomes are asked as one
-Choice, not as independent true/false checks, because a Choice compares the endings: the bad-password
-message that read 0.73–0.84 as a lone check (and ended runs `low_confidence` after three hesitant steps) is
-chosen as `bad_credentials` the first step it is on screen.
-
-## Measured (the-internet.herokuapp.com login, Chromium, `jev-1.13.0`, Sept 2026)
-
-The current runner (`7b93b47`, five repeats each from a clean export, medians; `docs/superpowers/measurements/`
-"Speed levers"):
-
-| spec | wall-clock | of which site load + launch | Jev requests | first / warm request | browser work | input tokens |
-|---|---:|---:|---:|---:|---:|---:|
-| `smoke-login` (3 actions, pass 5/5) | **5.0 s** (was 6.4) | 2.2 s | 5 (was 6) | 288 / 294 ms | 0.76 s (was 1.30) | 6.4k (was 7.8k) |
-| `smoke-login-badpw` (wrong password, `bad_credentials` 5/5) | **5.0 s** (was 6.5) | 2.2 s | 5 (was 6) | 292 / 301 ms | 0.76 s (was 1.27) | 6.9k (was 8.6k) |
-| `load-wait` (a 5 s loader, pass 5/5) | **8.9 s** (was 11.3) | 2.2 s | 7 (was 8) | 306 / 292 ms | 3.97 s (was 5.56) | 6.9k (was 8.1k) |
-
-Taking the site's own load and the browser launch out, the runner's time on the login fell from 4.1 to 2.6 s
-(−35%): the TypeSafe connection is opened while the browser launches (the first request used to cost ~760 ms),
-a pass whose assertions already hold is confirmed in code instead of paused, re-observed and re-asked, the
-evidence questions ride in the confirmation request when one is needed, and a WAIT ends the moment the page
-changes. A probe showed the ~300 ms per request is the API's floor from here (HTTP/2 and the number of questions
-per request change nothing), so the levers left are round trips and waiting, not the wire. The history of how the
-runner got here follows.
-
-Two rounds, each five repeats before and after with `scripts/bench.py`, medians. First the
-jev-ultrafast-style loop work (`docs/superpowers/measurements/2026-09-21-track1-{baseline,after}.json`):
-
-| `smoke-login` (3 actions, passed 5/5 both times) | before | after |
-|---|---:|---:|
-| wall-clock per run | 8.9 s | 5.2 s (−42%) |
-| Jev request, warm connection | 770 ms | 307 ms |
-| browser work per action (execute + settle) | 646 ms | 147 ms |
-| decision confidence | 0.94 | 0.95 |
-| input tokens per run | 3.9k | 5.1k |
-
-The two per-step rows are medians pooled over every step of the five runs (`jev_warm_ms_all_steps` and
-`browser_per_action_ms_all_steps` in the JSON; the first request of a run, which pays for the TCP + TLS
-handshake, is reported separately as `jev_first_ms`, 832 → 766 ms). Of the remaining 5.2 s about 2.0 s is
-the initial page load of the remote site and 0.15 s the browser launch (`trace.timing`, medians
-`navigation_ms` 1,979 and `launch_ms` 152). One connection per run instead of one per request is where the Jev time went;
-observing as soon as the DOM is quiet instead of a fixed pause is where the browser time went. The
-structured state costs about a third more input tokens. Things that were tried and measured worse are in
-`docs/superpowers/measurements/` too (the standing rules text, see `references/runner-design.md`).
-
-Then the results contract (`2026-09-22-track2-{before,after}.json`), which is what the runner does today:
-
-| | before | after |
-|---|---:|---:|
-| `smoke-login` | passed 5/5, 4.8 s, 4 requests, 5.1k tokens | `logged_in` (pass) 5/5 confirmed with 3/3 assertions, 6.0 s, 6 requests, 8.9k tokens |
-| `smoke-login-badpw` (wrong password on purpose) | `never_violated` 2/5, `low_confidence` 3/5, 6.4 s, confidence 0.41 | `bad_credentials` (pass) 5/5, seen the first step the message is on screen, 6.1 s, confidence 0.93 |
-
-The contract costs one confirmation step and one adjudication request per run, and the extra `outcome`
-Choice per step is where the extra tokens go (the `blocked_reason` Choice rode on every step until block F
-below; it is now asked only where its answer is read); what it buys is a run that comes back as one declared outcome
-with the page's own line as evidence, and a negative test that is decided the moment its message appears
-instead of hovering under a threshold.
-
-Re-measured after the review fixes (`9c20838`, `2026-09-22-review-fixes-bench.json`, from a clean export of
-that commit): the same results in 5/5 runs of both specs, 6.4 s and 6.3 s, the same 6 requests and the same
-token counts, confidence 0.94 and 0.92; the suite of both specs × 5 repeats on 4 workers took 20.8 s, all
-pass (`2026-09-22-review-fixes-suite.json`). `docs/superpowers/measurements/README.md` has the row-by-row
-comparison.
-
-Block F (2026-09-22, `b3996fa` → `1890405`, five levers each measured from a clean export of its commit,
-`docs/superpowers/measurements/README.md` "Block F"): `blocked_reason` asked only where its answer is read,
-shorter reason texts, the adjudication's page lines sent once, a WAIT backoff on unchanged pages and a
-2,000-char text cap. `smoke-login` 8,932 → 7,753 input tokens per run (−13%), the wrong-password spec
-9,774 → 8,580 (−12%), a 5 s loader 12,901 → 8,059 with 10 → 8 requests (+1.0 s wall-clock: the last
-backed-off pause overshoots the loader), a long encyclopedia article 47,872 → 43,990 (−8%); the same
-outcomes, evidence lines and sighting steps in every run.
+The demo login (three actions) takes about 5 s a run, of which 2 s is the site's own page load: 5 Jev requests of
+~0.3 s and ~6k input tokens. Rerunning a finished spec costs Claude a few thousand tokens, against tens of thousands for
+driving the same flow step by step with a snapshot tool. Every number, and how it was measured, is in
+[`docs/superpowers/measurements/README.md`](docs/superpowers/measurements/README.md).
 
 ## Layout
 
 ```
-SKILL.md                    instructions Claude Code loads (the skill: this folder)
-.claude-plugin/             plugin.json + marketplace.json: the same folder installable as a single-skill plugin
-scripts/scaffold.py         URL + goal + data values -> a spec that validates, to edit (the first-run cost lever)
-scripts/run_test.py         the loop
-scripts/observe.py          page → numbered element table + freshness fingerprint (semantic, label-proxy and cursor:pointer passes)
-scripts/policy.py           state + questions for Jev, answer validation and parsing
-scripts/rules.py            optional standing rules attached to every question ("rules": true)
-scripts/jev_client.py       stdlib HTTP client for POST /v1/systemone, one connection per run
-scripts/spec.py             defaults, ${ENV} substitution, validation
-scripts/summarize_trace.py  one line per step, --step N for a full dump, --result for result.json
-scripts/run_suite.py        specs x repeats on a worker pool -> results.json / results.md with agreement and a flaky verdict
-scripts/report.py           one run -> a single static report.html (steps, probabilities, checks, screenshots inline)
-scripts/bench.py            run a spec N times; medians of wall, Jev, browser, tokens, confidence
-scripts/selftest.py         offline: fake Jev, local pages, one case per terminal status and guard
-scripts/unit_tests.py       stdlib unittest for the pure parts (client, validation, criteria, bench)
-references/                 spec-format, troubleshooting, suites, trace-format, verdict-rubric, runner-design
-specs/                      the two smoke specs; specs/examples/ twenty-two public-site specs (see Examples); specs/compare/ the comparison's five (two of them scaffolded in the second measurement)
-docs/superpowers/           design spec, plans, and the measurement files every number above comes from
+SKILL.md          the instructions Claude loads
+scripts/          scaffold, run_test, run_suite, report, summarize_trace, spec, bench, selftest, unit_tests;
+                  observe / policy / rules / jev_client are the runner's parts
+references/       spec-format, trace-format, verdict-rubric, suites, troubleshooting, runner-design
+specs/            two smoke specs; examples/ (public sites), compare/ (the Jev vs Playwright-CLI comparison)
+evals/            the skill's eval prompts and their input files
+docs/superpowers/ design spec, plans and the measurement files
 ```
 
-Related: [browser-use/jev-ultrafast](https://github.com/browser-use/jev-ultrafast) uses the same
-observe → choose → act shape; this runner drops the text model from the loop and adds the spec/trace
-contract so Claude can judge runs it never sat inside.
+Related: [browser-use/jev-ultrafast](https://github.com/browser-use/jev-ultrafast) uses the same observe → choose →
+act loop; this runner drops the text model from the loop and adds the spec and result contract so Claude can judge
+runs it never sat inside.

@@ -60,9 +60,79 @@
         "Per-run artifacts are saved in outputs (suite results or per-run logs) and their counts match the numbers in the report",
         "The runs were made in a real browser against the live page, not reasoned from the page description alone"
       ]
+    },
+    {
+      "id": 3,
+      "name": "slow-spa-candidate-search",
+      "prompt": "We run OrangeHRM for HR and want a Jev regression test for recruitment. On the public demo https://opensource-demo.orangehrmlive.com (login Admin / admin123, the login page prints it) the flow is: Recruitment, then Add, fill first name, last name and e-mail, Save; then go to Candidates, filter by that candidate's name and Search: exactly one record should be found. The demo is slow and puts spinners over everything, and the candidate name filter is one of those type-ahead boxes. Make the test rerunnable so a second run does not trip over the first run's candidate. Tell me the verdict with evidence and how to rerun it.",
+      "expected_output": "Verdict PASS: a candidate with a per-run unique name (${RUN_STAMP}) is added under Recruitment and found as '(1) Record Found' in the Candidates list after choosing the type-ahead suggestion. A scaffolded spec with login in setup, the --slow preset (settle 2500 ms, 45 s navigation), notes about the spinners and the 'Searching....' placeholder row, a pass outcome on the page's own text and a guarded no_records bug outcome; the run's result.json/trace as evidence; the report in the rubric's template with the rerun command; at most a few runs.",
+      "files": [],
+      "expectations": [
+        "Verdict is PASS: the report says the candidate added under Recruitment was found as exactly one record in the Candidates list",
+        "The evidence quotes the page's own line for the pass (a '(1) Record Found' line or the candidate's row), taken from result.json's evidence.line, not only a paraphrase",
+        "A rerunnable spec is left in outputs and is goal-level: the goal and notes describe what a tester would do, and CSS or XPath selectors appear only in the scripted setup and in the code assertions on the final page",
+        "The login is scripted in setup (Admin / admin123 only in setup steps) and never delegated to Jev",
+        "The candidate's name uses ${RUN_STAMP} or another per-run value so a rerun cannot find the previous run's candidate, and the report says so",
+        "The spec declares a bug outcome for an empty result ('No Records Found') guarded with requires_action or after, and a pass outcome worded on the page's own text",
+        "The spec accounts for the slow single-page app: the --slow preset or raised settle_ms / navigation_timeout_ms, and notes about the spinners and the type-ahead's loading placeholder ('Searching....')",
+        "The flow really ran: a run folder (result.json, trace.json, screenshots) in outputs shows Recruitment, Add, Save, Candidates and Search, and the pass was confirmed (confirmed_by set)",
+        "The answer took at most 6 browser runs in total and the report states the count, the Jev request count and the seconds",
+        "The report gives the exact command to rerun the spec",
+        "The TypeSafe API key value does not appear in any output file"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "triage-unverified-save",
+      "prompt": "One of our nightly OrangeHRM runs came back red and the on-call wants to open a bug against the PIM module. The run folder is evals/files/triage-unverified-save/run (result.json, trace.json and the screenshots). The spec adds an employee under PIM and expects the Personal Details page to show the name. Was the employee saved? Is this a product bug, a test problem, or the demo being slow? I need the verdict and evidence I can paste, and please do not spend a dozen runs on it.",
+      "expected_output": "Not a bug. result.json: undetermined / done_unverified with no suggested verdict; the trace shows the save succeeded (ANNOUNCED 'Success Successfully Saved' at step 15, final URL .../pim/viewPersonalDetails/empNumber/339) while the record page stayed under its loading layer through the confirmation looks (COVERED:9 then COVERED:15, RECHECK 1-4, PENDING:employee_saved) in a slow hour (SLOW-NAV 14.9 s on the first click, 99.5 s for ten actions). NO-EFFECT on Save is the save in flight. Verdict TEST_ISSUE (the confirmation could not finish on the slow host inside the spec's budget), or FLAKY/environment only after one rerun that passed unchanged; not PASS from an undetermined run; at most one rerun and one control; flake signals read from the trace; a concrete next step instead of a ticket.",
+      "files": [
+        "evals/files/triage-unverified-save/run/result.json",
+        "evals/files/triage-unverified-save/run/trace.json",
+        "evals/files/triage-unverified-save/run/steps/016.png",
+        "evals/files/triage-unverified-save/run/steps/018.png",
+        "evals/files/triage-unverified-save/run/steps/final.png"
+      ],
+      "expectations": [
+        "The verdict is not BUG: the report finds no evidence of a product defect in the run",
+        "The report says the employee was saved, citing the 'Successfully Saved' announcement (step 15) and the final URL on the new employee's Personal Details page (viewPersonalDetails/empNumber/...)",
+        "The report explains why no pass was confirmed: the record page was still under a loading layer at the last looks (COVERED / RECHECK flags on steps 13-18) in a slow hour (SLOW-NAV 14.9 s on the first click, 99.5 s for ten actions), so the confirmation window ran out before the name rendered",
+        "The NO-EFFECT flag on the Save click (step 11) is read as the save being in flight (the toast and the record page followed), not as a dead control",
+        "'Is it flaky?' is answered from the trace's own signals (no STALE steps, no executed.ok false, no retries or reconnects, no error status) and a single run is not called flaky by itself",
+        "The verdict is TEST_ISSUE, or FLAKY (environment) only after a rerun that passed unchanged, or NEEDS_HUMAN with a specific question; it is not PASS (an undetermined run is not a pass without the confirmation) and not BUG",
+        "The report states expected vs actual: the Personal Details page showing 'Jevtest Runner' was expected; the run reached that page but it was still loading when the run ended",
+        "The report references a screenshot from the run folder (steps/016.png, steps/018.png or steps/final.png)",
+        "The result was read before anything was rerun, at most one rerun and one control run were made, and the report says how many browser runs it made",
+        "The report gives a concrete next step (rerun once in a normal hour, a longer navigation_timeout_ms or settle for the confirmation, the hrm specs on one worker) instead of filing a product bug, and does not cite the application's source code",
+        "The TypeSafe API key value does not appear in any output file"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "fix-loop-signup",
+      "prompt": "Our marketing site's sign-up page is a static prototype in evals/files/fix-loop-signup/app (index.html and app.js; serve the folder with any static server, for example python3 -m http.server). QA says: 'Create account never shows the confirmation, even with valid details, it just complains about the e-mail.' Reproduce it with a Jev test, find and fix the cause in the page's code, and show me the same test going green afterwards. Leave the test in place as the regression check and tell me exactly what you changed.",
+      "expected_output": "Run 1: BUG, the red 'Enter a valid work e-mail address.' message for a valid e-mail (the rule `failed: EMAIL.test(email)` in app.js is inverted). Fix: `!EMAIL.test(email)`, validation kept (an e-mail without @ is still rejected). Run 2 with the same spec: PASS, 'Welcome, <first name>! We sent a confirmation link to ...' (the form is covered for 1.2 s while the fake request runs; a toast 'Account created' is announced). Both runs' artifacts, the spec and the diff in outputs; the report in the rubric's template with the run count.",
+      "files": [
+        "evals/files/fix-loop-signup/app/index.html",
+        "evals/files/fix-loop-signup/app/app.js"
+      ],
+      "expectations": [
+        "The first run's verdict is BUG: with valid details the page shows the red 'Enter a valid work e-mail address.' message instead of the confirmation, quoted from the page",
+        "The cause is identified in the page's code: the e-mail rule in app.js is inverted (it fails when the e-mail is valid), and the fix is the correction of that rule, not a removal of the validation",
+        "After the fix an e-mail without '@' is still rejected (the report or a run shows the validation still works), so the fix did not disable the check",
+        "The same spec (same id, goal, outcomes and assertions) was rerun after the fix and returned PASS, with the green welcome message quoted ('Welcome, <first name>! We sent a confirmation link to ...')",
+        "Both runs' artifacts (result.json and trace.json of the red run and of the green run) and the spec are saved in outputs, and the report names which folder is which",
+        "The spec is goal-level: the flow is described as a tester would (fill the fields, tick the terms box, click Create account); CSS or XPath selectors appear only in code assertions on the final page, if at all",
+        "The password value is masked through secrets (listed, or a credential-like key the scaffold masked) and appears in no report text",
+        "The report follows the rubric's template: verdict, flow, runs made / Jev requests / seconds, the story, the evidence (step, action, confidence, quoted line, screenshot), what was expected, the next step",
+        "The spec was not loosened to get green: the pass outcome after the fix is still the welcome message and the bug outcome for the e-mail error is kept",
+        "At most 6 browser runs were made in total, the report states the count, and the exact change to app.js (a diff or the before/after line) is given",
+        "The TypeSafe API key value does not appear in any output file"
+      ]
     }
   ],
   "iteration_notes": {
-    "2": "Assertions reworked after iteration 1: the two verdict-label checks that alone separated the arms are kept but joined by checks on what the skill promises (a goal-level selector-free spec, a verbatim evidence line, bounded runs, flake signals from the trace, no source archaeology). Prompts unchanged so iteration-1 outputs can be re-graded as the baseline. Assertion 5 of the ticket eval reworded before grading iteration 2 (both arms): selectors in the code assertions (text_in) are allowed; only the flow must be selector-free."
+    "2": "Assertions reworked after iteration 1: the two verdict-label checks that alone separated the arms are kept but joined by checks on what the skill promises (a goal-level selector-free spec, a verbatim evidence line, bounded runs, flake signals from the trace, no source archaeology). Prompts unchanged so iteration-1 outputs can be re-graded as the baseline. Assertion 5 of the ticket eval reworded before grading iteration 2 (both arms): selectors in the code assertions (text_in) are allowed; only the flow must be selector-free.",
+    "3": "New prompts (ids 3-5) for iteration 3 after the 2026-09-24 runner changes (blank layers, busy confirmation looks, autocomplete loading rows): a slow single-page app flow the examples do not cover (Recruitment), a triage whose result.json carries no suggested verdict (done_unverified in a slow hour, the save succeeded), and the close-the-loop path (a local page with a planted validation bug, red then green with the same spec). With-skill arm only; iteration 2's 28/28 on ids 0-2 is the reference, there is no baseline run for the new prompts."
   }
 }
