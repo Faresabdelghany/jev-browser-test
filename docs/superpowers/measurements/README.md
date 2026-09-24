@@ -769,3 +769,53 @@ under 1.5 s three times.
 "Second measurement". Claude's tokens read from the session transcript: Jev path first run 36.7k new tokens (from the
 scaffold, six runs in the slow hour, one exit 2 from a scaffold defect fixed in `81ce6a2`), rerun 5.4k, Playwright CLI
 path 21.7k; break-even at the first or second rerun, against the reported fourth.
+
+## Blank layers (2026-09-24, afternoon): the hrm suite at `6f9c5be` as the demo recovered, the cause of its reds, `1b69699`
+
+The demo answered its login page in 0.34 s at 13:45 (three probes), so the rerun the previous handoff left open went
+out at once from a clean export of `6f9c5be` (`2026-09-24-regression-6f9c5be-hrm.md`, 861 s on one worker): **11/15**.
+`hrm-add-employee` 3/3 (19–28 s a run, the slow hour's budget untouched), `hrm-admin-add-user` 3/3 (31–39 s),
+`hrm-login` 3/3, `hrm-leave-assign` 2/3, `hrm-pim-add-employee-list` 0/3. The host slowed again during the suite
+(login page 5–9 s by 13:51, module pages `SLOW-NAV` 16–20 s), and the four reds are its last four runs.
+
+**The reds read the same way.** Leave run 3 (`low_confidence`, 134 s): Assign clicked at step 16, the form under its
+spinner (`COVERED:7`), the dialog not yet open; Jev picked the Leave List tab at 0.73, the runner deferred it once
+(`DEFERRED-CLICK:7`, one `settle_ms` of 2.5 s), Jev picked it again at 0.71 on the same page and the once-per-page rule
+executed it: the assignment was never confirmed, the Leave List showed no record, and three undecided BLOCKEDs ended the
+run. PIM run 1 (`app_error`, "Error Invalid Parameter"): the form under its loader (`COVERED:9`), the first name into
+the sidebar filter at 0.77 (deferred once, then executed the same way; the filter then hid the module links), Save, and
+Employee List clicked at 0.78 while the saving overlay was still up; the app answered the mid-save navigation with an
+error toast, which the spec's `app_error` outcome named a bug. Runs 2 and 3 (`budget_exhausted`, 154 / 131 s): the same
+sidebar typing at 0.83 / 0.79, `SLOW-NAV` 16–20 s twice, the 26-step budget spent on waits, and the suggestion row
+"mandaa Brooks" at 0.55 with the list still loading. The pictures at the deferred steps show a spinner over the form
+and nothing else on it.
+
+**What was wrong in the runner.** The covered-page deferral fired once per page signature and then executed the next
+decision whatever it was, on the reasoning that a layer that stays is a dialog and its controls are the controls. Both
+halves failed here: the layer was a loader (5–17 s on this host, against one 2.5 s wait), and the executed pick was
+never a control of the layer. The two design questions the previous handoff left open (Jev's BLOCKED after three
+undecided looks on a covered form; `covered_action_confidence` 0.9 for these specs) are the same fact from two sides.
+
+**`1b69699`.** The observer now counts the covering layer's own controls (`layer_controls`: offered controls inside a
+coverer, around it, or within its box: a dialog's Ok over a backdrop, an open list's options, a banner's Accept over a
+shade). A layer with none is blank, a loading or saving overlay: a marginal action under it is deferred with the WAIT
+backoff (`settle_ms` × 1, 2, 4, 4, 4), `deferral_limit` = `max_low_confidence_steps` + 2 = five times on one page, each
+wait ending when the page changes, and only then executed (`deferrals_exhausted`, `DEFER-LIMIT:5`); undecided looks
+under it get the same two extra looks the confirmation rechecks get (`low_confidence_limit`). A layer with controls (a
+dialog, a dropdown list: `COVERED:n(layer:m)`) defers nothing and does not make the page busy, so a marginal option
+pick or Ok goes at once, where before it waited one `settle_ms`. With that distinction the deferral gate could rise:
+`covered_action_confidence` 0.9 (was 0.8; the sidebar typing read 0.77–0.90). Offline: unit tests 133, selftest
+scenarios 4j (five deferrals then the action), 4j2 (a loader outliving one wait: three deferrals, the third wait ending
+as the overlay lifts, then the right field), 4j3 (four undecided looks under a loader, then the field), 4j4 (a marginal
+click on a dialog's Ok executed at once), `covered_check` on the fixture's loader (0 layer controls) and dialog (1).
+
+**The seventeen at `1b69699`** (`2026-09-24-regression-1b69699-examples.md`, 307 s on two workers, 14:16–14:21): no
+verdict moved against `0e2bc07` / `b487e2e`. Twelve pass 3/3, `forgot-password`, `shop-checkout-error-account` and
+`table-sort-due` expected 3/3, `shop-checkout-problem-account` bug 3/3, `dynamic-controls` pass 2/2 (its wording fixed
+at `b487e2e`), the two pages that vary by design `menu-random` flaky (all 2 / missing 1) and `notify-random` pass 3/3
+this time. Three environment failures, all `Page.goto: Timeout 30000ms` on the-internet.herokuapp.com (`dynamic-controls`,
+`login-logout`, `modal-close`, one run each; the other runs of each passed): the host, not the flows. No deferral fired
+in the 51 runs (no `DEFERRED-*`, no `DEFER-LIMIT`), and the new count did its one job: `wiki-search` runs 2 and 3 clicked
+the suggestion "Playwright (software)" at 0.68 / 0.71 while the open list covered one control, `COVERED:1(layer:2)`, and
+went at once, where the same pick used to wait one `settle_ms` (4 requests a run, against 5); `modal-close`'s Close read
+`COVERED:1(layer:1)` at 0.98. Request counts otherwise equal (`toolshop-search-cart` 8 against 10, Jev's choice of path).

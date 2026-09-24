@@ -128,7 +128,10 @@ and for a `blocked` right after a no-op action whose `blocked_reason` has no row
 **The confirmation looks again while the page moves.** A pass sighting or Jev's DONE gets a settle-and-recheck; if
 that look finds the page's signature changed since the sighting and no pass visible, it is not the settled page, so
 `run_test` parks again (settle_ms × 2, then × 4, ending when the page changes) and looks once more, `CONFIRM_RECHECKS_MAX`
-= 2 times at most (`step.recheck_again`). Live: an admin app's Save navigated during the pause and the one look saw
+= 2 times at most on a settled page, `BUSY_EXTRA_LOOKS` more while the page is busy, and on a busy page for as long as
+`navigation_timeout_ms` in all (`can_recheck`, `step.recheck_again`, `step.recheck_waited_ms`; live: a record page
+rendering some 30 s after Save outlasted four busy looks, 27.5 s of waits at settle_ms 2500, and the run ended
+done_unverified one look before the fields; scenario 4o2). Live: an admin app's Save navigated during the pause and the one look saw
 the next page's loading overlay (`done_unverified` 2/3 on a flow that had in fact saved); with the rule the second
 look sees the record.
 

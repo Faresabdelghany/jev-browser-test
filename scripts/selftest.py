@@ -479,12 +479,14 @@ SAVING_PAGE = """<!doctype html><html><head><title>Saving</title></head><body>
    }, 250);
    if (location.search.includes('shell=1')) {
      // the saved record's page as a single-page app renders it: an empty document first (900 ms), then its frame under a
-     // loading overlay with the heading not yet the record's (1500 ms), then the record with the overlay gone (2200 ms)
-     setTimeout(() => { document.body.innerHTML = '<div id="app"></div>'; }, 900);
+     // loading overlay with the heading not yet the record's (1500 ms), then the record with the overlay gone (2200 ms);
+     // ?scale=<n> stretches the three by n (a slow host)
+     const k = parseFloat(new URLSearchParams(location.search).get('scale') || '1');
+     setTimeout(() => { document.body.innerHTML = '<div id="app"></div>'; }, 900 * k);
      setTimeout(() => { document.getElementById('app').innerHTML = '<h1 id="h">Loading...</h1><form><label>First Name <input></label> <label>Last Name <input></label> <button type="button">Save</button></form>'
-       + '<div id="ov" style="position:fixed;left:0;top:0;width:100%;height:320px;background:rgba(255,255,255,.6)"></div>'; }, 1500);
+       + '<div id="ov" style="position:fixed;left:0;top:0;width:100%;height:320px;background:rgba(255,255,255,.6)"></div>'; }, 1500 * k);
      setTimeout(() => { document.getElementById('ov').remove(); document.getElementById('h').textContent = 'Personal Details';
-       document.getElementById('app').insertAdjacentHTML('beforeend', '<p>Jevtest Runner</p><p>Saved successfully</p>'); }, 2200);
+       document.getElementById('app').insertAdjacentHTML('beforeend', '<p>Jevtest Runner</p><p>Saved successfully</p>'); }, 2200 * k);
      return;
    }
    setTimeout(() => { o.remove(); document.getElementById('toasts').textContent = ''; document.getElementById('heading').textContent = 'Personal Details'; }, 900);
@@ -1571,6 +1573,25 @@ def main() -> int:
                         f"{trace['result'].get('confirmed_by')} {trace['result'].get('assertions')}")
     if "RECHECK:3" not in summarize(trace, out):
         failures.append("pass while saving, shell: the summary should flag RECHECK:3 on the third parked look")
+
+    # 4o2. the same staged record page on a slow host (?scale=3: shell at 2.7 s, frame at 4.5 s, record at 6.6 s) with a
+    #      settle_ms of 300: the busy looks (0.6 + 1.2 + 1.2 + 1.2 s) run out the count bound of four at about 4 s, and the
+    #      run used to end assert_failed there, one look before the record. A page on its way may take as long as a page
+    #      may take to arrive here, navigation_timeout_ms (15 s in this spec), so the looks go on while the page stays
+    #      busy and the pass is confirmed on the record. Live: a slow demo's record page rendered 30 s after Save, four
+    #      busy looks were 27.5 s of waits at settle_ms 2500, and the run ended done_unverified one look early.
+    slow_shell_spec = dict(saving_spec, start_url="file://" + saving_html + "?shell=1&scale=3",
+                           browser=dict(saving_spec["browser"], settle_ms=300, navigation_timeout_ms=15000))
+    out = os.path.join(tmp, "run-pass-while-saving-slow-shell")
+    trace = run(slow_shell_spec, FakeJev("toast"), out, screenshots=False)
+    print(summarize(trace, out))
+    print()
+    waited = [s for s in trace["steps"] if s.get("assertions_pending") or s.get("recheck_again")]
+    if trace["status"] != "passed" or trace["outcome"] != "saved":
+        failures.append(f"pass while saving, slow shell: expected passed/saved, got {trace['status']}/{trace.get('outcome')} ({trace.get('error')})")
+    if len(waited) < 5 or waited[-1].get("recheck_waited_ms", 0) < 4000:
+        failures.append(f"pass while saving, slow shell: the busy looks should go on past the count bound of four while the page stays busy: "
+                        f"{[(s.get('n'), s.get('recheck_again'), s.get('recheck_waited_ms')) for s in waited]}")
 
     # 5. a low-confidence DONE is a WAIT, not a verdict -> the flow continues and passes
     spec = base_spec(url)

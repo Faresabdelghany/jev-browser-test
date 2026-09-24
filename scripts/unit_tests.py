@@ -2229,6 +2229,18 @@ class AssertionsCanWaitTests(unittest.TestCase):
         self.assertFalse(assertions_can_wait(holding, busy=True, page_changed=True, rechecks=0), "every assertion holds: pass now")
         self.assertFalse(assertions_can_wait([], busy=True, page_changed=True, rechecks=0), "no assertions to wait for")
 
+    def test_busy_looks_continue_for_as_long_as_a_page_may_take_to_arrive(self) -> None:
+        from run_test import assertions_can_wait, can_recheck
+        failing = [{"url_matches": "**/x", "ok": False}]
+        self.assertTrue(can_recheck(busy=True, rechecks=4, waited_ms=27500, navigation_timeout_ms=45000),
+                        "four busy looks and 27.5 s of waits: a page here may take 45 s to arrive, so look again")
+        self.assertFalse(can_recheck(busy=True, rechecks=4, waited_ms=45000, navigation_timeout_ms=45000), "the page's time is up")
+        self.assertFalse(can_recheck(busy=False, rechecks=2, waited_ms=1000, navigation_timeout_ms=45000), "a settled page keeps the count bound")
+        self.assertTrue(can_recheck(busy=False, rechecks=1, waited_ms=0, navigation_timeout_ms=0), "within the count bound")
+        self.assertTrue(can_recheck(busy=True, rechecks=3, waited_ms=0, navigation_timeout_ms=0), "the busy count bound alone, when no time is given")
+        self.assertTrue(assertions_can_wait(failing, busy=True, page_changed=False, rechecks=6, waited_ms=20000, navigation_timeout_ms=30000))
+        self.assertFalse(assertions_can_wait(failing, busy=True, page_changed=False, rechecks=6, waited_ms=30000, navigation_timeout_ms=30000))
+
     def test_the_summary_flags_the_pending_assertions(self) -> None:
         from summarize_trace import _flags
         self.assertEqual(_flags({"recheck_again": 1, "assertions_pending": [{"url_matches": "**/x", "ok": False}]}), "RECHECK:1 ASSERT-PENDING:1")

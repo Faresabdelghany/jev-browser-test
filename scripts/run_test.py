@@ -232,6 +232,14 @@ def recheck_limit(busy: bool) -> int:
     return CONFIRM_RECHECKS_MAX + (BUSY_EXTRA_LOOKS if busy else 0)
 
 
+def can_recheck(busy: bool, rechecks: int, waited_ms: int = 0, navigation_timeout_ms: int = 0) -> bool:
+    """May a confirmation look park again? Within `recheck_limit` by count; and, while the page is busy, for as long as
+    the looks have waited less than `navigation_timeout_ms` in all: a page on its way may take as long as a page may
+    take to arrive here. Live: a slow demo's record page rendered some 30 s after Save, the four busy looks were 27.5 s
+    of waits at settle_ms 2500, and the run ended done_unverified one look before the fields."""
+    return rechecks < recheck_limit(busy) or (busy and waited_ms < navigation_timeout_ms)
+
+
 def low_confidence_limit(th: dict, blank: bool) -> int:
     """How many consecutive undecided (low-confidence) decisions on one page end the run `low_confidence`: the spec's
     max_low_confidence_steps on a settled page, BUSY_EXTRA_LOOKS more while a blank layer covers controls (the page is
@@ -291,13 +299,15 @@ def page_busy(obs: dict) -> bool:
     return blank_layer(obs) or not obs.get("elements")
 
 
-def assertions_can_wait(checked: list[dict], busy: bool, page_changed: bool, rechecks: int) -> bool:
+def assertions_can_wait(checked: list[dict], busy: bool, page_changed: bool, rechecks: int,
+                        waited_ms: int = 0, navigation_timeout_ms: int = 0) -> bool:
     """A pass is in sight but an assertion does not hold: has this look ruled out timing? Not while the page is busy
-    (`page_busy`: covered controls, an empty shell) or changed during the pause, within the recheck bound
-    (CONFIRM_RECHECKS_MAX). Live: a Save's toast announced the pass while the overlay still covered the form and the
-    URL was still the form's; the assertions were run there and the run ended `assert_failed` two seconds before the
-    page it asserted arrived. On a settled page a failing assertion is the verdict at once."""
-    return any(not a["ok"] for a in checked) and (busy or page_changed) and rechecks < recheck_limit(busy)
+    (`page_busy`: a blank layer over controls, an empty shell) or changed during the pause, within the recheck bound
+    (`can_recheck`: CONFIRM_RECHECKS_MAX by count, and for a busy page as long as `navigation_timeout_ms`). Live: a
+    Save's toast announced the pass while the overlay still covered the form and the URL was still the form's; the
+    assertions were run there and the run ended `assert_failed` two seconds before the page it asserted arrived. On a
+    settled page a failing assertion is the verdict at once."""
+    return any(not a["ok"] for a in checked) and (busy or page_changed) and can_recheck(busy, rechecks, waited_ms, navigation_timeout_ms)
 
 
 def wait_for_change(page, before: dict | None, wait_ms: int) -> dict:
@@ -1214,39 +1224,52 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     # (reloads, toasts, redirects). This observation is the verdict.
                     was = pending
                     pending = None
+                    nav_ms = spec["browser"]["navigation_timeout_ms"]
+                    waited = was.get("waited_ms", 0)
+
+                    def recheck_wait(rechecks: int) -> int:
+                        # settle_ms x 2, 4, 4, ... (WAIT_BACKOFF_MAX); past the count bound, on a busy page, never beyond
+                        # what is left of navigation_timeout_ms
+                        ms = spec["browser"]["settle_ms"] * min(2 ** rechecks, WAIT_BACKOFF_MAX)
+                        return ms if rechecks <= recheck_limit(True) else max(min(ms, nav_ms - waited), spec["browser"]["settle_ms"])
+
                     if passes:
                         checked = check_assertions(spec, page, obs, secret_values) if spec["assert"] else []
-                        if assertions_can_wait(checked, page_busy(obs), sig != was["sig"], was["rechecks"]):
+                        if assertions_can_wait(checked, page_busy(obs), sig != was["sig"], was["rechecks"], waited, nav_ms):
                             # The pass is in sight (a toast announced the save) but the page is still busy (controls under
                             # the saving overlay, the next page's empty shell) or changed during the pause, and the assertions
                             # do not hold yet (the URL still the form's, the name not rendered): not the settled page. Look
                             # again, as for a page that shows no pass yet.
-                            pending = {**was, "sig": sig, "rechecks": was["rechecks"] + 1}
+                            wait_ms = recheck_wait(was["rechecks"] + 1)
+                            pending = {**was, "sig": sig, "rechecks": was["rechecks"] + 1, "waited_ms": waited + wait_ms}
                             step["pending_outcome"] = passes[0]["name"]
                             step["recheck_again"] = pending["rechecks"]
+                            step["recheck_waited_ms"] = pending["waited_ms"]  # the confirmation's waits so far, against navigation_timeout_ms on a busy page
                             step["assertions_pending"] = [a for a in checked if not a["ok"]]
                             final.setdefault("first_seen_at_step", n)
                             park(step, "pass in sight but the page is still busy and the assertions do not hold yet; looking again",
                                  wait_entry(n, was["action"], "the page was still busy while the result was being checked; checking again"), sig,
-                                 wait_ms=spec["browser"]["settle_ms"] * min(2 ** pending["rechecks"], WAIT_BACKOFF_MAX),
-                                 before=obs.get("fingerprint"))
+                                 wait_ms=wait_ms, before=obs.get("fingerprint"))
                             continue
                         pre = {**merged_adj, "answers": answers} if merged_adj and merged_adj["name"] == passes[0]["name"] else None
                         settle_pass(page, step, obs, passes[0], was["action"], jev, pre, assertions=checked or None)
                         break
-                    if (sig != was["sig"] or page_busy(obs)) and was["rechecks"] < recheck_limit(page_busy(obs)):
-                        # The page changed during the pause, or is still busy (covered controls, an empty shell), and shows
-                        # no pass yet: this is not the settled page, so the look has not ruled out timing. Look again,
-                        # pausing settle_ms x 2, x 4 (ending the moment the page changes again), until two consecutive looks
-                        # agree on a settled page or the bound is reached. Live: a slow Save navigated during the pause and
-                        # the confirmation saw the next page's loading overlay; a DONE on a form under its saving spinner.
-                        pending = {**was, "sig": sig, "rechecks": was["rechecks"] + 1}
+                    if (sig != was["sig"] or page_busy(obs)) and can_recheck(page_busy(obs), was["rechecks"], waited, nav_ms):
+                        # The page changed during the pause, or is still busy (a blank layer over controls, an empty shell),
+                        # and shows no pass yet: this is not the settled page, so the look has not ruled out timing. Look
+                        # again, pausing settle_ms x 2, x 4 (ending the moment the page changes again), until two consecutive
+                        # looks agree on a settled page or the bound is reached: by count, and on a busy page for as long as
+                        # navigation_timeout_ms. Live: a slow Save navigated during the pause and the confirmation saw the
+                        # next page's loading overlay; a DONE on a form under its saving spinner; a record page rendering
+                        # 30 s after Save, one look past the count of four.
+                        wait_ms = recheck_wait(was["rechecks"] + 1)
+                        pending = {**was, "sig": sig, "rechecks": was["rechecks"] + 1, "waited_ms": waited + wait_ms}
                         step["pending_outcome"] = was["name"]
                         step["recheck_again"] = pending["rechecks"]
+                        step["recheck_waited_ms"] = pending["waited_ms"]
                         park(step, "page still changing during the confirmation; looking again",
                              wait_entry(n, was["action"], "the page changed while the result was being checked; checking again"), sig,
-                             wait_ms=spec["browser"]["settle_ms"] * min(2 ** pending["rechecks"], WAIT_BACKOFF_MAX),
-                             before=obs.get("fingerprint"))
+                             wait_ms=wait_ms, before=obs.get("fingerprint"))
                         continue
                     if was["action"] == "DONE":
                         finish(page, step, "done_unverified", {"action": "DONE", "ok": True, "error": None, "confirmed": True})
@@ -1256,7 +1279,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
 
                 def confirm_later(name: str | None, action: str, reason: str, entry_op: str) -> None:
                     nonlocal pending
-                    pending = {"name": name, "action": action, "sig": sig, "rechecks": 0}  # sig: the page the sighting / DONE was made on
+                    pending = {"name": name, "action": action, "sig": sig, "rechecks": 0, "waited_ms": 0}  # sig: the page the sighting / DONE was made on
                     step["pending_outcome"] = name
                     if name:
                         final["first_seen_at_step"] = n  # the sighting; seen_at_step will be the confirming step
