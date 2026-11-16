@@ -23,8 +23,9 @@ is the one in `.claude-plugin/plugin.json`, and merging a new one to `main` tags
   `--workers N` for an application you host yourself.
 
 ### Fixed
-- `selftest.py`'s remote-debugging scenario starts its browser without the sandbox when run as root (a CI container, a
-  devcontainer), where Chromium refuses to start otherwise.
+- `selftest.py`'s remote-debugging scenario starts its hand-launched browser without the sandbox, as Playwright does
+  for every browser it launches itself: with it, Chromium does not start as root (a container) or on GitHub's Ubuntu
+  runners, and the scenario failed there.
 
 ## [0.2.0] - 2026-09-24
 
