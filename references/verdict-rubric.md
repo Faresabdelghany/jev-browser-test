@@ -90,31 +90,51 @@ When you are handed a run folder (`result.json`, `trace.json`, screenshots) the 
 1. Read `result.json`, then the step table, then the pictures. Do not launch a browser first. Two things the
    typed reason leaves out: after `control_had_no_effect`, read every `NO-EFFECT` flag in the table, because the
    reason names the terminal dead control and the first one is often earlier and changes the ticket (an empty
-   order behind a Finish that does nothing); and compare the spec as run (`trace.spec`) with the spec on disk or
-   the skill's example of it, because a missing `expect` or a changed outcome means the red may already be known.
+   order behind a Finish that does nothing: the Add to cart before it did nothing either); and compare the spec as
+   run (`trace.spec`) with the spec on disk or the skill's example of it, because a missing `expect`, a changed
+   outcome or a changed `when` means the red may already be known, and the fix is then in the spec, not the app.
 2. "Is it flaky?" is answered from the trace's **flake signatures** before any rerun: `stale` steps,
-   `executed.ok == false`, `retried`, `usage.reconnects > 0`, a `settle` that ended on `cap` at the decisive step,
+   `executed.ok == false`, `retried` (flag `RETRIED`), `usage.reconnects > 0`, a `settle` that ended on `cap` at the decisive step,
    `reason.phase`, an `error` status. None present and a confident declared outcome or a typed reason with a
    suggestion → the run is deterministic evidence; say so and do not rerun. Rerun (once) only when a signature is
    present, when the user explicitly asks for a rerun, or after a spec fix you made. A rerun for pictures
-   (`--screenshots all`) is that one rerun: combine it with the spec fix rather than spending both.
+   (`--screenshots all`) is that one rerun: make it after the spec fix, not before it, rather than spending both.
 3. The cheapest way to separate TEST_ISSUE from BUG is a **control run**: the same spec with a known-good account
    or the sibling spec that is known to pass (`shop-checkout.json` beside `shop-checkout-error-account.json`). One
    run, ~10 Jev calls, and it settles whether the flow or the app is at fault. Prefer it to fetching the app's
-   source code, which is not asked for and rarely changes the verdict.
-4. Bound the work: one triage is one reading, at most one rerun and one control. A triage that takes longer than
-   the run it judges has gone wrong.
+   source code, which is not asked for and rarely changes the verdict. The same control settles "test problem or
+   slow host" on a `done_unverified` or timed-out red: the unchanged spec, once; green means the host (FLAKY /
+   environment, both traces attached), the same red again means the spec's timing budget (TEST_ISSUE: raise
+   `navigation_timeout_ms` or `settle_ms`).
+4. Bound the work: one triage is one reading, at most one rerun and one control, and the report says how many
+   browser runs were made. A triage that takes longer than the run it judges has gone wrong.
 
 ## How to look at a run (in this order)
 
 0. `result.json` (see above): outcome, verdict or suggestion, evidence line, assertions.
 1. Summary line: status, actions, duration, `passed_without_actions` warning.
 2. Step table: read the operations as a story. Does the sequence make sense for the goal?
-3. Flags column: `LOW-CONF`, `ACTION-FAILED`, `FORCED-CLICK`, `DISPATCHED-CLICK`, `REPEAT×n`, `NEVER:*`,
-   `STALE` (the page changed while Jev decided; nothing was executed, the loop observed again),
+3. Flags column, the action's own flags: `LOW-CONF`, `ACTION-FAILED`, `FORCED-CLICK`, `DISPATCHED-CLICK`, `REPEAT×n`,
+   `NEVER:*`, `STALE` (the page changed while Jev decided; nothing was executed, the loop observed again),
    `NO-TARGET-ANSWER`, `INVALID-ANSWER` (a Jev answer failed validation; the reason is in `step.invalid_answer`),
-   `RETRIED` (the request was re-sent once), `ERROR`, `NO-EFFECT` (the action landed and the page did not
-   change; when the run ended on `control_had_no_effect`, read every one of them, the first is rarely the last).
+   `RETRIED` (the request was re-sent once), `ERROR`, `EVIDENCE-ASKED`, `NO-EFFECT` (the action landed and the page did
+   not change: the classic dead control, and the next step's picture shows it; when the run ended on
+   `control_had_no_effect`, read every one of them, the first is rarely the last; with `IN-FLIGHT` beside it the next
+   look showed a blank layer or a toast, so the click landed and the app was working on it: a Save on a single-page
+   app, not a dead control), `SLOW-NAV:<s>` (the click landed; the page it asked for answered after the action timeout:
+   a slow host, not a failure).
+   The page's flags: `COVERED:<n>` (controls on screen but under another layer, so not offered; plain, the layer is
+   blank and the form is still loading; `(layer:<m>)`, the layer has controls of its own, a dialog or an open list),
+   `DEFERRED-<OP>:<n>` (a marginal click or typing under a blank layer turned into a wait, again with backoff while the
+   layer stays, five on one page; `DEFER-LIMIT:5` when it then went ahead; `DEFERRED-<OP>:loading` while an autocomplete
+   still said 'Searching....', `LOADING:<n>` on such steps), `ANNOUNCED:"…"` (a toast or live message appeared between
+   the previous observation and this one; Jev saw it in its state for this and the next two steps, faded or not).
+   The outcome's flags: `DEFERRED:<outcome>` (true of the page, but its `requires_action` / `after` condition has not
+   happened yet: not counted), `RECHECK:<n>` / `ASSERT-PENDING:<n>` (a pass in sight on a page still busy, looked at
+   again).
+   In the operation column, `(not run)` marks a decision the runner turned into a wait (a marginal or deferred action,
+   an undecided step) and `AUTO_DONE` a pass the runner confirmed itself when its outcome came into sight, without Jev
+   choosing DONE.
 4. The step **after** the last sensible action: its checks and screenshot show what the app actually did.
    With the default `screenshots: "key"` only the terminal and flagged steps have a picture; the step
    before a divergence usually has none, but its element table and probabilities are in the trace

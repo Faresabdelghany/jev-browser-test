@@ -59,9 +59,8 @@ matches the skill's pre-approved commands, and the runner finds the project's `.
 
 ### 1. Write the spec
 
-Scaffold it, then edit; do not author it by hand (measured on 2026-09-24: a first run that read this skill and the
-format reference and wrote three specs by hand cost ~72k Claude tokens, against ~19k for driving the same two flows
-step by step with a snapshot tool; a rerun of the finished specs cost ~6k):
+Scaffold it, then edit; do not author it by hand (measured: writing three specs by hand from the format reference
+cost ~72k Claude tokens, a rerun of a finished spec ~6k):
 
 ```bash
 python $SKILL/scripts/scaffold.py --url https://app.example.com/ \
@@ -75,12 +74,12 @@ python $SKILL/scripts/scaffold.py --url https://app.example.com/ \
 
 Single quotes around anything with `${...}` (the shell must not expand it: the runner does, at run time).
 
-It writes a spec that already validates (goal, data, a `pass` outcome from the goal's "so that" clause, your `bug`
-outcomes with `requires_action`, named `name=statement` and held by `--after click:Save` until that click ran, the
-standing `app_error`, your assertions and setup steps, `--slow` for a slow single-page app, `--comment` for the spec's
-own comment in place of the editing guidance), prints `spec.py`'s summary, and leaves nothing invented: no assertion
-unless you gave one, `${ENV}` kept for run time. Then edit the twenty lines that matter, guided by the field notes below; open
-`references/spec-format.md` only for a field the scaffold's `comment` does not explain.
+It writes a spec that already validates: the goal and data, a `pass` outcome from the goal's "so that" clause, each
+`--bug name=statement` as a bug outcome with `requires_action` (held by `--after click:Save` until that click ran),
+the standing `app_error`, your assertions and setup steps; `--slow` is for a slow single-page app. Nothing is
+invented: no assertion unless you gave one, `${ENV}` kept for run time. Then edit the twenty lines that matter,
+guided by the field notes below; open `references/spec-format.md` only for a field the scaffold's `comment` does not
+explain.
 
 - **goal** — what you would tell a tester in one breath, ending with the visible outcome.
 - **data** — every string the flow might type. Jev chooses *which* value; a missing one surfaces as `BLOCKED`.
@@ -108,12 +107,9 @@ unless you gave one, `${ENV}` kept for run time. Then edit the twenty lines that
   "assert"`, the default) instead of a pause, a second look and another request.
 - **checks** — atomic progress statements, one fact each; an outcome's `requires` can lean on them.
 - **setup** — deterministic Playwright steps for preconditions. Prefer `wait_for` to `wait`.
-- **long pages and type-aheads** — form controls and buttons below the first screen are offered marked `(below the
-  fold)` and the click scrolls to them; links and plain clickables there are not, so on a long page say in the goal
-  where to scroll ("scroll down to the bottom of the form"). A type-ahead that never offers the value ('No Records
-  Found' for a name the page itself displays) wants a `suggestion_not_found` bug outcome with `requires_action` and
-  `after: {type: <the field's label or placeholder>}`, beside the `invalid_search_name` test issue for a suggestion
-  offered but not chosen: the run then ends declared, with the dropdown's own words as evidence.
+- **long pages and type-aheads** — a link far down a long page wants the goal to say where to scroll; a type-ahead
+  wants a `suggestion_not_found` bug outcome. `references/spec-format.md` (Writing the goal and data) has both
+  recipes: read them before writing a spec for a long form or an autocomplete.
 - **expect** — only for a spec whose *correct* result is red (a demo account documented as broken): the ending
   it should reach. It is green when it matches and red when the behaviour changes. Never use it to hide a bug.
 
@@ -133,10 +129,8 @@ conversation and the remaining words are the request. Otherwise read the request
 "open the browser", "I want to see it" mean `--headed`; "in the background", "hide the browser" mean
 `--headless`; nothing said means headless, the default. Pass the same flag to `run_suite.py` (a headed suite
 with `--workers 1`: one window at a time). `JEV_HEADED=1` in the user's `.env` is a standing preference the
-runner reads by itself; a flag beats it, and both beat the spec's `browser.headless`. The runner prints
-`browser: headed` or `browser: headless (...)` on stderr as it launches and keeps the mode in
-`trace.browser.headless`, so a window that no run announced is not this runner's. The first time you run in a
-conversation, name the mode in one clause ("headless; say *headed* to watch"); never ask which.
+runner reads by itself; a flag beats it. The first time you run in a conversation, name the mode in one clause
+("headless; say *headed* to watch"); never ask which.
 
 Exit 0 = a pass (or, with `expect`, the declared result); 1 = any other outcome or `undetermined`; 2 = never a
 verdict: a spec problem, a missing key, a browser that would not launch, a start URL that did not load, a setup
@@ -165,22 +159,15 @@ was gone before the runner looked), `story`, and for `undetermined` the `reason`
 `suggested_verdict`; `expected` for a spec with `expect`.
 `confirmed_by: recheck` on a spec that has assertions means the pass was not yet in sight when Jev chose DONE
 (the outcome read below 0.8), so the runner took the checking step and saw it there: correct, one request more.
-Open the step table only for `undetermined` or a surprising outcome. Flags worth knowing: `NO-EFFECT` (an
-action landed and the page did not change: the classic dead control; the next step's picture shows it; with
-`IN-FLIGHT` beside it the next look showed a blank layer or a toast, so the click landed and the app was working on
-it, a Save on a single-page app, not a dead control),
-`DEFERRED:<outcome>` (true of the page, but its `requires_action` / `after` condition has not happened yet: not
-counted), `COVERED:<n>` (controls on screen but under another layer, so not offered; plain, the layer is blank and the
-form is still loading; `(layer:<m>)`, the layer has controls of its own, a dialog or an open list), `DEFERRED-<OP>:<n>` (a
-marginal click or typing under a blank layer turned into a wait, again with backoff while the layer stays, five on one
-page; `DEFER-LIMIT:5` when it then went ahead; `DEFERRED-<OP>:loading` while an autocomplete still said 'Searching....',
-`LOADING:<n>` on such steps), `ANNOUNCED:"…"` (a toast or
-live message appeared between the previous observation and this one; Jev saw it in its state for this and the next
-two steps, faded or not), `SLOW-NAV:<s>` (the click landed; the page it asked for answered after the action timeout: a
-slow host, not a failure), `RECHECK:<n>` / `ASSERT-PENDING:<n>` (a pass in sight on a page still busy, looked at again),
-`LOW-CONF`, `STALE`, `EVIDENCE-ASKED`. In the operation column, `(not run)` marks a decision the runner turned into
-a wait (a marginal or deferred action, an undecided step) and `AUTO_DONE` a pass the runner confirmed itself when its
-outcome came into sight, without Jev choosing DONE. With the
+Open the step table only for `undetermined` or a surprising outcome. The flags you meet most: `NO-EFFECT` (an
+action landed and the page did not change: the classic dead control, and the next step's picture shows it; with
+`IN-FLIGHT` beside it the next look showed a blank layer or a toast, so the app was working on the click: a Save on
+a single-page app, not a dead control), `DEFERRED:<outcome>` (true of the page, but its `requires_action` / `after`
+condition has not happened yet: not counted), `ANNOUNCED:"…"` (a toast or live message appeared since the previous
+observation), `SLOW-NAV:<s>` (the click landed and the page answered after the action timeout: a slow host, not a
+failure) and `LOW-CONF`. `references/verdict-rubric.md` (How to look at a run) explains every other flag
+(`COVERED`, `DEFERRED-<OP>`, `LOADING`, `RECHECK`, `ASSERT-PENDING`, `STALE`, `EVIDENCE-ASKED`) and the `(not run)` /
+`AUTO_DONE` entries of the operation column: read it before judging a run that carries one of them. With the
 default `screenshots: "key"` the terminal step, every flagged step and the step after a no-effect action have a
 `steps/NNN.png`; `--screenshots all` pictures every step on a rerun. The one reading rule: the checks recorded
 in step *n* describe the page **before** action *n*; action *n*'s effect shows in step *n+1*. After a no-effect
@@ -226,24 +213,17 @@ which shows in one run that the spec is sound and the defect is the app's.
 
 ## Triage-only mode
 
-Handed a run folder (`result.json`, `trace.json`, screenshots), the answer is in it: skip to steps 3–4.
+Handed a run folder (`result.json`, `trace.json`, screenshots), the answer is in it: skip to steps 3–4 and follow
+`references/verdict-rubric.md` (Triage-only mode) to the letter. Its rules, in short:
 
-1. Read `result.json`, the step table, the pictures. **Do not launch a browser first.** Two things the typed
-   reason does not tell you. After `control_had_no_effect`, read **every** `NO-EFFECT` flag in the table: the
-   reason names the last dead control, and the first one is often earlier and changes the ticket (a Finish that
-   does nothing behind an Add to cart that did nothing: the order was empty). And compare the spec as run
-   (`trace.spec`) with the spec on disk or the skill's example of it: a missing `expect`, a changed outcome or
-   `when` means the red may already be known, and the fix is in the spec, not the app.
-2. "Is it flaky?" is answered from the trace's flake signatures: `STALE` steps, `executed.ok: false`, `RETRIED`,
-   `usage.reconnects`, a `reason.phase`, an `error` status. None present, plus a confident declared outcome or a
-   typed reason with a suggestion → deterministic evidence; say so and do not rerun. Rerun once only when a
-   signature is present, the user asks, or after a spec fix you made; a rerun for pictures (`--screenshots all`)
-   is that one rerun, so make it after the spec fix, not before it.
-3. To separate TEST_ISSUE from BUG cheaply, run a **control**: the same spec with a known-good account, or the
-   sibling spec known to pass. One run, ~10 Jev calls. Prefer it to reading the app's source, which was not asked
-   for and rarely changes the verdict. The same control settles "test problem or slow host" on a `done_unverified`
-   or timed-out red: the unchanged spec, once; green means the host (FLAKY / environment, both traces attached),
-   the same red again means the spec's timing budget (TEST_ISSUE: raise `navigation_timeout_ms` or `settle_ms`).
+1. Read `result.json`, the step table, the pictures. **Do not launch a browser first.** After
+   `control_had_no_effect` read **every** `NO-EFFECT` flag (the first dead control is often earlier than the one the
+   reason names), and compare the spec as run (`trace.spec`) with the spec on disk: a missing `expect` or a changed
+   outcome means the red may already be known.
+2. "Is it flaky?" is answered from the trace's flake signatures, not from repetition. Rerun once only when a
+   signature is present, the user asks, or after a spec fix you made.
+3. Separate TEST_ISSUE from BUG, and a test problem from a slow host, with one **control** run; do not read the app's
+   source for it.
 4. One triage = one reading, at most one rerun and one control. Report how many runs you made.
 
 ## Suites: anything longer than one spec
@@ -259,10 +239,9 @@ kind of flaky it is (environment or an app that varies by design), and how to ge
 
 ## What makes a run fast (and what does not)
 
-The runner already does what jev-ultrafast does: one request per decision, one browser call per snapshot, no
-screenshots in the loop, event-based settles, a pre-connected keep-alive client, WAITs that end the moment the
-page changes. A probe showed the ~0.3 s per request is the API's floor (HTTP/2 and the number of questions per
-request change nothing), so what *you* control is the number of round trips and the waiting:
+The runner already makes one request per decision and waits on events, not on timers, and the ~0.3 s per request is
+the API's floor (`references/runner-design.md` has the probe), so what *you* control is the number of round trips
+and the waiting:
 
 - Put login and known banners in `setup`: each is one Jev request saved and no chance of a wrong pick.
 - Give the spec assertions: a pass then confirms itself in code, saving a pause, an observation and a request.
@@ -287,15 +266,7 @@ keys or two same-named elements wants keys named like the app's labels, or a `no
 - `references/spec-format.md` (every field), `troubleshooting.md` (symptom → fix), `suites.md` (agreement, flakiness,
   reports), `trace-format.md`, `verdict-rubric.md`, `runner-design.md`.
 - `specs/smoke-login.json`, `specs/smoke-login-badpw.json` (the demo-site smoke specs); `specs/examples/*.json`,
-  twenty-two specs against public sites: a shop checkout in four variants (two with the accounts the site documents as
-  broken, one of them an `expect` spec), an encyclopedia search with a real autocomplete, a todo app, a 5 s loader,
-  a random notification (`text_in` on the notification), a modal on load, a menu that drops an entry at random, a
-  static web form (select, checkbox, radio, the GET query asserted), add/remove elements (a count asserted with
-  `text_in` `equals`), two asynchronous controls with loaders, a forgot-password form that answers with a server
-  error (expected-red), a Jev-typed login and logout, an admin panel's own login typed by Jev, sortable table headers with no affordance (an expected
-  TEST_ISSUE: what a control Jev cannot see looks like), an admin panel's Add Employee behind loading overlays
-  (`covered_controls`, `settle_ms` raised for a slow demo), a shop's search-to-cart, and three more admin-panel flows
-  (a user with a role and a password, a leave assignment confirmed by toasts, an employee added then found in a list)
-  that keep their data unique with `${RUN_STAMP}`. Copy one as the starting point for your own app.
-  `specs/examples/README.md` has the table.
+  twenty-two specs against public sites (shop checkout, a search with a real autocomplete, loaders, toasts, an
+  admin single-page app under loading overlays, records kept unique with `${RUN_STAMP}`, expected-red specs).
+  `specs/examples/README.md` has the table: copy the closest one as the starting point for your own app.
 - `assets/spec.example.json` — a realistic spec with login in `setup` and a Jev-driven goal.
