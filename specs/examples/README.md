@@ -6,7 +6,7 @@ with `python scripts/run_suite.py specs/examples/*.json --repeat 3 --workers 2`,
 specs/examples/<id>.json --headed`, and the `hrm-*` specs on one worker (`--workers 1`: the demo pre-fills the next
 Employee Id when a form opens, and two forms opened in the same second collide). the-internet is a free Heroku app: a
 cold start can add 25 s to a run's navigation, which the runner reports as such. The latest suite results are in
-`docs/superpowers/measurements/README.md`.
+`docs/superpowers/measurements/README.md` (on the `dev-docs` branch).
 
 | spec | site | flow | it exercises | result |
 |---|---|---|---|---|
@@ -34,5 +34,5 @@ cold start can add 25 s to a run's navigation, which the runner reports as such.
 | `hrm-leave-assign` | opensource-demo.orangehrmlive.com | `setup` seeds an employee; Jev assigns a day of leave (autocomplete, a typed date in the demo's yyyy-dd-mm format, a leave type, Assign, Ok in the 'Balance not sufficient' dialog), filters the Leave List by status and employee, searches: one record | decisive facts that were toasts ('Successfully Saved', 'Failed to Submit: ...') captured as `announcements`; `no_records` with `after: {click: Search}`; a calendar popup that eats the next click, named in `notes` | pass, "(1) Record Found" |
 
 `specs/compare/` holds the five specs of the Jev-versus-Playwright-CLI comparison
-(`docs/superpowers/measurements/2026-09-24-claude-cost-comparison.md`). Copy any spec here as the starting point for
+(`docs/superpowers/measurements/2026-09-24-claude-cost-comparison.md` on the `dev-docs` branch). Copy any spec here as the starting point for
 your own application, and keep specs for a private application under `specs/local/` (git-ignored).

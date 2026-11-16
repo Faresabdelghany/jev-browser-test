@@ -359,6 +359,10 @@ def cdp_check(url: str, tmp: str) -> list[str]:
          # Playwright passes these when it launches Chromium itself; without them a fresh profile asks
          # macOS for the keychain ("Chromium Safe Storage") to encrypt cookies, a password prompt per run.
          "--use-mock-keychain", "--password-store=basic",
+         # Playwright launches Chromium without its sandbox unless asked otherwise, and so must this hand-launched one:
+         # with the sandbox it does not start as root (a container) nor on a CI runner whose AppArmor profile forbids
+         # unprivileged user namespaces (GitHub's ubuntu-24.04), and the endpoint below never answers.
+         "--no-sandbox",
          "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )

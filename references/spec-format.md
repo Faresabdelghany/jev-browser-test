@@ -252,6 +252,13 @@ Checks are Noul questions: Jev returns the probability that the statement is tru
   `"when": "The table shows a row for 'Runner${RUN_STAMP}'"`): the runner substitutes one fresh value per run, so a
   spec run three times in a suite creates three distinct records and a search for the name finds exactly one.
   Without it, the second run collides with the first ("Already exists", two records found) and reads as a bug.
+- **Long pages.** Form controls and buttons below the first screen are offered marked `(below the fold)` and the
+  click scrolls to them; links and plain clickables there are not, so on a long page say in the goal where to scroll
+  ("scroll down to the bottom of the form").
+- **Type-aheads.** A type-ahead that never offers the value ('No Records Found' for a name the page itself displays)
+  wants a `suggestion_not_found` bug outcome with `requires_action` and `after: {type: <the field's label or
+  placeholder>}`, beside the `invalid_search_name` test issue for a suggestion offered but not chosen: the run then
+  ends declared, with the dropdown's own words as evidence.
 - Test credentials go in `data` via `${ENV_VAR}` and are listed in `secrets`. Never paste real
   passwords into a spec file. Prefer `setup` for the login itself so the credential never reaches Jev at all.
   The one exception is a credential the site itself publishes (the demo accounts a practice site prints on its

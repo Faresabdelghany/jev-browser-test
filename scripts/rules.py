@@ -9,7 +9,7 @@ Adapted from browser-use/jev-ultrafast's questions.py for a loop with prepared v
 TYPE_TEXT means choosing one of `available_data_values`). The untrusted-page-text guard is in both
 NEXT_ACTION and CHECK: nothing on the page can change the goal or the rules.
 
-**Off by default.** Measured on the-internet.herokuapp.com (docs/superpowers/measurements/
+**Off by default.** Measured on the-internet.herokuapp.com (dev-docs branch: docs/superpowers/measurements/
 2026-09-22-track1-ab-*.json, 3 runs per variant): three of the four wordings tried (full, light, just the
 two guard sentences) lowered the `operation` decision's median confidence on smoke-login from 0.95 to
 0.50-0.57; the fourth (without the BLOCKED sentences) kept 0.97 but took two extra no-op steps and broke
