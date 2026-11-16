@@ -70,7 +70,7 @@ def _rel(path: str | None, base: str | None) -> str | None:
     if not path or not base:
         return path
     try:
-        return os.path.relpath(path, base)
+        return os.path.relpath(path, base).replace(os.sep, "/")  # the same results.json on every system; "/" opens on Windows too
     except ValueError:  # another drive on Windows: no relative form exists
         return path
 

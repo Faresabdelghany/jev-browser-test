@@ -214,7 +214,8 @@ def render_report(trace: dict, result: dict | None, images: dict[str, bytes], ru
         parts.append("<h2>Final page</h2>" + f'<div class="probs"><code>{_e(final.get("url"))}</code> · {_e(final.get("title"))}</div>'
                      + _img(images, final.get("screenshot"), "final page"))
     if run_dir:
-        parts.append(f'<p class="probs">trace: <code>{_e(os.path.join(run_dir, "trace.json"))}</code> · result: <code>{_e(os.path.join(run_dir, "result.json"))}</code></p>')
+        shown_dir = run_dir.replace(os.sep, "/").rstrip("/")  # a path a reader can paste on any system
+        parts.append(f'<p class="probs">trace: <code>{_e(shown_dir + "/trace.json")}</code> · result: <code>{_e(shown_dir + "/result.json")}</code></p>')
     parts.append("</body></html>")
     return "\n".join(parts)
 
