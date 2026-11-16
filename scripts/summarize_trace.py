@@ -31,7 +31,7 @@ def _fmt_conf(step: dict) -> str:
     tg = step.get("target") or {}
     a = f"{op.get('confidence', 0):.2f}" if op else "-"
     b = f"{tg.get('confidence', 0):.2f}" if tg and not tg.get("missing") else "-"
-    tv = step.get("type_value")
+    tv = step.get("type_value") or step.get("upload_file")  # which value to type, or which file to attach
     c = f"/{tv.get('confidence', 0):.2f}" if tv else ""
     return f"{a}/{b}{c}"
 
@@ -220,6 +220,8 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
             target = tg.get("label", tg.get("choice", ""))
         if s.get("type_value"):
             target += f" <- {s['type_value'].get('choice')}"
+        if s.get("upload_file"):
+            target += f" <- file {s['upload_file'].get('choice')}"
         if len(target) > 58:
             target = target[:55] + "..."
         lines.append(
@@ -256,7 +258,12 @@ def _hidden_controls_hint(trace: dict) -> list[str]:
                        "(or script them in setup with \"frame\").")
     if last.get("shadow_hosts"):
         hints.append(f"  hint: {last['shadow_hosts']} element(s) on the last page keep controls inside shadow DOM, which the observer "
-                     "does not offer. Script those steps in setup: Playwright selectors reach into open shadow roots.")
+                     "does not offer unless the spec says \"observation\": {\"shadow_dom\": true} (or --shadow-dom). A scripted setup "
+                     "step reaches them too: Playwright selectors go into open shadow roots.")
+    spec = trace.get("spec") or {}
+    if not spec.get("files") and any(e.get("role") == "file" for e in last.get("elements") or []):
+        hints.append("  hint: the last page has a file field and the spec declares no `files`. Give the files Jev may attach "
+                     "(\"files\": {\"cv\": \"fixtures/cv.pdf\"}) and UPLOAD_FILE is offered, or script the upload in setup.")
     return hints
 
 

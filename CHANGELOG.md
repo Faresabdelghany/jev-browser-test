@@ -3,6 +3,37 @@
 Notable changes to the jev-browser-test skill. Versions follow [semantic versioning](https://semver.org); the version
 is the one in `.claude-plugin/plugin.json`, and merging a new one to `main` tags and releases it.
 
+## [0.5.0] - 2026-11-16
+
+Jev can now drive the three interactions 0.4.0 could only script. Each is **off until the spec asks**: a spec that
+does not ask is sent the questions and the observation it always was (compared field by field against 0.4.0 on 80
+page states: identical).
+
+### Added
+- **Shadow DOM: `observation.shadow_dom`** (`--shadow-dom`). The controls and the text inside open shadow roots,
+  nested ones included, are observed like the rest of the page; Jev types and clicks there; the evidence line and
+  the assertions read there too. A page without shadow DOM is observed exactly as before with it on.
+- **Uploads: `files`.** `{"cv": "fixtures/cv.pdf"}` offers the operation `UPLOAD_FILE` wherever the page has a file
+  field, including one hidden behind a styled button. Jev picks the field and the file's name; only the name reaches
+  Jev, never the path. A field that holds a file reads `(file: cv.pdf)`.
+- **Hover: `extra_operations: ["HOVER"]`** (`--hover`). Jev may hover a link, button, tab or menu item to open a menu
+  that only shows on hover, then click what it reveals.
+- **`scripts/ab.py`**: runs a set of specs with and without an option, interleaved so both arms see the same hour of
+  a shared host, and reports per spec whether the ending moved and whether decisions got less certain. It is how
+  "could this be the default" gets answered.
+- `scaffold.py --file KEY=PATH / --hover / --shadow-dom`; a stalled run on a page with an unused file field says so.
+- Offline scenarios J, K, L in `selftest_capabilities.py` and 11 more unit tests (173).
+
+### Changed
+- With `files` declared, a file field is an upload target and no longer a click target (a click would open a system
+  dialog nothing in the run can answer). Without `files` nothing changes.
+
+### Not in this release
+- **None of the three was run against the live Jev API.** Offline, a scripted stand-in chooses HOVER and UPLOAD_FILE
+  when they are offered; whether Jev does, and what offering HOVER costs the steps that do not need it, is what
+  `ab.py` and the experiment specs on the `dev-docs` branch are for.
+- Drag and drop is still scripted only. Closed shadow roots, and toasts announced inside a shadow root, are not seen.
+
 ## [0.4.0] - 2026-11-16
 
 No existing spec changes behaviour: every new capability is a new field or flag, off until a spec uses it, with two

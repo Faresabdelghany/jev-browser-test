@@ -86,8 +86,15 @@ SETTLE_JS = r"""
   const t0 = performance.now();
   let frames = 0, lastMutation = t0, done = false, cap = null;
   const mo = new MutationObserver(() => { lastMutation = performance.now(); });
+  const watch = { subtree: true, childList: true, attributes: true, characterData: true };
   try {
-    mo.observe(document.documentElement || document, { subtree: true, childList: true, attributes: true, characterData: true });
+    mo.observe(document.documentElement || document, watch);
+    if (args.deep) {
+      // a MutationObserver does not see into a shadow root: with observation.shadow_dom each open root is watched too,
+      // so a component still rendering keeps the page from counting as quiet
+      const scan = root => { for (const el of root.querySelectorAll('*')) if (el.shadowRoot) { mo.observe(el.shadowRoot, watch); scan(el.shadowRoot); } };
+      scan(document);
+    }
   } catch (e) { /* no document yet: the frame/cap logic below still resolves */ }
   const finish = (ended) => {
     if (done) return;
@@ -132,6 +139,16 @@ SETTLE_JS = r"""
 AUTOCOMPLETE_ROLES = ("combobox", "searchbox")
 
 BODY_TEXT_JS = "() => document.body ? document.body.innerText : ''"
+# the same with the text inside open shadow roots after it (innerText stops at a shadow host): observation.shadow_dom
+DEEP_BODY_TEXT_JS = r"""() => {
+  if (!document.body) return '';
+  const parts = [document.body.innerText];
+  const scan = root => { for (const el of root.querySelectorAll('*')) if (el.shadowRoot) {
+    for (const child of el.shadowRoot.children) if (!/^(STYLE|SCRIPT|TEMPLATE|LINK)$/.test(child.tagName)) parts.push(child.innerText || '');
+    scan(el.shadowRoot); } };
+  scan(document);
+  return parts.join('\n');
+}"""
 
 
 def settle(page, spec: dict, after: tuple[str | None, str | None] | None = None) -> dict:
@@ -151,7 +168,8 @@ def settle(page, spec: dict, after: tuple[str | None, str | None] | None = None)
     cap = spec["browser"]["settle_ms"]
     quiet = min(spec["browser"]["quiet_ms"], cap)
     operation, role = after or (None, None)
-    args = {"quietMs": quiet, "capMs": cap, "waitForOptions": operation == "TYPE_TEXT" and role in AUTOCOMPLETE_ROLES}
+    args = {"quietMs": quiet, "capMs": cap, "waitForOptions": operation == "TYPE_TEXT" and role in AUTOCOMPLETE_ROLES,
+            "deep": bool(spec.get("observation", {}).get("shadow_dom"))}
     t0 = time.perf_counter()
 
     def loaded() -> None:
@@ -443,7 +461,7 @@ def deferral_limit(th: dict) -> int:
     while the loader was still up."""
     return th["max_low_confidence_steps"] + BUSY_EXTRA_LOOKS
 WAIT_POLL_MS = 100  # a WAIT re-reads the page's fingerprint this often and ends as soon as the page has changed
-NO_EFFECT_ACTIONS = {"CLICK", "TYPE_TEXT", "SELECT", "PRESS_ENTER"}  # an executed one of these that changed nothing is flagged
+NO_EFFECT_ACTIONS = {"CLICK", "TYPE_TEXT", "SELECT", "PRESS_ENTER", "HOVER", "UPLOAD_FILE"}  # an executed one of these that changed nothing is flagged
 NAVIGATION_PENDING_MARKER = "waiting for scheduled navigations to finish"  # Playwright's call log after "click action done"
 
 
@@ -520,7 +538,7 @@ def wait_for_change(page, before: dict | None, wait_ms: int) -> dict:
         if before is None:
             continue
         try:
-            changed = compare_fingerprint(before, fingerprint(page, before.get("frames")), "DONE") is not None
+            changed = compare_fingerprint(before, fingerprint(page, before.get("frames"), before.get("deep")), "DONE") is not None
         except Exception:  # noqa: BLE001 - the document navigated: that is a change
             return {"ended": "navigated", "ms": int((time.perf_counter() - t0) * 1000)}
         if changed:
@@ -550,7 +568,7 @@ def execute(page, spec: dict, operation: str, target: dict | None, value_key: st
     timeout = spec["browser"]["action_timeout_ms"]
     res: dict = {"action": operation, "ok": True, "error": None}
     try:
-        if operation in ("CLICK", "TYPE_TEXT", "SELECT"):
+        if operation in ("CLICK", "TYPE_TEXT", "SELECT", "HOVER", "UPLOAD_FILE"):
             if not target or target.get("missing"):
                 raise RuntimeError("no target answer for this operation")
             scope = page.frame_locator(frame) if frame else page
@@ -584,6 +602,19 @@ def execute(page, spec: dict, operation: str, target: dict | None, value_key: st
             except Exception:  # contenteditable / custom inputs don't support fill
                 loc.click(timeout=timeout)
                 loc.press_sequentially(value, timeout=timeout)
+        elif operation == "HOVER":
+            # the pointer stays where it is put: the menu it opens is on the next observation, and a click on one of its
+            # items moves the pointer there without leaving the menu
+            loc.hover(timeout=timeout)
+        elif operation == "UPLOAD_FILE":
+            files = spec.get("files") or {}
+            if not value_key or value_key not in files:
+                raise RuntimeError("no usable upload_file answer")
+            res["file_key"] = value_key
+            if not os.path.isfile(files[value_key]):
+                raise FileNotFoundError(f"no such file (paths are relative to {os.getcwd()}): {files[value_key]}")
+            loc.set_input_files(files[value_key], timeout=timeout)  # no click, no file dialog: works on a hidden field too
+            res["file"] = os.path.basename(files[value_key])
         elif operation == "PRESS_ENTER":
             page.keyboard.press("Enter")
         elif operation == "SELECT":
@@ -741,6 +772,7 @@ def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = No
     """
     results = []
     secrets = secrets or []
+    deep = bool((spec.get("observation") or {}).get("shadow_dom"))  # the page's shadow roots are part of what is asserted on
     body_text: str | None = None
     elements: list[dict] | None = None
     url = page.url
@@ -768,7 +800,7 @@ def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = No
             continue
         if kind in ELEMENT_ASSERTIONS and elements is None:
             try:
-                elements = observe(page, ASSERT_MAX_ELEMENTS, 100, whole_document=True)["elements"]
+                elements = observe(page, ASSERT_MAX_ELEMENTS, 100, whole_document=True, shadow_dom=deep)["elements"]
             except Exception:  # noqa: BLE001 - fall back to what the observer saw
                 elements = obs["elements"]
         if kind == "url_matches":
@@ -777,7 +809,7 @@ def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = No
         elif kind in ("text_contains", "text_order"):
             if body_text is None:
                 try:
-                    body_text = page.evaluate(BODY_TEXT_JS)
+                    body_text = page.evaluate(DEEP_BODY_TEXT_JS if deep else BODY_TEXT_JS)
                 except Exception:  # noqa: BLE001 - fall back to what the observer saw
                     body_text = obs["visible_text"]
             if kind == "text_contains":
@@ -804,6 +836,8 @@ def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = No
                     for sel in ([arg["frame"]] if isinstance(arg["frame"], str) else arg["frame"]):
                         scope = scope.frame_locator(sel)
                     texts = [t for t in scope.locator(arg["selector"]).all_inner_texts() if isinstance(t, str)]
+                elif deep:
+                    texts = [t for t in page.locator(arg["selector"]).all_inner_texts() if isinstance(t, str)]  # a locator reaches into shadow roots
                 else:
                     texts = [t for t in page.evaluate(ELEMENT_TEXTS_JS, arg["selector"]) if isinstance(t, str)]
             except Exception:  # noqa: BLE001 - a selector the page rejects, or the page is gone
@@ -828,14 +862,16 @@ def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = No
     return results
 
 
-def adjudication_request(page, name: str, when: str, secrets: list[str] | None = None, extra_lines: list[str] | None = None) -> dict | None:
+def adjudication_request(page, name: str, when: str, secrets: list[str] | None = None, extra_lines: list[str] | None = None,
+                         deep: bool = False) -> dict | None:
     """The evidence questions for a seen outcome (spec §5.4) over the current page's numbered lines, ready to send
     alone (`adjudicate`) or riding in a confirmation step's request (the loop merges them: one round trip fewer
     for every pass). None when the page text cannot be read. The lines are masked like every observation.
     `extra_lines` (the messages the page announced recently, policy.announcement_lines) follow the page's lines, kept
     within the cap: a toast that has faded is then a line Jev can point at, and one still on the page is quoted from it."""
     try:
-        lines = [mask_text(ln, secrets or []) for ln in page.evaluate(LINES_JS, ADJUDICATION_MAX_LINES)]
+        # `deep` (observation.shadow_dom): the lines inside shadow roots are quotable too
+        lines = [mask_text(ln, secrets or []) for ln in page.evaluate(LINES_JS, {"maxLines": ADJUDICATION_MAX_LINES, "deep": bool(deep)})]
     except Exception:  # noqa: BLE001 - the page is gone or navigating
         return None
     extra = list(extra_lines or [])[:ADJUDICATION_MAX_LINES // 2]
@@ -873,7 +909,7 @@ def read_adjudication(rec: dict, answers: dict, req: dict) -> None:
 
 
 def adjudicate(page, jev, name: str, when: str, secrets: list[str] | None = None, prefetched: dict | None = None,
-               extra_lines: list[str] | None = None) -> dict:
+               extra_lines: list[str] | None = None, deep: bool = False) -> dict:
     """The evidence for a seen outcome (spec §5.4): Jev selects the line of the final page that states the outcome
     (`evidence_line`; one Choice per sentence of a compound statement, the most confident sentence's line is
     quoted) and re-judges the statement (`evidence_present`). The chosen line is copied verbatim into the result:
@@ -889,7 +925,7 @@ def adjudicate(page, jev, name: str, when: str, secrets: list[str] | None = None
         except Exception as e:  # noqa: BLE001
             rec["error"] = f"{type(e).__name__}: {str(e)[:300]}"
         return rec
-    req = adjudication_request(page, name, when, secrets, extra_lines)
+    req = adjudication_request(page, name, when, secrets, extra_lines, deep)
     if req is None:
         rec["error"] = "could not read the page text"
         return rec
@@ -931,6 +967,8 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
             line += f" {s['target']['label']}"
         if (s.get("type_value") or {}).get("choice"):
             line += f" <- {s['type_value']['choice']}"
+        if (s.get("upload_file") or {}).get("choice"):
+            line += f" <- file {s['upload_file']['choice']}"
         if not (s.get("executed") or {}).get("ok", True):
             line += "  (failed)"
         story.append(line)
@@ -1048,6 +1086,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     th = spec["thresholds"]
     budget = spec["budget"]
     obs_cfg = spec["observation"]
+    deep = bool(obs_cfg.get("shadow_dom"))  # observe, re-read, settle, assert and quote inside open shadow roots too
     outcomes = effective_outcomes(spec)  # declared + synthesized: the runner only knows outcomes
 
     trace: dict = {
@@ -1213,7 +1252,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         if ok and not spec["setup"] and not any("reason" not in h for h in history):
             trace["passed_without_actions"] = True
         final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]), secret_values, prefetched,
-                                           announced_lines(step["n"]))
+                                           announced_lines(step["n"]), deep=deep)
 
     def accepted(seen: list[dict], step: dict) -> list[dict]:
         """Outcomes with `requires_action` do not count before the first executed action (a statement such as
@@ -1232,7 +1271,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         step["outcome_seen"] = seen["name"]
         finish(page, step, "outcome", dict(STOP))
         final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]), secret_values,
-                                           extra_lines=announced_lines(step["n"]))
+                                           extra_lines=announced_lines(step["n"]), deep=deep)
 
     timing: dict = {}  # where the wall-clock went: launch, navigation, setup, steps, final
 
@@ -1247,7 +1286,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
             trace["observation_retries"] = trace.get("observation_retries", 0) + 1
         return observe_after_navigation(
             page, spec, lambda: mask_secrets(observe(page, obs_cfg["max_elements"], obs_cfg["max_text_chars"],
-                                                     frames=obs_cfg.get("frames") or None), secret_values), bump)
+                                                     frames=obs_cfg.get("frames") or None, shadow_dom=deep,
+                                                     file_inputs=bool(spec.get("files"))), secret_values), bump)
 
     def on_announce(raw) -> None:
         """The page reports a toast / live message (observe.ANNOUNCE_INIT_JS): keep it until the next observation."""
@@ -1430,7 +1470,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     # The confirmation of a pass sighting: ask the evidence questions in the same request (speculative
                     # fan-out), so a confirmed pass needs no adjudication round trip. The Choices point at state.lines.
                     merged_adj = adjudication_request(page, pending["name"], outcome_when(pending["name"]), secret_values,
-                                                      announced_lines(n))
+                                                      announced_lines(n), deep)
                     if merged_adj:
                         state["lines"] = merged_adj["state"]["lines"]
                         questions.update(merged_adj["questions"])
@@ -1591,6 +1631,13 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                         note_invalid(step, "type_value: " + validate_choice(answers.get("type_value"), offered.get("type_value", [])))
                     step["type_value"] = tv
                     value_key = tv["choice"] if tv else None
+                uf = None
+                if operation == "UPLOAD_FILE":
+                    uf = read_choice(answers, "upload_file", offered.get("upload_file", []))
+                    if uf is None:
+                        note_invalid(step, "upload_file: " + validate_choice(answers.get("upload_file"), offered.get("upload_file", [])))
+                    step["upload_file"] = uf
+                    value_key = uf["choice"] if uf else None
 
                 # Confidence gate. Jev reporting low confidence on the operation, the target, or (for
                 # TYPE_TEXT) which value to type is a typed "I don't know", and the runner never acts on
@@ -1603,6 +1650,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     confs.append(target["confidence"])
                 if operation == "TYPE_TEXT" and tv:
                     confs.append(tv["confidence"])
+                if operation == "UPLOAD_FILE" and uf:
+                    confs.append(uf["confidence"])
                 low = min(confs) < th["min_confidence"]
                 step["low_confidence"] = low
                 step["decision_confidence"] = round(min(confs), 3)
@@ -1669,7 +1718,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 )
                 if guard:
                     try:
-                        reason = compare_fingerprint(obs["fingerprint"], fingerprint(page, obs["fingerprint"].get("frames")),
+                        reason = compare_fingerprint(obs["fingerprint"],
+                                                     fingerprint(page, obs["fingerprint"].get("frames"), obs["fingerprint"].get("deep")),
                                                      operation, (target or {}).get("element"))
                     except Exception:  # noqa: BLE001 - the document navigated under us
                         reason = "document navigated"
@@ -1919,6 +1969,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--model", help="override TYPESAFE_MODEL (default jev-latest)")
     ap.add_argument("--cdp-url", help="attach to a running browser (overrides browser.cdp_url), e.g. http://127.0.0.1:9222")
     ap.add_argument("--device", help="emulate a Playwright device (overrides browser.device), e.g. 'iPhone 13', 'Pixel 7'")
+    ap.add_argument("--hover", action="store_true", help="offer the HOVER operation (adds it to the spec's extra_operations)")
+    ap.add_argument("--shadow-dom", action="store_true", help="observe inside open shadow roots too (observation.shadow_dom)")
     ap.add_argument("--junit", metavar="FILE", help="also write the result as a JUnit XML report (one test case) for a CI dashboard")
     args = ap.parse_args(argv[1:])
 
@@ -1928,6 +1980,13 @@ def main(argv: list[str]) -> int:
         spec["browser"]["headless"] = resolve_headless(spec["browser"]["headless"], headed=args.headed, headless=args.headless)
         if args.device:
             spec["browser"]["device"] = args.device
+        if args.hover and "HOVER" not in spec["extra_operations"]:
+            spec["extra_operations"] = [*spec["extra_operations"], "HOVER"]
+        if args.shadow_dom:
+            spec["observation"]["shadow_dom"] = True
+        missing_files = [f"{k}: {v}" for k, v in spec["files"].items() if not os.path.isfile(v)]
+        if missing_files:
+            raise ValueError("Spec problems:\n  - files: no such file (paths are relative to " + os.getcwd() + "): " + ", ".join(missing_files))
         if args.cdp_url:
             spec["browser"]["cdp_url"] = args.cdp_url
             problems = validate(spec)

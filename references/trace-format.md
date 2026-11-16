@@ -214,6 +214,7 @@ environment failure (or a spec file is missing / two files share an id).
       "target": { "question": "click_target", "choice": "3", "element": 3, "label": "[3] button \"Add to cart\"",
                   "confidence": 0.88, "top_probabilities": { "3": 0.86, "4": 0.11 } },
       "type_value": { "choice": "search_query", "confidence": 0.95, "top_probabilities": {...} },   // TYPE_TEXT only
+      "upload_file": { "choice": "cv", "confidence": 0.95, "top_probabilities": {...} },             // UPLOAD_FILE only: which of the spec's `files`; executed then carries "file_key" and "file" (the name)
       "checks": { "cart_has_item": 0.02, "error_visible": 0.01 },   // evaluated on the page BEFORE the action
       "outcome": { "choice": "none_yet", "confidence": 0.9, "probabilities": { "item_added": 0.03, "app_error": 0.02, "none_yet": 0.95 } },  // the outcome Choice (only when an outcome has a `when`)
       "blocked_reason": { "choice": "missing_data_value", ... },   // only on the terminal step of blocked / stuck / low_confidence (a follow-up request) and on the final look
