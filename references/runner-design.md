@@ -160,7 +160,7 @@ can look "unchanged"; that is intentional, since Jev could not see the change ei
 
 ## Where the wall-clock goes, and the levers (2026-09-22)
 
-Measured on the demo login (5 repeats, medians, `docs/superpowers/measurements/`): of ~6.4 s, ~2.0 s is the site's
+Measured on the demo login (5 repeats, medians, `docs/superpowers/measurements/` on the `dev-docs` branch, like every measurement file this page names): of ~6.4 s, ~2.0 s is the site's
 own page load and ~0.16 s the browser launch; the rest was 6 Jev requests (the first ~760 ms for TCP + TLS, then
 ~300 ms each) and ~1.3 s of browser work (three actions at ~145 ms, the 400 ms confirmation pause, screenshots).
 A probe of 40 identical requests showed the ~300 ms is the API's floor from here: HTTP/2 (httpx) against the

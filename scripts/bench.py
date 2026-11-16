@@ -15,7 +15,7 @@ of it can be recomputed. Per spec it reports the medians of those, medians poole
 runs (`*_all_steps`), and status, outcome and stale-step counts.
 
 Every number quoted in the README or the references comes from this script's `--json` output; the
-before/after files live under docs/superpowers/measurements/.
+before/after files live under docs/superpowers/measurements/ on the dev-docs branch.
 """
 from __future__ import annotations
 

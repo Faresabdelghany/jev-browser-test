@@ -18,3 +18,6 @@ runs/
 # specs for a genuinely private application (its URLs, flows, account handles): local only, never in the public
 # repo. Specs for public demo and practice sites are committed under specs/examples/.
 specs/local/
+
+# the dev-docs branch checked out beside the skill (git worktree add dev origin/dev-docs): docs/ and evals/
+dev/
