@@ -11,6 +11,12 @@ agree), medians, and a suite verdict: one verdict everywhere → it; a spec with
 loaded or a setup step that failed is listed as an environment/setup failure and kept out of the distribution.
 Exit 0 iff every spec is `pass` or `expected`. Open a trace only for a spec that is `undetermined` or `flaky`.
 
+`--junit runs/junit.xml` also writes the suite as JUnit XML for a CI dashboard, one test case per spec: `pass` and
+`expected` are green, any other verdict is a `<failure>` whose type is the verdict (`bug`, `flaky`, ...) with every
+run's outcome and evidence line, and a spec whose every run failed before observing a page is an `<error
+type="environment">`, so an unreachable host is not painted as a product failure. `run_test.py --junit FILE` does
+the same for one run.
+
 When a suite reads `flaky`, say which kind: **environment** (load timeouts, stale pages, error runs) or **an app
 that varies by design** (every run a confident declared outcome, different evidence lines: a random notification,
 an A/B page). The second is not noise to retry away: if the spec asserts one ending of a legitimate variation, fix

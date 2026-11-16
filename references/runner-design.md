@@ -233,10 +233,31 @@ pass and its evidence line.
 
 ## Known limits
 
-Main frame only; no file uploads, drag-and-drop, canvas, or hover-only menus; no shadow DOM piercing
-beyond what `querySelectorAll` reaches; one tab (new tabs opened by the page are not followed). All of
-these are also outside jev-ultrafast's current scope. Put such steps in `setup` with plain Playwright when
-they are preconditions rather than the thing under test.
+What Jev is offered: the main frame's controls, and those of the `<iframe>`s the spec lists
+(`observation.frames`, below). Not offered to Jev: controls inside shadow DOM (counted, `shadow_hosts`), file
+uploads, drag-and-drop, hover-only menus, canvas. All of these have a scripted step instead (`upload`, `drag`,
+`hover`, and any selector reaches into open shadow roots and, with `frame`, into an iframe), so they can be
+preconditions or cleanup, not yet the thing Jev decides. One tab at a time: a tab the flow opens is followed with
+`browser.follow_new_tabs`, otherwise flagged and left.
+
+## Frames (opt-in)
+
+`observe.add_frames` runs the same `OBSERVE_JS` in each listed frame with `idxOffset` set to the number of
+elements so far, so indices are unique across documents and `data-jev-idx` in the frame's DOM matches the table.
+The frame's elements get `frame` (the selector) and a `context` naming the frame; `execute` builds the locator
+from `page.frame_locator(frame)`. The fingerprint merges the frames' node tuples and keeps each frame's text head
+(`frame_heads`), and `fingerprint(page, frames)` re-reads the same frames, so the freshness guard and every WAIT
+see a change inside a frame; a frame that has gone leaves its nodes missing, which reads as stale. It is opt-in per
+frame because a page's other iframes are adverts and trackers whose buttons must not become choices, and because
+with no frames listed the observation is byte-for-byte what it was. Not covered: the settle watches the main
+document's mutations only, and the adjudication's lines come from the main frame.
+
+## Browser diagnostics
+
+`run_test.Diagnostics` listens to `console`, `pageerror`, `requestfailed` and `response` on the page (and on a
+followed tab). It is deliberately outside the loop: nothing goes into Jev's state, no threshold reads it. The
+entries are stamped by `take(n)` at each observation, attached to that step as counts, and read by the two
+diagnostic assertions; `ERR_ABORTED` and the console's echo of a failed resource are dropped as noise.
 
 ## Observer: three passes, viewport-first text
 
@@ -309,7 +330,15 @@ per page, and in every slow-hour run the second identical decision was the same 
 sidebar filter at 0.77–0.83 and the Leave List tab at 0.71 before the dialog had opened, while loaders of 5–17 s
 outlived the one wait (`measurements/2026-09-24-regression-6f9c5be-hrm.md`). Undecided decisions under a blank layer
 get the same two extra looks (`low_confidence_limit`), as the confirmation rechecks do (scenarios 4i, 4j, 4j2–4j4,
-selftest `covered_check`). The other way a page is visibly on its way is an autocomplete whose list holds only a
+selftest `covered_check`). So do undecided decisions on a page with a **loading indicator that covers nothing**
+(`aria-busy`, an indeterminate `role=progressbar` or `<progress>`, a class or id token loading / loader / spinner /
+skeleton, a short 'Loading...' / 'Wait for it...' line: `observe.INDICATORS_JS`, a script of its own that the loop
+runs only when a decision came back undecided, because walking a 5,000-node page's text costs some 20 ms that an
+ordinary step should not pay; the count lands on the step as `loading_indicators`, `run_test.loading_indicated`),
+and that is all such an indicator does: it is not `page_busy`, defers nothing and extends no confirmation, because
+an indicator can be decoration that never goes away, and those waits run for as long as `navigation_timeout_ms`
+(capabilities selftest G; live, `dynamic-controls` ended `low_confidence` after three looks in 6.8 s beside a
+'Wait for it...' bar). The other way a page is visibly on its way is an autocomplete whose list holds only a
 loading row ('Searching....', 'Loading...', `LOADING_OPTION` in the observer): the row is not offered, counted as
 `loading_options` (in the fingerprint too, so a wait ends when the suggestions replace it), the settle's options wait
 does not take it for the suggestions, and `page_loading` treats it like a blank layer for the deferral and the

@@ -30,6 +30,10 @@ evidence, the file Claude reads first. The trace is the *evidence* behind it; th
   "status": "passed", "duration_ms": 6200,
   "usage": { "jev_requests": 5, "input_tokens": 9774, "output_tokens": 1741, "model": "jev-1.13.0", "reconnects": 0 },
   "trace": "runs/smoke-login-badpw/20260922-101500/trace.json",
+  "diagnostics": { "counts": { "page_errors": 1, "console_errors": 0, "failed_requests": 0, "http_errors": 2, "server_errors": 1 },   // only when the browser reported something:
+                   "page_errors": [ { "text": "TypeError: x is undefined", "step": 4 } ],                    //   uncaught exceptions, 5xx responses and failed requests, five of each at most
+                   "server_errors": [ { "status": 500, "method": "POST", "url": ".../api/save", "resource": "fetch", "step": 4 } ] },   //   (4xx responses and console errors are in trace.diagnostics)
+  "teardown": { "ok": true, "steps": 3, "ran": 3 },             // only for a spec with `teardown`; on a failure ok false and "failed": { "n", "action", "error" }. Never changes the result
   "expected": { "expect": { "outcome": "bad_credentials" }, "actual": { "outcome": "bad_credentials" },   // only when the spec declares `expect`:
                 "matched": true, "mismatches": {} }                                                      // did the run end in the declared result?
 }
@@ -170,16 +174,23 @@ environment failure (or a spec file is missing / two files share an id).
   "started_at": "...", "ended_at": "...", "duration_ms": 6210,
   "actions_executed": 4,                 // steps that changed the browser (not DONE/STOP, not runner-inserted WAITs)
   "timing": { "launch_ms": 150, "navigation_ms": 2000, "setup_ms": 0, "steps_ms": 2500, "final_ms": 30,   // where the wall-clock went
+              "teardown_ms": 900,            // only for a spec with `teardown`
               "jev_connect_ms": 460 },       // the TCP + TLS handshake to the API, paid in the background while the browser launched
   "failed_before_observation": "navigation", // only when the start URL never loaded ("navigation") or a setup step failed ("setup"): no steps, exit 2
   "expected": { "expect": {...}, "matched": true, ... },  // only for a spec with `expect` (the same record as result.expected)
-  "browser": { "attached": false },      // or { attached: true, cdp_url, storage_state_ignored } when browser.cdp_url was used
+  "browser": { "attached": false },      // or { attached: true, cdp_url, storage_state_ignored } when browser.cdp_url was used;
+                                         // with browser.device also "device": "iPhone 13" and the "viewport" it brought
+  "diagnostics": { "counts": {...}, "page_errors": [...], "console_errors": [...], "failed_requests": [...], "http_errors": [...] },
+                                         // only when the browser reported something: every entry (fifty a kind at most; counts are complete), masked like
+                                         //   page text, each with the "step" whose observation first followed it. http_errors: { status, method, url, resource };
+                                         //   failed_requests: { method, url, resource, failure }; page_errors / console_errors: { text, url? }
   "passed_without_actions": true,        // only present if the start page already satisfied done_when
   "observation_retries": 1,              // only when > 0: observations that raced a navigation ("Execution context was destroyed") and were retried on the new document
   "usage": { "jev_requests": 5, "input_tokens": 2100, "output_tokens": 300, "model": "jev-1.13.0",
              "reconnects": 0 },      // reconnects > 0: the kept-alive API connection dropped mid-run and was reopened
   "spec": { ... },                       // the spec as run, secrets replaced by "<secret>"
-  "setup": [ { "n": 0, "action": "fill", "selector": "...", "ok": true, "error": null } ],
+  "setup": [ { "n": 0, "action": "fill", "selector": "...", "ok": true, "error": null } ],   // "frame" when the step named one; "files" for an upload
+  "teardown": [ ... ], "teardown_result": { "ok": true, "steps": 3, "ran": 3 },   // the teardown's steps in the same shape, and result.teardown
   "steps": [
     {
       "n": 1, "url": "...", "title": "...", "signature": "7be5a4cf2445",
@@ -189,6 +200,11 @@ environment failure (or a spec file is missing / two files share an id).
       "truncated_elements": 0, "visible_text": "first 600 chars of the viewport-first text Jev saw...",
       "covered_controls": 3,                                         // only when > 0: controls on screen but under another layer (a loading overlay, a dialog), counted, not offered; Jev sees the count in its state; flag COVERED:3
       "layer_controls": 0,                                           // with covered_controls: how many offered controls belong to the covering layer (a dialog's buttons, an open list's options); 0 is a blank layer, a loading or saving overlay (run_test.blank_layer); flag COVERED:3(layer:2) when > 0
+      "loading_indicators": 1,                                       // only on an undecided (low-confidence) step, when > 0: spinners, indeterminate progress bars and 'Loading...' lines that cover nothing, counted when the decision came back: such a page gets the extra looks a blank layer gets, and nothing else (flag LOADING-IND)
+      "frames": [ { "selector": "#card-frame", "elements": 2, "label": "Secure card payment", "url": "..." } ],   // with observation.frames: what each listed <iframe> contributed to the table, or "skipped": why not; its elements carry "frame" and a context "frame: <label>"
+      "iframes": 1, "shadow_hosts": 1,                              // only when > 0: visible <iframe>s, and elements whose shadow root holds controls (not offered): what the summary's hint for a stalled run reads
+      "diagnostics": { "page_errors": 1, "http_errors": 1, "server_errors": 1 },   // only when the browser reported something since the previous observation (flags JS-ERROR, HTTP-5xx, HTTP-4xx, REQ-FAILED, CONSOLE-ERR)
+      "new_tab": { "followed": true, "url": "..." },                // on the step whose action opened a tab; followed only with browser.follow_new_tabs (flags NEW-TAB / NEW-TAB(not followed))
       "loading_options": 1,                                          // only when > 0: autocomplete rows that only say 'Searching....' / 'Loading...': not offered, the suggestions are on their way (run_test.page_loading); flag LOADING:1
       "recheck_again": 1,                                            // a confirmation look (after a pass sighting or DONE) that found the page changed during the pause with no pass visible: it parked and looked again (1, then 2; CONFIRM_RECHECKS_MAX; two more on a busy page, and on a busy page for as long as navigation_timeout_ms, can_recheck); flag RECHECK:1
       "recheck_waited_ms": 3500,                                     // with recheck_again: the confirmation's waits so far (settle_ms x 2, 4, 4, ...), the figure a busy page's looks run against navigation_timeout_ms

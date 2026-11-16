@@ -2,7 +2,7 @@
 name: jev-browser-test
 description: Goal-driven end-to-end browser testing where Claude writes the test spec and judges the result, TypeSafe's Jev decision model picks every click/type/scroll from a numbered element table (jev-ultrafast style, one ~0.3 s request per decision), and Playwright executes. Use this whenever the user wants to test, verify, smoke-test, regression-test or explore a web UI flow (login, signup, checkout, search, forms, CRUD screens, admin panels) with Jev or TypeSafe, mentions jev-ultrafast or browser-use with Jev, asks for "fast/cheap AI browser tests", wants E2E tests that survive selector or layout changes, or needs fuzzy UI assertions like "the error message tells the user their card was declined". Also use it to triage an existing run (a result.json, trace.json or runs/ folder) into PASS / BUG / TEST_ISSUE / FLAKY, to reproduce a bug ticket as a rerunnable spec, or to ask whether a page is flaky. Do not use it for unit tests, API tests, or flows with fully stable selectors where plain Playwright already works.
 argument-hint: "[headed|headless] what to test"
-allowed-tools: Bash(${CLAUDE_SKILL_DIR}/.venv/bin/python ${CLAUDE_SKILL_DIR}/scripts/*)
+allowed-tools: Bash(${CLAUDE_SKILL_DIR}/.venv/bin/python ${CLAUDE_SKILL_DIR}/scripts/*) Bash(${CLAUDE_SKILL_DIR}/.venv/Scripts/python.exe ${CLAUDE_SKILL_DIR}/scripts/*)
 ---
 
 # Jev browser test
@@ -52,7 +52,9 @@ $SKILL/.venv/bin/python $SKILL/scripts/selftest.py     # offline: local pages + 
 export TYPESAFE_API_KEY=...   # https://console.typesafe.ai/keys, or a .env in the directory you run from
 ```
 
-Use that interpreter for every command below (`python` stands for it). Never install into the system Python,
+On Windows the interpreter is `$SKILL/.venv/Scripts/python.exe` (create the environment with `python -m venv`); in
+Git Bash, which Claude Code uses there, every command below is otherwise the same. Use that interpreter for every
+command below (`python` stands for it). Never install into the system Python,
 never echo the key back, never write it into a spec. Work from the project directory: change into it once, in its
 own command (the Bash tool's working directory persists), so every run command starts with the interpreter and
 matches the skill's pre-approved commands, and the runner finds the project's `.env` there.
@@ -104,9 +106,20 @@ explain.
   `text_in` (text inside a CSS-selected element: the notification, the badge, never the whole page when the
   page's copy mentions the same words), `text_order` (a sorted list), `field_value`, `element_present/absent`.
   Give every spec at least one: with assertions a pass sighting is **confirmed at once in code** (`confirm:
-  "assert"`, the default) instead of a pause, a second look and another request.
+  "assert"`, the default) instead of a pause, a second look and another request. `{"no_page_errors": true}` and
+  `{"no_failed_requests": true}` make a clean console and network part of the pass (no uncaught exception; no 5xx
+  and no failed request): add them when "it says Saved" is not enough.
 - **checks** — atomic progress statements, one fact each; an outcome's `requires` can lean on them.
-- **setup** — deterministic Playwright steps for preconditions. Prefer `wait_for` to `wait`.
+- **setup** — deterministic Playwright steps for preconditions. Prefer `wait_for` to `wait`. It is also where the
+  interactions Jev is not offered go: `upload`, `hover` (then `click` the menu item), `drag`, and any step inside an
+  iframe (`"frame": "<the iframe's selector>"`) or a web component (selectors reach into shadow DOM).
+- **teardown** — the same steps, run after the verdict whatever it was: delete what the run created (name it with
+  `${RUN_STAMP}`), log out. A failing teardown step is reported and never changes the result.
+- **iframes, new tabs, phones** — when what Jev must use sits in an iframe (a card form, an embedded widget), list
+  the frame: `"observation": {"frames": ["iframe#card-frame"]}`. A flow that continues in a tab it opens wants
+  `"browser": {"follow_new_tabs": true}`; a phone layout, `"browser": {"device": "iPhone 13"}` (or `--device`).
+  `scaffold.py` takes `--frame`, `--follow-new-tabs`, `--device` and `--teardown`. A stalled run on a page with an
+  unlisted iframe or shadow-DOM controls says so under its step table.
 - **long pages and type-aheads** — a link far down a long page wants the goal to say where to scroll; a type-ahead
   wants a `suggestion_not_found` bug outcome. `references/spec-format.md` (Writing the goal and data) has both
   recipes: read them before writing a spec for a long form or an autocomplete.
@@ -156,7 +169,10 @@ verbatim; `live message: Successfully Saved` when it quotes a toast that had alr
 (`assertions` or `recheck`), `path_confidence`, `assertions`, `announcements` (every toast and ARIA live message
 the page showed during the run, with the step it preceded: what the app said about each action, kept even when it
 was gone before the runner looked), `story`, and for `undetermined` the `reason` with its typed cause and
-`suggested_verdict`; `expected` for a spec with `expect`.
+`suggested_verdict`; `expected` for a spec with `expect`; `diagnostics` when the browser itself reported something
+(uncaught JavaScript exceptions, 5xx responses, failed requests, each with the step it preceded: the difference
+between "the button did nothing" and "the button's request answered 500", so quote it in a BUG report); `teardown`
+when the spec has one.
 `confirmed_by: recheck` on a spec that has assertions means the pass was not yet in sight when Jev chose DONE
 (the outcome read below 0.8), so the runner took the checking step and saw it there: correct, one request more.
 Open the step table only for `undetermined` or a surprising outcome. The flags you meet most: `NO-EFFECT` (an
@@ -166,7 +182,7 @@ a single-page app, not a dead control), `DEFERRED:<outcome>` (true of the page, 
 condition has not happened yet: not counted), `ANNOUNCED:"…"` (a toast or live message appeared since the previous
 observation), `SLOW-NAV:<s>` (the click landed and the page answered after the action timeout: a slow host, not a
 failure) and `LOW-CONF`. `references/verdict-rubric.md` (How to look at a run) explains every other flag
-(`COVERED`, `DEFERRED-<OP>`, `LOADING`, `RECHECK`, `ASSERT-PENDING`, `STALE`, `EVIDENCE-ASKED`) and the `(not run)` /
+(`COVERED`, `DEFERRED-<OP>`, `LOADING`, `RECHECK`, `ASSERT-PENDING`, `STALE`, `JS-ERROR`, `HTTP-5xx`, `NEW-TAB`) and the `(not run)` /
 `AUTO_DONE` entries of the operation column: read it before judging a run that carries one of them. With the
 default `screenshots: "key"` the terminal step, every flagged step and the step after a no-effect action have a
 `steps/NNN.png`; `--screenshots all` pictures every step on a rerun. The one reading rule: the checks recorded
@@ -234,7 +250,7 @@ python $SKILL/scripts/run_suite.py specs/*.json --repeat 3 --workers 2   # -> ru
 
 Launch it with the Bash tool's `run_in_background` and do nothing until the completion notification; then read
 `results.md` (one suite verdict per spec: `pass`, `expected`, `bug`, ..., or the computed `flaky`). Open a trace only
-for a spec that is `undetermined` or `flaky`. `references/suites.md` says how to read agreement and flakiness, which
+for a spec that is `undetermined` or `flaky`. `--junit runs/junit.xml` adds a JUnit report for a CI dashboard. `references/suites.md` says how to read agreement and flakiness, which
 kind of flaky it is (environment or an app that varies by design), and how to get a `report.html` for a human.
 
 ## What makes a run fast (and what does not)
@@ -260,8 +276,9 @@ keys or two same-named elements wants keys named like the app's labels, or a `no
 
 - `scripts/scaffold.py` (URL + goal + data → a valid spec to edit), `run_test.py` (one spec → `result.json` +
   `trace.json`), `run_suite.py` (specs × repeats → `results.json` + `results.md`), `report.py` (a run →
-  `report.html`), `spec.py` (validation), `summarize_trace.py`, `selftest.py` (offline check), `unit_tests.py`,
-  `bench.py` (N repeats, medians), and the pieces `observe.py`, `policy.py`, `rules.py`, `jev_client.py` (read
+  `report.html`), `spec.py` (validation), `summarize_trace.py`, `selftest.py` (offline check, with
+  `selftest_capabilities.py`), `unit_tests.py`, `bench.py` (N repeats, medians), `junit.py`, and the pieces
+  `observe.py`, `policy.py`, `rules.py`, `jev_client.py` (read
   `references/runner-design.md` before changing them).
 - `references/spec-format.md` (every field), `troubleshooting.md` (symptom → fix), `suites.md` (agreement, flakiness,
   reports), `trace-format.md`, `verdict-rubric.md`, `runner-design.md`.
