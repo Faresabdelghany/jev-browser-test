@@ -1,0 +1,12 @@
+{
+  "id": "exp-hover-menu",
+  "comment": "Experiment for 0.5.0 (extra_operations: HOVER), written without access to the site: probe before trusting the outcomes. The jQuery UI menu opens its submenu on hover and, as far as I know, on click as well, so both arms of an A/B may pass here; what this spec measures is whether Jev chooses HOVER when it is offered and what offering it does to the other steps. A menu that opens on :hover only (most site navigation bars) is the case HOVER exists for: add one from an application of your own.",
+  "start_url": "https://the-internet.herokuapp.com/jqueryui/menu",
+  "goal": "Open the Enabled menu by hovering over it and choose 'Back to JQuery UI' from the submenu it opens, so that the JQuery UI page is shown.",
+  "notes": "The submenu appears only while the pointer is over Enabled.",
+  "extra_operations": ["HOVER"],
+  "outcomes": {
+    "back_on_jquery_ui": { "when": "The page heading says 'JQuery UI'. The page explains that JQuery UI Menus are tricky to automate.", "verdict": "pass" }
+  },
+  "assert": [ { "url_matches": "**/jqueryui" } ]
+}

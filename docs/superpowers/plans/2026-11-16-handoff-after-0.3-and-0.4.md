@@ -54,6 +54,13 @@ The eval prompts name their inputs as `evals/files/...`: run them from `dev/`.
   the `operation` Choice (HOVER, UPLOAD_FILE) or a deep-traversal observer; both change what every step asks and
   need the A/B the rules got (`2026-09-22-track1-ab-*`).
 
+## Update, later the same day
+
+#2 is merged too (`main` at `28c5de8`, released as `v0.4.0`), again without a live run. #3 (`feat/jev-driven`,
+version 0.5.0) is open: Jev-driven shadow DOM, uploads and hover, each opt-in, and `scripts/ab.py`. Open items 1
+and 2 below are what #3 does. What to run with the key, and how to decide the defaults, is in
+`2026-11-16-ab-protocol-jev-driven.md`; the two experiment specs are under `experiments/jev-driven/`.
+
 ## Open
 
 1. Jev-driven shadow DOM: `OBSERVE_JS` uses `document.querySelectorAll`, `elementFromPoint`, `closest` and a
