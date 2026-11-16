@@ -94,7 +94,7 @@ def measure_trace(trace: dict) -> dict:
 def run_once(spec_path: str, out_dir: str, python: str, run_args: list[str]) -> dict:
     cmd = [python, RUN_TEST, spec_path, "--out", out_dir, *run_args]
     t0 = time.perf_counter()
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     wall_ms = int((time.perf_counter() - t0) * 1000)
     rec: dict = {"out_dir": out_dir, "exit_code": proc.returncode, "wall_ms": wall_ms}
     trace_path = os.path.join(out_dir, "trace.json")
@@ -184,6 +184,8 @@ def format_spec(spec_id: str, runs: list[dict], agg: dict) -> str:
 
 
 def main(argv: list[str]) -> int:
+    from spec import utf8_stdio
+    utf8_stdio()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("specs", nargs="+", help="spec files to run")
     ap.add_argument("--repeat", type=int, default=5)

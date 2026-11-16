@@ -32,15 +32,15 @@ from datetime import datetime, timezone
 from jev_client import JevClient, JevError
 from observe import (
     ANNOUNCE_FUNCTION, ANNOUNCE_INIT_JS, GUARD_SKIPPED, LINES_JS, TARGET_OPERATIONS, compare_fingerprint, element_label,
-    fingerprint, mask_secrets, mask_text, observe, signature,
+    fingerprint, loading_indicators, mask_secrets, mask_text, observe, signature,
 )
 from policy import (
     ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, announcement_lines, build_adjudication, build_questions, build_reason_questions,
     build_state, defer_action, deferred_outcomes, evidence_line_keys, is_field, quoted_pick, read_checks, read_choice,
     read_outcome, recent_announcements, resolve_target, seen_outcomes, suggested_verdict, validate_choice,
 )
-from spec import (HEADED_ENV, UNDETERMINED, effective_outcomes, load_dotenv, load_spec, match_expect, resolve_headless,
-                  spec_warnings, validate)
+from spec import (DIAGNOSTIC_ASSERTIONS, HEADED_ENV, UNDETERMINED, effective_outcomes, load_dotenv, load_spec, match_expect, resolve_headless,
+                  spec_warnings, utf8_stdio, validate)
 from summarize_trace import is_action_step, summarize
 
 
@@ -74,7 +74,7 @@ def redacted_spec(spec: dict) -> dict:
     s = copy.deepcopy(spec)
     for k in s["secrets"]:
         s["data"][k] = "<secret>"
-    for step in s["setup"]:
+    for step in [*s["setup"], *s.get("teardown", [])]:
         if step.get("action") == "fill":
             step["value"] = "<redacted>"
     return s
@@ -176,33 +176,62 @@ def settle(page, spec: dict, after: tuple[str | None, str | None] | None = None)
     return result
 
 
-def run_setup(page, spec: dict, results: list[dict] | None = None) -> list[dict]:
-    """Deterministic Playwright steps before Jev takes over (login, cookie banner, fixtures). Records land in
-    `results` as they run (pass the trace's list, so a failing step is recorded even though this raises)."""
-    results = [] if results is None else results
+def step_locator(page, step: dict, selector: str | None = None):
+    """The first element a scripted step's `selector` matches, inside the <iframe> its `frame` names when it has one
+    (a CSS selector, or a list of them for nested frames, outermost first). Playwright's CSS engine pierces open
+    shadow roots by itself, so a control inside a web component needs nothing extra here."""
+    scope = page
+    frame = step.get("frame")
+    for sel in ([frame] if isinstance(frame, str) else frame or []):
+        scope = scope.frame_locator(sel)
+    return scope.locator(selector or step["selector"]).first
+
+
+def run_steps(page, spec: dict, steps: list[dict], results: list[dict], name: str = "setup") -> list[dict]:
+    """Deterministic Playwright steps, no Jev: `setup` before the flow (login, cookie banner, fixtures, and the
+    interactions Jev is not offered: a file upload, a hover menu, a drag) and `teardown` after the verdict. Records
+    land in `results` as they run (pass the trace's list, so a failing step is recorded even though this raises)."""
     timeout = spec["browser"]["action_timeout_ms"]
-    for i, step in enumerate(spec["setup"]):
+    for i, step in enumerate(steps):
         act = step["action"]
         rec = {"n": i, "action": act, "selector": step.get("selector"), "ok": True, "error": None}
+        if step.get("frame"):
+            rec["frame"] = step["frame"]
         before = fingerprint(page) if act in ("click", "press", "select") else None  # to tell a slow navigation from a failure
         try:
             if act == "goto":
                 page.goto(step["url"], wait_until="domcontentloaded", timeout=spec["browser"]["navigation_timeout_ms"])
                 rec["url"] = step["url"]
             elif act == "click":
-                page.locator(step["selector"]).first.click(timeout=timeout)
+                step_locator(page, step).click(timeout=timeout)
             elif act == "fill":
-                page.locator(step["selector"]).first.fill(step["value"], timeout=timeout)
+                step_locator(page, step).fill(step["value"], timeout=timeout)
             elif act == "press":
-                page.locator(step["selector"]).first.press(step["key"], timeout=timeout)
+                step_locator(page, step).press(step["key"], timeout=timeout)
             elif act == "select":
-                page.locator(step["selector"]).first.select_option(step["value"], timeout=timeout)
+                step_locator(page, step).select_option(step["value"], timeout=timeout)
+            elif act == "hover":
+                step_locator(page, step).hover(timeout=timeout)
+            elif act == "check":
+                step_locator(page, step).check(timeout=timeout)
+            elif act == "uncheck":
+                step_locator(page, step).uncheck(timeout=timeout)
+            elif act == "upload":
+                paths = step["path"] if isinstance(step["path"], list) else [step["path"]]
+                missing = [p for p in paths if not os.path.isfile(p)]
+                if missing:  # said plainly, before Playwright's own message about the same thing
+                    raise FileNotFoundError(f"no such file (paths are relative to {os.getcwd()}): {', '.join(missing)}")
+                step_locator(page, step).set_input_files(paths, timeout=timeout)
+                rec["files"] = [os.path.basename(p) for p in paths]
+            elif act == "drag":
+                step_locator(page, step).drag_to(step_locator(page, step, step["to"]), timeout=timeout)
+                rec["to"] = step["to"]
             elif act == "wait":
                 page.wait_for_timeout(int(step["ms"]))
             elif act == "wait_for":
                 t = int(step.get("timeout_ms", timeout))
                 if step.get("selector"):
-                    page.locator(step["selector"]).first.wait_for(state=step.get("state", "visible"), timeout=t)
+                    step_locator(page, step).wait_for(state=step.get("state", "visible"), timeout=t)
                 if step.get("url"):
                     page.wait_for_url(step["url"], timeout=t)
             settle(page, spec)
@@ -215,9 +244,153 @@ def run_setup(page, spec: dict, results: list[dict] | None = None) -> list[dict]
             rec["ok"] = False
             rec["error"] = f"{type(e).__name__}: {str(e)[:300]}"
             results.append(rec)
-            raise RuntimeError(f"setup[{i}] ({act}) failed: {rec['error']}") from None
+            raise RuntimeError(f"{name}[{i}] ({act}) failed: {rec['error']}") from None
         results.append(rec)
     return results
+
+
+def run_setup(page, spec: dict, results: list[dict] | None = None) -> list[dict]:
+    """The spec's `setup` steps (see run_steps)."""
+    return run_steps(page, spec, spec["setup"], [] if results is None else results, "setup")
+
+
+def run_teardown(page, spec: dict, results: list[dict]) -> dict:
+    """The spec's `teardown` steps, after the verdict and whatever it was: best effort. The first failing step ends
+    the teardown and is reported, never raised: cleaning up is not what the run was asked to judge. Returns
+    {"ok", "steps", "ran"} and, on a failure, "failed": {"n", "action", "error"} (result.teardown)."""
+    summary: dict = {"ok": True, "steps": len(spec["teardown"]), "ran": 0}
+    try:
+        run_steps(page, spec, spec["teardown"], results, "teardown")
+    except Exception as e:  # noqa: BLE001 - recorded on the step; the run's result stands
+        last = results[-1] if results and not results[-1]["ok"] else {"n": len(results), "action": None, "error": f"{type(e).__name__}: {str(e)[:300]}"}
+        summary["ok"] = False
+        summary["failed"] = {"n": last["n"], "action": last["action"], "error": last["error"]}
+    summary["ran"] = sum(1 for r in results if r["ok"])
+    return summary
+
+
+DIAGNOSTIC_KINDS = ("page_errors", "console_errors", "failed_requests", "http_errors")
+DIAGNOSTICS_KEPT = 50  # entries kept per kind in the trace; the counts are always complete
+DIAGNOSTICS_IN_RESULT = 5  # entries per kind repeated in result.json
+
+
+class Diagnostics:
+    """What the browser itself says went wrong while the flow ran, kept beside what the page shows: uncaught
+    JavaScript exceptions (`page_errors`), console.error messages (`console_errors`), requests that failed outright
+    (`failed_requests`: DNS, refused, reset; a request the page or a navigation aborted is not a failure) and
+    responses with a status of 400 or more (`http_errors`). Nothing here reaches Jev or changes a decision: it is
+    evidence for whoever judges the run (a dead Save with a 500 behind it is a different ticket from a dead Save with
+    nothing behind it), and what the `no_page_errors` / `no_failed_requests` assertions read.
+
+    Every entry is masked like page text and stamped with the step whose observation first followed it (`take`), the
+    convention the announcements use: an entry of step n was caused by what happened before step n looked."""
+
+    def __init__(self, secrets: list[str]):
+        self.secrets = secrets
+        self.items: dict[str, list[dict]] = {k: [] for k in DIAGNOSTIC_KINDS}
+        self.counts: dict[str, int] = {k: 0 for k in DIAGNOSTIC_KINDS}
+        self.server_errors = 0  # http_errors with a status of 500 or more
+        self._fresh: list[tuple[str, dict]] = []
+
+    def _add(self, kind: str, rec: dict) -> None:
+        self.counts[kind] += 1
+        if kind == "http_errors" and rec.get("status", 0) >= 500:
+            self.server_errors += 1
+        self._fresh.append((kind, rec))
+        if len(self.items[kind]) < DIAGNOSTICS_KEPT:
+            self.items[kind].append(rec)
+
+    def _text(self, s, cut: int = 300) -> str:
+        return mask_text(" ".join(str(s or "").split())[:cut], self.secrets)
+
+    def attach(self, page) -> None:
+        """Listen on `page`. A handler never raises: a diagnostic that cannot be read is dropped, not a run error."""
+        def guarded(fn):
+            def handler(arg):
+                try:
+                    fn(arg)
+                except Exception:  # noqa: BLE001
+                    pass
+            return handler
+
+        def on_console(msg) -> None:
+            if msg.type != "error":
+                return
+            text = msg.text or ""
+            if text.startswith("Failed to load resource"):
+                return  # the browser's echo of a response or a failure that is recorded as such
+            rec = {"text": self._text(text)}
+            where = (msg.location or {}).get("url")
+            if where:
+                rec["url"] = self._text(where, 200)
+            self._add("console_errors", rec)
+
+        def on_page_error(err) -> None:
+            self._add("page_errors", {"text": self._text(getattr(err, "message", None) or err)})
+
+        def on_request_failed(req) -> None:
+            why = req.failure or ""
+            if "ERR_ABORTED" in why:
+                return  # cancelled by a navigation or by the page itself
+            self._add("failed_requests", {"method": req.method, "url": self._text(req.url, 200), "resource": req.resource_type,
+                                          "failure": self._text(why, 120)})
+
+        def on_response(resp) -> None:
+            if resp.status >= 400:
+                if resp.status == 404 and resp.url.split("?", 1)[0].endswith("/favicon.ico"):
+                    return  # the browser asks for it by itself; a site without one is not reporting an error
+                req = resp.request
+                self._add("http_errors", {"status": resp.status, "method": req.method, "url": self._text(resp.url, 200),
+                                          "resource": req.resource_type})
+
+        page.on("console", guarded(on_console))
+        page.on("pageerror", guarded(on_page_error))
+        page.on("requestfailed", guarded(on_request_failed))
+        page.on("response", guarded(on_response))
+
+    def take(self, step: int) -> dict:
+        """Stamp everything recorded since the last call with `step` and return its counts by kind (empty when nothing
+        new): the step's `diagnostics`, flagged in the summary."""
+        fresh, self._fresh = self._fresh, []
+        counts: dict[str, int] = {}
+        for kind, rec in fresh:
+            rec["step"] = step
+            counts[kind] = counts.get(kind, 0) + 1
+            if kind == "http_errors" and rec.get("status", 0) >= 500:
+                counts["server_errors"] = counts.get("server_errors", 0) + 1
+        return counts
+
+    def any(self) -> bool:
+        return any(self.counts.values())
+
+    def for_trace(self) -> dict:
+        return {"counts": {**self.counts, "server_errors": self.server_errors}, **{k: v for k, v in self.items.items() if v}}
+
+    def for_result(self) -> dict:
+        """The short form in result.json: the counts, and the first few of what most often is the story (exceptions,
+        5xx responses, failed requests). 4xx responses and console errors stay in the trace."""
+        out: dict = {"counts": {**self.counts, "server_errors": self.server_errors}}
+        if self.items["page_errors"]:
+            out["page_errors"] = self.items["page_errors"][:DIAGNOSTICS_IN_RESULT]
+        server = [r for r in self.items["http_errors"] if r["status"] >= 500][:DIAGNOSTICS_IN_RESULT]
+        if server:
+            out["server_errors"] = server
+        if self.items["failed_requests"]:
+            out["failed_requests"] = self.items["failed_requests"][:DIAGNOSTICS_IN_RESULT]
+        return out
+
+
+def device_settings(playwright, name: str) -> dict:
+    """Playwright's descriptor for the device `name` as context options (viewport, user agent, pixel ratio, touch),
+    or BrowserUnavailable naming the closest matches: a misspelt device is an environment problem (exit 2), never a
+    flow outcome."""
+    devices = playwright.devices
+    if name not in devices:
+        import difflib
+        close = difflib.get_close_matches(name, list(devices), n=4, cutoff=0.5)
+        hint = f"; did you mean {', '.join(repr(c) for c in close)}?" if close else ""
+        raise BrowserUnavailable(f"unknown browser.device {name!r}{hint} (Playwright's device names, e.g. 'iPhone 13', 'Pixel 7', 'iPad Mini')")
+    return {k: v for k, v in devices[name].items() if k != "default_browser_type"}
 
 
 WAIT_BACKOFF_MAX = 4  # lever F4: consecutive WAITs on an unchanged page pause settle_ms x 1, 2, 4, 4, ... (never more than x4)
@@ -245,10 +418,20 @@ def can_recheck(busy: bool, rechecks: int, waited_ms: int = 0, navigation_timeou
 
 def low_confidence_limit(th: dict, blank: bool) -> int:
     """How many consecutive undecided (low-confidence) decisions on one page end the run `low_confidence`: the spec's
-    max_low_confidence_steps on a settled page, BUSY_EXTRA_LOOKS more while a blank layer covers controls (the page is
-    still loading or saving, and each undecided look already waits with backoff). Live: three undecided looks on a
-    form under its loader, 2.5 + 5 + 10 s, ended a run one look before the fields rendered in a slow hour."""
+    max_low_confidence_steps on a settled page, BUSY_EXTRA_LOOKS more while the page says it is loading (`blank`: a
+    blank layer over controls, an autocomplete's placeholder row, or a loading indicator that covers nothing; each
+    undecided look already waits with backoff). Live: three undecided looks on a form under its loader, 2.5 + 5 +
+    10 s, ended a run one look before the fields rendered in a slow hour."""
     return th["max_low_confidence_steps"] + (BUSY_EXTRA_LOOKS if blank else 0)
+
+
+def loading_indicated(step: dict) -> bool:
+    """Does something on the page say it is loading without covering anything (a spinner, an indeterminate progress
+    bar, a 'Loading...' line: the step's `loading_indicators`, counted by observe.loading_indicators when the decision
+    came back undecided)? Read only for the undecided-look limit: such a page gets the extra looks, but it is not
+    `page_busy`, no action is deferred for it and no confirmation waits on it, because an indicator can be decoration
+    that never goes away and those waits are long."""
+    return step.get("loading_indicators", 0) > 0
 
 
 def deferral_limit(th: dict) -> int:
@@ -337,7 +520,7 @@ def wait_for_change(page, before: dict | None, wait_ms: int) -> dict:
         if before is None:
             continue
         try:
-            changed = compare_fingerprint(before, fingerprint(page), "DONE") is not None
+            changed = compare_fingerprint(before, fingerprint(page, before.get("frames")), "DONE") is not None
         except Exception:  # noqa: BLE001 - the document navigated: that is a change
             return {"ended": "navigated", "ms": int((time.perf_counter() - t0) * 1000)}
         if changed:
@@ -361,16 +544,20 @@ def scroll_page(page, direction: int) -> dict:
 
 
 def execute(page, spec: dict, operation: str, target: dict | None, value_key: str | None, wait_ms: int | None = None,
-            before: dict | None = None) -> dict:
-    """Perform one operation. `before` is the observation's fingerprint: a WAIT ends as soon as the page differs from it."""
+            before: dict | None = None, frame: str | None = None) -> dict:
+    """Perform one operation. `before` is the observation's fingerprint: a WAIT ends as soon as the page differs from it.
+    `frame` is the <iframe> selector of a target the observer found inside a listed frame (its element's `frame`)."""
     timeout = spec["browser"]["action_timeout_ms"]
     res: dict = {"action": operation, "ok": True, "error": None}
     try:
         if operation in ("CLICK", "TYPE_TEXT", "SELECT"):
             if not target or target.get("missing"):
                 raise RuntimeError("no target answer for this operation")
-            loc = page.locator(f'[data-jev-idx="{target["element"]}"]').first
+            scope = page.frame_locator(frame) if frame else page
+            loc = scope.locator(f'[data-jev-idx="{target["element"]}"]').first
             res["element"] = target["element"]
+            if frame:
+                res["frame"] = frame
         if operation == "CLICK":
             try:
                 loc.click(timeout=timeout)
@@ -533,7 +720,7 @@ ELEMENT_ASSERTIONS = ("field_value", "element_present", "element_absent")
 ELEMENT_TEXTS_JS = "(sel) => Array.from(document.querySelectorAll(sel)).map(e => e.innerText !== undefined ? e.innerText : (e.textContent || ''))"
 
 
-def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = None) -> list[dict]:
+def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = None, diagnostics=None) -> list[dict]:
     """Evaluate the spec's `assert` block in code on the final page (spec §5.1): free, exact, non-model.
 
     Each record repeats the assertion, adds `ok` and `actual` (the value found, or what was there instead).
@@ -548,6 +735,9 @@ def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = No
     viewport-and-hit-tested table Jev chose from, so a Logout link below the fold is present and an alert
     below the fold is not absent. Comparisons use the real page; `actual` is masked with `secrets` before
     it is written, so a secret can be asserted on without reaching the trace.
+    `text_in` takes an optional `frame` (an <iframe>'s CSS selector, or a list for nested frames): the selector is
+    then looked for inside that frame. `no_page_errors` / `no_failed_requests` read `diagnostics` (the run's
+    Diagnostics): no uncaught JavaScript exception so far; no request that failed outright and no 5xx response.
     """
     results = []
     secrets = secrets or []
@@ -556,13 +746,26 @@ def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = No
     url = page.url
     for a in spec.get("assert") or []:
         (kind, arg), = a.items()
-        if isinstance(arg, str):
+        if isinstance(arg, (str, bool)):
             shown = mask_text(arg, secrets)
         elif isinstance(arg, list):
             shown = [mask_text(v, secrets) for v in arg]
         else:
             shown = {k: mask_text(v, secrets) for k, v in arg.items()}
         rec: dict = {kind: shown, "ok": False, "actual": None}
+        if kind in DIAGNOSTIC_ASSERTIONS:
+            if diagnostics is None:  # a caller outside a run: nothing was recorded, nothing can be said against it
+                rec["ok"], rec["actual"] = True, "not recorded"
+            elif kind == "no_page_errors":
+                rec["ok"] = diagnostics.counts["page_errors"] == 0
+                rec["actual"] = [e["text"] for e in diagnostics.items["page_errors"][:3]] or "none"
+            else:
+                bad = ([f'{r["method"]} {r["url"]}: {r["failure"]}' for r in diagnostics.items["failed_requests"]]
+                       + [f'{r["status"]} {r["method"]} {r["url"]}' for r in diagnostics.items["http_errors"] if r["status"] >= 500])
+                rec["ok"] = diagnostics.counts["failed_requests"] == 0 and diagnostics.server_errors == 0
+                rec["actual"] = bad[:3] or "none"
+            results.append(rec)
+            continue
         if kind in ELEMENT_ASSERTIONS and elements is None:
             try:
                 elements = observe(page, ASSERT_MAX_ELEMENTS, 100, whole_document=True)["elements"]
@@ -596,7 +799,13 @@ def check_assertions(spec: dict, page, obs: dict, secrets: list[str] | None = No
                 rec["actual"] = found
         elif kind == "text_in":
             try:
-                texts = [t for t in page.evaluate(ELEMENT_TEXTS_JS, arg["selector"]) if isinstance(t, str)]
+                if arg.get("frame"):
+                    scope = page
+                    for sel in ([arg["frame"]] if isinstance(arg["frame"], str) else arg["frame"]):
+                        scope = scope.frame_locator(sel)
+                    texts = [t for t in scope.locator(arg["selector"]).all_inner_texts() if isinstance(t, str)]
+                else:
+                    texts = [t for t in page.evaluate(ELEMENT_TEXTS_JS, arg["selector"]) if isinstance(t, str)]
             except Exception:  # noqa: BLE001 - a selector the page rejects, or the page is gone
                 texts = []
             if "equals" in arg:
@@ -850,6 +1059,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         "verdict": None,
         "steps": [],
         "setup": [],
+        "teardown": [],
         "final": None,
         "spec": redacted_spec(spec),
         "outcomes": outcomes,
@@ -874,6 +1084,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     final: dict = {"outcome": None, "seen_at_step": None, "confirmed": False, "assertions": [], "adjudication": None}
     # first_seen_at_step is added when a pass sighting starts its confirmation (the confirming step becomes seen_at_step)
     secret_values = [spec["data"][k] for k in spec["secrets"] if spec["data"].get(k)]
+    diagnostics = Diagnostics(secret_values)  # what the browser says went wrong (exceptions, failed requests, 4xx/5xx)
+    teardown_summary: dict | None = None
 
     def record(entry: dict, step: dict, sig: str) -> None:
         """Append a history entry and remember which observation it was decided on, so the next
@@ -901,9 +1113,9 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         holder["screenshot_error"] so a missing picture is explained, not silent)."""
         if mode is False:
             return None
-        rel = os.path.join("steps", name)
+        rel = f"steps/{name}"  # the same in every trace, whatever the operating system's separator
         try:
-            page.screenshot(path=os.path.join(out_dir, rel), timeout=SCREENSHOT_TIMEOUT_MS)
+            page.screenshot(path=os.path.join(out_dir, "steps", name), timeout=SCREENSHOT_TIMEOUT_MS)
             return rel
         except Exception as e:  # noqa: BLE001 - a picture is evidence, never a reason to stop the run
             if holder is not None:
@@ -994,7 +1206,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         final.setdefault("first_seen_at_step", step["n"])
         final["confirmed"] = True
         final.setdefault("confirmed_by", "recheck")
-        final["assertions"] = check_assertions(spec, page, obs, secret_values) if assertions is None else assertions
+        final["assertions"] = check_assertions(spec, page, obs, secret_values, diagnostics) if assertions is None else assertions
         ok = all(a["ok"] for a in final["assertions"])
         step["assertions"] = final["assertions"]
         finish(page, step, "passed" if ok else "assert_failed", {"action": action, "ok": True, "error": None, "confirmed": True})
@@ -1034,7 +1246,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         def bump() -> None:
             trace["observation_retries"] = trace.get("observation_retries", 0) + 1
         return observe_after_navigation(
-            page, spec, lambda: mask_secrets(observe(page, obs_cfg["max_elements"], obs_cfg["max_text_chars"]), secret_values), bump)
+            page, spec, lambda: mask_secrets(observe(page, obs_cfg["max_elements"], obs_cfg["max_text_chars"],
+                                                     frames=obs_cfg.get("frames") or None), secret_values), bump)
 
     def on_announce(raw) -> None:
         """The page reports a toast / live message (observe.ANNOUNCE_INIT_JS): keep it until the next observation."""
@@ -1113,14 +1326,19 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 trace["browser"] = {"attached": True, "cdp_url": cdp_url,
                                     "storage_state_ignored": bool(spec["browser"]["storage_state"])}
             else:
+                device = spec["browser"].get("device")
+                # a device's viewport, user agent, pixel ratio and touch replace the spec's viewport (a phone is its screen)
+                ctx_kwargs = device_settings(p, device) if device else {"viewport": viewport}
                 browser = p.chromium.launch(headless=headless, channel=spec["browser"]["channel"])
-                ctx_kwargs = {"viewport": viewport}
                 if spec["browser"]["storage_state"]:
                     ctx_kwargs["storage_state"] = spec["browser"]["storage_state"]
                 context = browser.new_context(**ctx_kwargs)
                 context.add_init_script(ANNOUNCE_INIT_JS)
                 page = context.new_page()
                 trace["browser"] = {"attached": False, "headless": headless}
+                if device:
+                    trace["browser"]["device"] = device
+                    trace["browser"]["viewport"] = ctx_kwargs.get("viewport")
         except Exception as e:  # noqa: BLE001 - nothing to trace yet: this is the environment, not the test
             what = (f"could not attach to the browser at {cdp_url} (is Chrome running with --remote-debugging-port?)"
                     if cdp_url else "could not launch the browser")
@@ -1129,6 +1347,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     os.rmdir(d)
                 except OSError:
                     pass
+            if isinstance(e, BrowserUnavailable):  # device_settings said what is wrong already
+                raise
             raise BrowserUnavailable(f"{what}: {type(e).__name__}: {str(e).split(chr(10), 1)[0][:300]}") from None
         # Tabs the flow itself opens (target=_blank, window.open) are ours to close: launch mode closes them
         # with the context; in attached mode they would otherwise stay in the user's browser.
@@ -1141,6 +1361,14 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         page.on("popup", track_popup)
         page.expose_function(ANNOUNCE_FUNCTION, on_announce)  # the page's announcements land in announced_raw, across navigations
         page.set_default_timeout(spec["browser"]["action_timeout_ms"])
+        diagnostics.attach(page)
+        first_page = page  # `page` moves on to a new tab when browser.follow_new_tabs says so; this one is still ours to close
+
+        def note_diagnostics(step: dict) -> None:
+            """What the browser reported since the previous observation (flags JS-ERROR, HTTP-5xx, ... in the summary)."""
+            fresh = diagnostics.take(step["n"])
+            if fresh:
+                step["diagnostics"] = fresh
         t_lap = lap("launch_ms", t_lap)
         try:
             phase = "navigation"
@@ -1183,6 +1411,12 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     step["loading_options"] = obs["loading_options"]  # autocomplete rows that only say the suggestions are loading: not offered
                 if announced:
                     step["announcements"] = announced  # flag ANNOUNCED; in Jev's state for this and the next two steps
+                if obs.get("frames"):
+                    step["frames"] = obs["frames"]  # what each listed <iframe> contributed to the table, or why nothing
+                for hint in ("iframes", "shadow_hosts"):
+                    if obs.get(hint):
+                        step[hint] = obs[hint]  # controls may sit where the observer does not look: summarize_trace's hint
+                note_diagnostics(step)
                 if after_no_effect:
                     step["after_no_effect"] = True  # this is the page the previous action failed to change
                 recent_ann = recent_announcements(all_announcements, n)
@@ -1272,7 +1506,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                         return ms if rechecks <= recheck_limit(True) else max(min(ms, nav_ms - waited), spec["browser"]["settle_ms"])
 
                     if passes:
-                        checked = check_assertions(spec, page, obs, secret_values) if spec["assert"] else []
+                        checked = check_assertions(spec, page, obs, secret_values, diagnostics) if spec["assert"] else []
                         if assertions_can_wait(checked, page_busy(obs), sig != was["sig"], was["rechecks"], waited, nav_ms):
                             # The pass is in sight (a toast announced the save) but the page is still busy (controls under
                             # the saving overlay, the next page's empty shell) or changed during the pause, and the assertions
@@ -1329,7 +1563,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                         # Confirm in code when the spec lets us: every assertion already holds on the page the pass was
                         # seen on, so the settle-and-recheck (a 400 ms pause, one observation, one request) is not needed
                         # to know the page really shows the ending. The evidence line is asked in its own request.
-                        checked = check_assertions(spec, page, obs, secret_values)
+                        checked = check_assertions(spec, page, obs, secret_values, diagnostics)
                         if all(a["ok"] for a in checked):
                             final["confirmed_by"] = "assertions"
                             settle_pass(page, step, obs, passes[0], "AUTO_DONE", jev, assertions=checked)
@@ -1383,7 +1617,13 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     last_low_sig = sig
                     stale_streak = 0  # a refused decision is not a stale one: `max_stale` counts consecutive stale steps
                     step["low_streak"] = low_streak
-                    if low_streak >= low_confidence_limit(th, page_loading(obs)):
+                    if not page_loading(obs):
+                        # asked only now, for an undecided decision on a page with no blank layer: is something else
+                        # saying "loading"? (one small script; an ordinary step never pays for it)
+                        found = loading_indicators(page, obs["fingerprint"].get("frames"))
+                        if found:
+                            step["loading_indicators"] = found
+                    if low_streak >= low_confidence_limit(th, page_loading(obs) or loading_indicated(step)):
                         ask_reason(step, state)
                         finish(page, step, "low_confidence", dict(STOP))
                         break
@@ -1429,7 +1669,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 )
                 if guard:
                     try:
-                        reason = compare_fingerprint(obs["fingerprint"], fingerprint(page), operation, (target or {}).get("element"))
+                        reason = compare_fingerprint(obs["fingerprint"], fingerprint(page, obs["fingerprint"].get("frames")),
+                                                     operation, (target or {}).get("element"))
                     except Exception:  # noqa: BLE001 - the document navigated under us
                         reason = "document navigated"
                     if reason:
@@ -1488,11 +1729,36 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 # for the budget (the for-else below), so it gets its picture like every terminal step.
                 capture(page, step, terminal=(n == budget["max_steps"]))
                 t_b = time.perf_counter()
-                executed = execute(page, spec, operation, target, value_key, wait_ms, obs.get("fingerprint"))
+                target_el = next((e for e in obs["elements"] if e["idx"] == (target or {}).get("element")), {})
+                tabs_before = len(popups)
+                executed = execute(page, spec, operation, target, value_key, wait_ms, obs.get("fingerprint"), target_el.get("frame"))
                 if not executed["ok"]:
                     step["screenshot_after_failure"] = shot(page, f"{n:03d}-failed.png", step)
-                target_el = next((e for e in obs["elements"] if e["idx"] == (target or {}).get("element")), {})
                 step["settle"] = settle(page, spec, after=(operation, None if target_el.get("datalist") else target_el.get("role")))
+                if len(popups) > tabs_before:
+                    # The action opened a new tab (target=_blank, window.open; the popup event arrives during the settle
+                    # above, not with the click). A person's eyes go with it; the run's do when the spec says so
+                    # (browser.follow_new_tabs), and otherwise the step says a tab opened.
+                    newest = popups[-1]
+                    step["new_tab"] = {"followed": False}
+                    try:
+                        step["new_tab"]["url"] = mask_text(newest.url, secret_values)
+                        if spec["browser"]["follow_new_tabs"] and not newest.is_closed():
+                            try:
+                                newest.wait_for_load_state("domcontentloaded", timeout=spec["browser"]["navigation_timeout_ms"])
+                            except Exception:  # noqa: BLE001 - settle() below waits for the document either way
+                                pass
+                            try:
+                                newest.expose_function(ANNOUNCE_FUNCTION, on_announce)
+                            except Exception:  # noqa: BLE001 - announcements from this tab are lost; the page text is not
+                                pass
+                            newest.set_default_timeout(spec["browser"]["action_timeout_ms"])
+                            diagnostics.attach(newest)
+                            page = newest
+                            step["new_tab"] = {"followed": True, "url": mask_text(page.url, secret_values)}
+                            step["settle"] = settle(page, spec)  # the new tab's document, before it is observed
+                    except Exception as e:  # noqa: BLE001 - the tab closed itself again: the run stays where it was
+                        step["new_tab"]["error"] = f"{type(e).__name__}: {str(e)[:120]}"
                 step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
                 step["executed"] = executed
                 record(history_entry(n, operation, target, value_key, executed), step, sig)
@@ -1526,6 +1792,12 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     step["loading_options"] = obs["loading_options"]
                 if announced:
                     step["announcements"] = announced
+                if obs.get("frames"):
+                    step["frames"] = obs["frames"]
+                for hint in ("iframes", "shadow_hosts"):
+                    if obs.get(hint):
+                        step[hint] = obs[hint]
+                note_diagnostics(step)
                 recent_ann = recent_announcements(all_announcements, n)
                 questions, meta = build_questions(spec, obs, last_operation, outcomes, ask_blocked=True, announcements=recent_ann)
                 last_look = {k: v for k, v in questions.items() if k in spec["checks"] or k in ("outcome", "blocked_reason")}
@@ -1563,8 +1835,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
             last = trace["steps"][-1] if trace["steps"] else {}
             if last.get("screenshot") and (last.get("executed") or {}).get("action") in ("AUTO_DONE", "DONE", "STOP", "BLOCKED"):
                 # nothing happened after the terminal step's picture: final.png is that picture (a copy, not a capture)
-                shutil.copyfile(os.path.join(out_dir, last["screenshot"]), os.path.join(out_dir, "steps", "final.png"))
-                trace["final"]["screenshot"] = os.path.join("steps", "final.png")
+                shutil.copyfile(os.path.join(out_dir, *last["screenshot"].split("/")), os.path.join(out_dir, "steps", "final.png"))
+                trace["final"]["screenshot"] = "steps/final.png"
             else:
                 trace["final"]["screenshot"] = shot(page, "final.png", trace["final"])
             lap("final_ms", t_lap)
@@ -1576,10 +1848,17 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
             except Exception:  # noqa: BLE001 - no picture of a page that is gone
                 pass
         finally:
+            diagnostics.take((trace["steps"][-1]["n"] + 1) if trace["steps"] else 0)  # what arrived after the last look
+            if spec["teardown"] and trace.get("failed_before_observation") != "navigation":
+                # After the verdict and its picture, whatever the verdict was (a start page that never loaded has
+                # nothing to clean up). Best effort: recorded, never part of the result.
+                t_td = time.perf_counter()
+                teardown_summary = run_teardown(page, spec, trace["teardown"])
+                timing["teardown_ms"] = int((time.perf_counter() - t_td) * 1000)
             if cdp_url:
                 # Only what we opened goes away: the user's tabs stay. On a connected browser,
                 # browser.close() just disconnects (and drops a context only if we created it).
-                for tab in [*popups, page]:
+                for tab in [*popups, first_page]:
                     try:
                         tab.close()
                     except Exception:  # noqa: BLE001 - already gone
@@ -1603,7 +1882,14 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     trace["actions_executed"] = sum(1 for s in trace["steps"] if is_action_step(s))
     trace["usage"] = jev.usage_summary()
     trace["adjudication"] = final.get("adjudication")
+    if diagnostics.any():
+        trace["diagnostics"] = diagnostics.for_trace()
     result = build_result(trace, spec, outcomes, final, out_dir)
+    if diagnostics.any():
+        # the browser's own account of what went wrong, beside the page's: exceptions, 5xx responses, failed requests
+        result["diagnostics"] = diagnostics.for_result()
+    if teardown_summary is not None:
+        result["teardown"] = trace["teardown_result"] = teardown_summary
     if spec.get("expect"):
         # an expected-red spec (a documented breakage): the run is green when the result matches what was declared
         result["expected"] = match_expect(result, spec["expect"])
@@ -1618,6 +1904,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
 
 
 def main(argv: list[str]) -> int:
+    utf8_stdio()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("spec")
     ap.add_argument("--out", help="output directory (default runs/<spec id>/<timestamp>)")
@@ -1631,12 +1918,16 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--no-screenshots", action="store_true", help="alias for --screenshots none")
     ap.add_argument("--model", help="override TYPESAFE_MODEL (default jev-latest)")
     ap.add_argument("--cdp-url", help="attach to a running browser (overrides browser.cdp_url), e.g. http://127.0.0.1:9222")
+    ap.add_argument("--device", help="emulate a Playwright device (overrides browser.device), e.g. 'iPhone 13', 'Pixel 7'")
+    ap.add_argument("--junit", metavar="FILE", help="also write the result as a JUnit XML report (one test case) for a CI dashboard")
     args = ap.parse_args(argv[1:])
 
     load_dotenv()  # ./.env, if present; exported variables win
     try:
         spec = load_spec(args.spec)
         spec["browser"]["headless"] = resolve_headless(spec["browser"]["headless"], headed=args.headed, headless=args.headless)
+        if args.device:
+            spec["browser"]["device"] = args.device
         if args.cdp_url:
             spec["browser"]["cdp_url"] = args.cdp_url
             problems = validate(spec)
@@ -1670,6 +1961,9 @@ def main(argv: list[str]) -> int:
         if close:
             close()
     print(summarize(trace, out_dir))
+    if args.junit:
+        from junit import run_case, write_junit
+        write_junit(args.junit, "jev-browser-test", [run_case(trace["result"], exit_code(trace), trace.get("duration_ms"))])
     return exit_code(trace)
 
 

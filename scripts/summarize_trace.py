@@ -102,6 +102,22 @@ def _flags(step: dict, nxt: dict | None = None) -> str:
         first = step["announcements"][0].get("text") or ""
         more = len(step["announcements"]) - 1
         f.append(f'ANNOUNCED:"{first[:40]}{"…" if len(first) > 40 else ""}"' + (f" +{more}" if more else ""))
+    if step.get("loading_indicators"):
+        f.append(f"LOADING-IND:{step['loading_indicators']}")  # spinners / progress bars / 'Loading...' lines that cover nothing
+    d = step.get("diagnostics") or {}
+    # what the browser reported between the previous observation and this one (the action before this step caused it)
+    if d.get("page_errors"):
+        f.append(f"JS-ERROR:{d['page_errors']}")  # uncaught JavaScript exceptions
+    if d.get("server_errors"):
+        f.append(f"HTTP-5xx:{d['server_errors']}")
+    if d.get("http_errors", 0) - d.get("server_errors", 0) > 0:
+        f.append(f"HTTP-4xx:{d['http_errors'] - d.get('server_errors', 0)}")
+    if d.get("failed_requests"):
+        f.append(f"REQ-FAILED:{d['failed_requests']}")  # requests that never got an answer (DNS, refused, reset)
+    if d.get("console_errors"):
+        f.append(f"CONSOLE-ERR:{d['console_errors']}")
+    if step.get("new_tab"):
+        f.append("NEW-TAB" if step["new_tab"].get("followed") else "NEW-TAB(not followed)")  # the action opened a tab
     if step.get("adjudication_merged"):
         f.append("EVIDENCE-ASKED")  # the evidence questions rode in this confirmation request
     if step.get("stale"):
@@ -163,6 +179,19 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
     if trace.get("setup"):
         ok = sum(1 for s in trace["setup"] if s.get("ok"))
         lines.append(f"  setup: {ok}/{len(trace['setup'])} scripted steps ok")
+    td = trace.get("teardown_result")
+    if td:
+        lines.append(f"  teardown: {td.get('ran')}/{td.get('steps')} scripted steps ok"
+                     + ("" if td.get("ok") else f"  (step {td['failed'].get('n')} failed: {td['failed'].get('error')}; the result above stands)"))
+    device = (trace.get("browser") or {}).get("device")
+    if device:
+        lines.append(f"  device: {device}")
+    diag = (trace.get("diagnostics") or {}).get("counts")
+    if diag:
+        lines.append("  browser diagnostics: " + ", ".join(f"{diag.get(k, 0)} {label}" for k, label in (
+            ("page_errors", "uncaught JS exception(s)"), ("server_errors", "5xx response(s)"), ("http_errors", "4xx/5xx response(s) in all"),
+            ("failed_requests", "failed request(s)"), ("console_errors", "console error(s)")) if diag.get(k))
+                     + "  (trace.diagnostics has each one, with the step it preceded)")
     final = trace.get("final") or {}
     lines.append(f"  start: {spec.get('start_url')}")
     lines.append(f"  end:   {final.get('url')}  \"{final.get('title')}\"")
@@ -196,6 +225,7 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
         lines.append(
             f"{s['n']:>3}  {op:<20} {target:<58} {_fmt_conf(s):<16} {_fmt_checks(s.get('checks', {}), spec)}  {_flags(s, steps[i + 1] if i + 1 < len(steps) else None)}".rstrip()
         )
+    lines.extend(_hidden_controls_hint(trace))
     lines.append("")
     lines.append("final checks: " + _fmt_checks(final.get("checks", {}), spec))
     assertions = (trace.get("result") or {}).get("assertions") or []
@@ -205,6 +235,29 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
     if out_dir:
         lines.append(f"result: {os.path.join(out_dir, 'result.json')}  trace: {os.path.join(out_dir, 'trace.json')}" + _screenshot_hint(trace))
     return "\n".join(lines)
+
+
+STALLED_STATUSES = ("stuck", "blocked", "low_confidence", "budget_exhausted")
+
+
+def _hidden_controls_hint(trace: dict) -> list[str]:
+    """A run that could not make progress on a page with an <iframe> the spec does not list, or with controls inside
+    shadow DOM, may have been looking for a control the observer never offered: say where to look. Silent for runs
+    that ended in a declared outcome, and for pages with neither."""
+    steps = trace.get("steps") or []
+    if trace.get("status") not in STALLED_STATUSES or not steps:
+        return []
+    last = steps[-1]
+    listed = ((trace.get("spec") or {}).get("observation") or {}).get("frames") or []
+    hints = []
+    if last.get("iframes", 0) > len([f for f in last.get("frames") or [] if f.get("elements")]):
+        hints.append(f"  hint: the last page shows {last['iframes']} <iframe>(s)" + (f", {len(listed)} listed in observation.frames" if listed else "")
+                     + ". Controls inside a frame are offered only when the spec lists the frame's selector in observation.frames "
+                       "(or script them in setup with \"frame\").")
+    if last.get("shadow_hosts"):
+        hints.append(f"  hint: {last['shadow_hosts']} element(s) on the last page keep controls inside shadow DOM, which the observer "
+                     "does not offer. Script those steps in setup: Playwright selectors reach into open shadow roots.")
+    return hints
 
 
 def _screenshot_hint(trace: dict) -> str:
@@ -244,6 +297,8 @@ def dump_step(trace: dict, n: int) -> str:
 
 
 def main(argv: list[str]) -> int:
+    from spec import utf8_stdio
+    utf8_stdio()
     ap = argparse.ArgumentParser()
     ap.add_argument("trace", help="a run's trace.json (or its result.json, or the run directory)")
     ap.add_argument("--step", type=int, help="dump one step in full")

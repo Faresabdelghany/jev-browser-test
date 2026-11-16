@@ -1,7 +1,7 @@
 """Run several specs, each N times, on a pool of runner subprocesses, and write one verdict per spec.
 
     python scripts/run_suite.py specs/*.json [--repeat 3] [--workers 2] [--out runs/suite/<ts>]
-                                [--run-arg=--screenshots=none ...] [--label name]
+                                [--run-arg=--screenshots=none ...] [--label name] [--junit runs/junit.xml]
 
 Every (spec, repeat) is its own `run_test.py` subprocess with its own browser and Jev connection, so the
 runs are independent and the pool only bounds how many browsers are open at once. The suite writes
@@ -46,7 +46,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from bench import _git_commit, _median, measure_trace
-from spec import UNDETERMINED
+from spec import UNDETERMINED, utf8_stdio
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUN_TEST = os.path.join(HERE, "run_test.py")
@@ -70,7 +70,7 @@ def _rel(path: str | None, base: str | None) -> str | None:
     if not path or not base:
         return path
     try:
-        return os.path.relpath(path, base)
+        return os.path.relpath(path, base).replace(os.sep, "/")  # the same results.json on every system; "/" opens on Windows too
     except ValueError:  # another drive on Windows: no relative form exists
         return path
 
@@ -82,7 +82,7 @@ def run_once(runner: str, python: str, spec_path: str, out_dir: str, run_args: l
     -> an undetermined error run. `out_dir`, `trace` and `result` are written relative to `base` when given."""
     cmd = [python, runner, spec_path, "--out", out_dir, *run_args]
     t0 = time.perf_counter()
-    proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     rec: dict = {"out_dir": out_dir, "exit_code": proc.returncode, "wall_ms": int((time.perf_counter() - t0) * 1000),
                  "outcome": None, "verdict": None, "status": None}
     tail = (proc.stderr or proc.stdout or "").strip()[-500:]
@@ -305,6 +305,7 @@ def run_suite(spec_paths: list[str], repeat: int, workers: int, out_root: str, r
 
 
 def main(argv: list[str]) -> int:
+    utf8_stdio()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("specs", nargs="+", help="spec files to run")
     ap.add_argument("--repeat", type=int, default=1, help="runs per spec (default 1; use 3-5 to measure agreement)")
@@ -317,6 +318,7 @@ def main(argv: list[str]) -> int:
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--headed", action="store_true", help="every runner shows its browser window (use --workers 1); beats JEV_HEADED")
     mode.add_argument("--headless", action="store_true", help="every runner hides it; beats JEV_HEADED=1")
+    ap.add_argument("--junit", metavar="FILE", help="also write the suite as a JUnit XML report (one test case per spec) for a CI dashboard")
     ap.add_argument("--python", default=sys.executable)
     ap.add_argument("--runner", default=RUN_TEST, help=argparse.SUPPRESS)  # the offline tests substitute a fake runner
     args = ap.parse_args(argv[1:])
@@ -342,6 +344,9 @@ def main(argv: list[str]) -> int:
     print()
     print(render_markdown(report))
     print(f"results: {os.path.join(out_root, 'results.json')}  {os.path.join(out_root, 'results.md')}")
+    if args.junit:
+        from junit import suite_cases, write_junit
+        print(f"junit: {write_junit(args.junit, args.label or 'jev-browser-test', suite_cases(report))}")
     runs = [r for sp in report["specs"].values() for r in sp["runs"]]
     if runs and all(r.get("environment_failure") for r in runs):
         print("every run failed before observing a page (browser, start URL or setup; see the error column): the environment "

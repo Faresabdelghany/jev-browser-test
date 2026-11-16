@@ -129,6 +129,12 @@ When you are handed a run folder (`result.json`, `trace.json`, screenshots) the 
    layer stays, five on one page; `DEFER-LIMIT:5` when it then went ahead; `DEFERRED-<OP>:loading` while an autocomplete
    still said 'Searching....', `LOADING:<n>` on such steps), `ANNOUNCED:"…"` (a toast or live message appeared between
    the previous observation and this one; Jev saw it in its state for this and the next two steps, faded or not).
+   The browser's flags, on the step after the action that caused them: `JS-ERROR:<n>` (uncaught JavaScript
+   exceptions), `HTTP-5xx:<n>` / `HTTP-4xx:<n>` (responses), `REQ-FAILED:<n>` (requests that never got an answer),
+   `CONSOLE-ERR:<n>`; `result.diagnostics` and `trace.diagnostics` have the entries. They change no verdict by
+   themselves, and they are what turns "the button did nothing" into "the button's request answered 500": quote
+   them in a BUG report. `LOADING-IND:<n>` (a spinner or 'Loading...' line that covers nothing), `NEW-TAB` /
+   `NEW-TAB(not followed)` (the action opened a tab).
    The outcome's flags: `DEFERRED:<outcome>` (true of the page, but its `requires_action` / `after` condition has not
    happened yet: not counted), `RECHECK:<n>` / `ASSERT-PENDING:<n>` (a pass in sight on a page still busy, looked at
    again).

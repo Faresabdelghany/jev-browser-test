@@ -27,7 +27,7 @@ import re
 import sys
 from datetime import date
 
-from spec import DEFAULTS, RUN_STAMP_VAR, _merge, substitute_env, validate
+from spec import DEFAULTS, RUN_STAMP_VAR, _merge, substitute_env, utf8_stdio, validate
 
 SETUP_SYNTAX = {
     "fill": ("selector", "value"),
@@ -37,6 +37,11 @@ SETUP_SYNTAX = {
     "wait_for": ("selector",),
     "wait_for_url": ("url",),
     "goto": ("url",),
+    "hover": ("selector",),
+    "check": ("selector",),
+    "uncheck": ("selector",),
+    "upload": ("selector", "path"),
+    "drag": ("selector", "to"),
 }
 SLOW = {"browser": {"settle_ms": 2500, "quiet_ms": 200, "navigation_timeout_ms": 45000},
         "budget": {"max_steps": 40, "max_seconds": 480}}  # a slow-hour pass of a two-page flow took 26 steps; 30 ended one early
@@ -128,21 +133,21 @@ def split_selector(rest: str) -> tuple[str, str, str]:
     return rest, "", ""
 
 
-def parse_setup(items: list[str], slow: bool) -> list[dict]:
+def parse_setup(items: list[str], slow: bool, flag: str = "--setup") -> list[dict]:
     steps = []
     for item in items:
         action, sep, rest = item.partition(":")
         if not sep or action not in SETUP_SYNTAX:
-            raise ScaffoldError(f"--setup wants one of {', '.join(k + ':...' for k in SETUP_SYNTAX)}, got {item!r}")
+            raise ScaffoldError(f"{flag} wants one of {', '.join(k + ':...' for k in SETUP_SYNTAX)}, got {item!r}")
         fields = SETUP_SYNTAX[action]
         if len(fields) == 2:
             first, eq, second = split_selector(rest)
             if not eq or not first.strip() or not second.strip():
-                raise ScaffoldError(f"--setup {action} wants {action}:{fields[0]}={fields[1]}, got {item!r}")
+                raise ScaffoldError(f"{flag} {action} wants {action}:{fields[0]}={fields[1]}, got {item!r}")
             values = (first.strip(), second.strip())
         else:
             if not rest.strip():
-                raise ScaffoldError(f"--setup {action} wants {action}:{fields[0]}, got {item!r}")
+                raise ScaffoldError(f"{flag} {action} wants {action}:{fields[0]}, got {item!r}")
             values = (rest.strip(),)
         step = {"action": "wait_for" if action == "wait_for_url" else action}
         step.update(zip(fields, values))
@@ -193,6 +198,9 @@ def build(args: argparse.Namespace) -> dict:
     setup = parse_setup(args.setup, args.slow)
     if setup:
         spec["setup"] = setup
+    teardown = parse_setup(args.teardown, args.slow, "--teardown")
+    if teardown:
+        spec["teardown"] = teardown
     after = parse_after(args.after)
     outcomes: dict = {"goal_reached": {"when": (args.pass_when or pass_statement(goal)).strip(), "verdict": "pass"}}
 
@@ -217,6 +225,12 @@ def build(args: argparse.Namespace) -> dict:
         spec["assert"] = assertions
     if args.slow:
         spec.update(copy.deepcopy(SLOW))
+    if args.frame:
+        spec.setdefault("observation", {})["frames"] = [f.strip() for f in args.frame]
+    if args.device:
+        spec.setdefault("browser", {})["device"] = args.device.strip()
+    if args.follow_new_tabs:
+        spec.setdefault("browser", {})["follow_new_tabs"] = True
     return spec
 
 
@@ -242,6 +256,7 @@ def summary(spec: dict) -> str:
 
 
 def main(argv: list[str]) -> int:
+    utf8_stdio()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--url", required=True, help="the page the browser opens (start_url)")
     ap.add_argument("--goal", required=True, help="what a tester would be told, ending with 'so that <the visible outcome>'")
@@ -258,7 +273,14 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--assert-text", action="append", default=[], metavar="TEXT", help="text_contains on the final page (repeatable)")
     ap.add_argument("--assert-in", action="append", default=[], metavar="CSS|TEXT", help="text_in: the text inside a CSS-selected element (repeatable)")
     ap.add_argument("--setup", action="append", default=[], metavar="STEP",
-                    help="a deterministic step before Jev: fill:css=value, click:css, press:css=Key, select:css=value, wait_for:css, wait_for_url:glob, goto:url")
+                    help="a deterministic step before Jev: fill:css=value, click:css, press:css=Key, select:css=value, wait_for:css, "
+                         "wait_for_url:glob, goto:url, hover:css, check:css, uncheck:css, upload:css=path, drag:css=css")
+    ap.add_argument("--teardown", action="append", default=[], metavar="STEP",
+                    help="a deterministic step after the verdict, whatever it was (delete what the flow created, log out): the --setup syntax")
+    ap.add_argument("--frame", action="append", default=[], metavar="CSS",
+                    help="an <iframe> whose controls Jev may use too, by its CSS selector (observation.frames; repeatable)")
+    ap.add_argument("--device", help="emulate a Playwright device, e.g. 'iPhone 13' (browser.device)")
+    ap.add_argument("--follow-new-tabs", action="store_true", help="carry on in a tab the flow opens (browser.follow_new_tabs)")
     ap.add_argument("--notes", help="hints Jev reads every step, about the page and the flow")
     ap.add_argument("--comment", help="the spec's own comment (the ticket, what it checks); default: the scaffold's editing guidance")
     ap.add_argument("--slow", action="store_true", help="the slow single-page-app preset: settle 2500 ms, quiet 200 ms, 45 s navigation, 40 steps / 480 s")

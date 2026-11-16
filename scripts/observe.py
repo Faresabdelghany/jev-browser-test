@@ -2,7 +2,8 @@
 
 Every step produces a *fresh* table (indices are not stable across steps). Each
 included element is tagged with `data-jev-idx="<n>"` so the runner can act on it
-with a plain Playwright locator. Only the main frame is observed.
+with a plain Playwright locator. The main frame is observed, and the <iframe>s the spec lists
+(`observation.frames`, see add_frames); controls inside shadow DOM are counted, not offered.
 
 The observation also records a *fingerprint* (url, title, text head, one identity/meaning
 tuple per tagged node). Right before acting, `fingerprint()` re-reads the same tuples and
@@ -144,6 +145,7 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
   // wherever it sits, with no viewport or hit-test gates and no cursor:pointer scan, and without touching
   // the numbering Jev saw. The default is the table Jev chooses from: viewport, hit-tested, cursor scan.
   const { maxElements, maxTextChars, wholeDocument } = args;
+  const idxOffset = args.idxOffset || 0;  // a child frame's elements are numbered after the page's own (observe.add_frames)
   if (!wholeDocument) document.querySelectorAll('[data-jev-idx], [data-jev-covered]').forEach(e => {
     e.removeAttribute('data-jev-idx'); e.removeAttribute('data-jev-covered'); });
   const SEL = [
@@ -323,10 +325,12 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
   // clickable <div> (an avatar menu, a card, a table row) has no role, no tabindex and no onclick
   // attribute -- the only visible hint is `cursor: pointer`. Because `cursor` is inherited, keep the
   // OUTERMOST element of each pointer chain, and skip anything nested inside a pass-1 control.
+  let shadowHosts = 0;  // elements with an open shadow root: the controls inside are not in the table (a hint for the reader)
   if (document.body && !wholeDocument) {
     let scanned = 0;
     for (const el of document.body.querySelectorAll('*')) {
       if (++scanned > 8000) break;
+      if (el.shadowRoot && el.shadowRoot.querySelector(SEL)) shadowHosts++;
       if (el.ownerSVGElement) continue;                 // svg internals: the <svg> root is enough
       const tag = el.tagName.toLowerCase();
       if (tag === 'script' || tag === 'style' || tag === 'template' || tag === 'noscript') continue;
@@ -408,10 +412,18 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
                     || (coverers.some(t => c.el.contains(t) || within(c.el, t)) && overCovered(c.el))).length : 0;
   const nodes = {};
   kept.forEach((c, i) => {
-    if (!wholeDocument) { c.el.setAttribute('data-jev-idx', String(i)); nodes[String(i)] = nodeTuple(c.el); }
-    c.idx = i;
+    const k = i + idxOffset;
+    if (!wholeDocument) { c.el.setAttribute('data-jev-idx', String(k)); nodes[String(k)] = nodeTuple(c.el); }
+    c.idx = k;
     delete c.el;
   });
+  // <iframe>s on screen large enough to hold a form: their controls are only in the table when the spec lists the
+  // frame (observation.frames). Counted so a run that could not find its control can say where it may be.
+  let iframes = 0;
+  if (!wholeDocument) for (const f of document.querySelectorAll('iframe')) {
+    const r = f.getBoundingClientRect();
+    if (r.width >= 80 && r.height >= 40 && r.bottom > 0 && r.top < vh && r.right > 0 && r.left < vw && visibleOf(f)) iframes++;
+  }
   if (!wholeDocument) coveredEls.forEach((el, i) => el.setAttribute('data-jev-covered', String(i)));
   return {
     url: location.href,
@@ -422,6 +434,8 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     covered,
     layer_controls: layerControls,  // offered controls that belong to the covering layers; 0 with covered > 0 is a blank layer
     loading_options: loadingOptions,  // autocomplete rows that only say 'Searching....' / 'Loading...': not offered, the suggestions are on their way
+    iframes,  // visible <iframe>s (their controls are offered only for the frames the spec lists)
+    shadow_hosts: shadowHosts,  // elements whose open shadow root holds controls (not offered)
     visible_text: visibleText(maxTextChars),
     fingerprint: { url: location.href, title: document.title, text_head: visibleText(500), nodes, covered, loading: loadingOptions },
     scroll: {
@@ -554,22 +568,141 @@ FINGERPRINT_JS = "() => {\n" + JS_HELPERS + r"""
 }
 """
 
+# Something that says "loading" without covering anything: a spinner or an indeterminate progress bar (aria-busy,
+# role=progressbar or <progress> with no value, a class or id token loading / loader / spinner / skeleton), or a short
+# line of text that says so ('Loading...', 'Wait for it...'). Counted once per indicator (a spinner inside a loading
+# box is one), on screen only. Its own script, run only when a decision came back undecided (run_test asks then, to
+# give such a page the extra looks a blank layer gets): walking every text node costs some 20 ms on a 5,000-node page,
+# which an ordinary step should not pay. Nothing else reads it, so an indicator that never goes away costs two looks.
+# Live: a Remove button's 'Wait for it...' bar ran 4 s, Jev hovered between WAIT and DONE, and three undecided looks
+# in 6.8 s ended the run low_confidence one second before the page finished.
+INDICATORS_JS = r"""() => {
+  const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+  const LOADING_TOKEN = /(^|[-_])(loading|loader|spinner|spinning|skeleton)([-_]|$)/i;
+  const LOADING_TEXT = /^(loading|please wait|wait for it|fetching|one moment|working on it)\b[\s.…!]*$/i;
+  const indicatorsNow = () => {
+    const found = [];
+    const onScreen = el => { const r = el.getBoundingClientRect();
+      return r.width >= 2 && r.height >= 2 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth; };
+    const shown = el => el.isConnected && onScreen(el) && (!el.checkVisibility || el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
+    const add = el => { if (found.length < 20 && !found.some(f => f === el || f.contains(el) || el.contains(f)) && shown(el)) found.push(el); };
+    const SEL = '[aria-busy="true"], [role="progressbar"]:not([aria-valuenow]), progress:not([value]), ' +
+      '[class*="loading" i], [class*="loader" i], [class*="spinner" i], [class*="spinning" i], [class*="skeleton" i], ' +
+      '[id*="loading" i], [id*="loader" i], [id*="spinner" i]';
+    let scanned = 0;
+    for (const el of document.querySelectorAll(SEL)) {
+      if (++scanned > 200) break;
+      const named = el.matches('[aria-busy="true"], [role="progressbar"], progress');
+      const cls = typeof el.className === 'string' ? el.className : (el.getAttribute('class') || '');
+      if (named || (cls + ' ' + (el.id || '')).split(/\s+/).some(t => LOADING_TOKEN.test(t))) add(el);
+    }
+    if (document.body) {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      let node, seen = 0;
+      while ((node = walker.nextNode()) && ++seen < 4000) {
+        const raw = node.textContent;
+        if (!raw || raw.length > 60 || !LOADING_TEXT.test(clean(raw))) continue;
+        const parent = node.parentElement;
+        if (parent && !parent.closest('script, style, noscript, template, option, [role="option"], button, a')) add(parent);
+      }
+    }
+    return found.length;
+  };
+  return indicatorsNow();
+}
+"""
+
 TUPLE_FIELDS = ("connected", "visible", "value", "checked", "disabled", "context")
 GUARD_SKIPPED = {"SCROLL_DOWN", "SCROLL_UP", "WAIT"}
 TARGET_OPERATIONS = {"CLICK", "TYPE_TEXT", "SELECT"}
 
 
-def observe(page, max_elements: int = 200, max_text_chars: int = 4000, whole_document: bool = False) -> dict:
+FRAME_TABLE_ROOM = 250  # a Choice takes at most 255 options: the page's own elements and the frames' share this
+FRAME_MIN_BOX = (40, 20)  # an <iframe> smaller than this (a tracking pixel) holds nothing to choose
+FRAME_TEXT_SHARE = 3  # a frame's visible text gets up to a third of max_text_chars
+
+
+def frame_of(page, selector: str):
+    """The Frame behind the first <iframe> `selector` matches on the page right now, with its box, or (None, why)."""
+    handle = page.query_selector(selector)
+    if handle is None:
+        return None, "no element matches"
+    frame = handle.content_frame()
+    if frame is None:
+        return None, "not an <iframe>"
+    box = handle.bounding_box()
+    if not box or box["width"] < FRAME_MIN_BOX[0] or box["height"] < FRAME_MIN_BOX[1]:
+        return None, "not visible"
+    label = handle.get_attribute("title") or handle.get_attribute("name") or handle.get_attribute("id") or selector
+    return (frame, box, " ".join(label.split())[:40]), None
+
+
+def add_frames(page, obs: dict, selectors: list[str], max_elements: int, max_text_chars: int) -> None:
+    """Append the controls of the listed <iframe>s to the observation (spec `observation.frames`).
+
+    Each frame is observed by the same script as the page, numbered on from the page's own elements, so an index
+    names one control whichever document it lives in. A frame's elements carry `frame` (the selector, for the
+    locator) and say which frame they are in through their `context`; their node tuples join the fingerprint, its
+    covered and loading counts add to the page's, and its visible text follows the page's (up to a third of the
+    text budget). `obs["frames"]` records what each selector contributed, or why it contributed nothing: a frame
+    that is not on the page yet is not an error, the next observation looks again."""
+    info = []
+    fp = obs["fingerprint"]
+    for sel in selectors:
+        rec: dict = {"selector": sel, "elements": 0}
+        info.append(rec)
+        try:
+            found, why = frame_of(page, sel)
+            if found is None:
+                rec["skipped"] = why
+                continue
+            frame, box, label = found
+            base = len(obs["elements"])
+            room = FRAME_TABLE_ROOM - base
+            if room <= 0:
+                rec["skipped"] = "the element table is full"
+                continue
+            sub = frame.evaluate(OBSERVE_JS, {"maxElements": min(max_elements, room), "maxTextChars": max_text_chars,
+                                              "wholeDocument": False, "idxOffset": base})
+        except Exception as e:  # noqa: BLE001 - a frame navigating or detaching mid-read: nothing from it this time
+            rec["skipped"] = f"{type(e).__name__}: {str(e).splitlines()[0][:120]}"
+            continue
+        where = f"frame: {label}"
+        for e in sub["elements"]:
+            e["frame"] = sel
+            e["x"], e["y"] = e["x"] + round(box["x"]), e["y"] + round(box["y"])
+            e["context"] = f'{e["context"]} ({where})'[:110] if e.get("context") else where
+        obs["elements"].extend(sub["elements"])
+        obs["truncated"] += sub["truncated"]
+        for key in ("covered", "layer_controls", "loading_options"):
+            obs[key] = obs.get(key, 0) + sub.get(key, 0)
+        share = min(len(sub["visible_text"]), max_text_chars // FRAME_TEXT_SHARE)
+        if share:
+            obs["visible_text"] = (obs["visible_text"][:max_text_chars - share - 1] + " " + sub["visible_text"][:share]).strip()
+        fp["nodes"].update(sub["fingerprint"]["nodes"])
+        fp["covered"] += sub["fingerprint"]["covered"]
+        fp["loading"] += sub["fingerprint"]["loading"]
+        fp.setdefault("frames", []).append(sel)
+        fp.setdefault("frame_heads", []).append(sub["fingerprint"]["text_head"])
+        rec.update({"elements": len(sub["elements"]), "label": label, "url": sub["url"]})
+    obs["frames"] = info
+
+
+def observe(page, max_elements: int = 200, max_text_chars: int = 4000, whole_document: bool = False,
+            frames: list[str] | None = None) -> dict:
     """Run the observation script on the current page and return the observation dict.
 
     Besides the element table it carries `fingerprint`: url, title, the first 500 chars of visible text and
     one identity/meaning tuple per tagged node, which `fingerprint()` + `compare_fingerprint()` check again
     right before acting. `whole_document=True` is the assertion oracle (run_test.check_assertions): every
     rendered control on the page, not only what is in the viewport and under the pointer, and the nodes
-    Jev saw keep their numbering.
+    Jev saw keep their numbering. `frames` lists the <iframe>s whose controls join the table (add_frames);
+    without it only the main frame is observed.
     """
     obs = page.evaluate(OBSERVE_JS, {"maxElements": max_elements, "maxTextChars": max_text_chars,
                                      "wholeDocument": whole_document})
+    if frames and not whole_document:
+        add_frames(page, obs, frames, max_elements, max_text_chars)
     s = obs["scroll"]
     obs["can_scroll_down"] = s["y"] + s["viewport"] < s["height"] - 8
     obs["can_scroll_up"] = s["y"] > 8
@@ -644,9 +777,46 @@ def mask_secrets(obs: dict, values: list[str]) -> dict:
     return obs
 
 
-def fingerprint(page) -> dict:
-    """The current identity/meaning fingerprint of the tagged nodes (same functions as observe())."""
-    return page.evaluate(FINGERPRINT_JS)
+def fingerprint(page, frames: list[str] | None = None) -> dict:
+    """The current identity/meaning fingerprint of the tagged nodes (same functions as observe()). `frames` is the
+    observation's `fingerprint["frames"]`: the <iframe>s that contributed elements are re-read the same way, so a
+    control inside a frame goes stale like any other; a frame that is gone contributes nothing, and its nodes then
+    read as no longer on the page."""
+    fp = page.evaluate(FINGERPRINT_JS)
+    for sel in frames or []:
+        try:
+            found, _ = frame_of(page, sel)
+            if found is None:
+                continue
+            sub = found[0].evaluate(FINGERPRINT_JS)
+        except Exception:  # noqa: BLE001 - the frame navigated or detached: its nodes are missing, which is the answer
+            continue
+        fp["nodes"].update(sub["nodes"])
+        fp["covered"] += sub["covered"]
+        fp["loading"] += sub["loading"]
+        fp.setdefault("frames", []).append(sel)
+        fp.setdefault("frame_heads", []).append(sub["text_head"])
+    return fp
+
+
+def loading_indicators(page, frames: list[str] | None = None) -> int:
+    """How many loading indicators that cover nothing the page (and the listed frames) shows right now: see
+    INDICATORS_JS. 0 when the page cannot be read (it is navigating: the next observation will say)."""
+    total = 0
+    scopes = [page]
+    for sel in frames or []:
+        try:
+            found, _ = frame_of(page, sel)
+        except Exception:  # noqa: BLE001
+            found = None
+        if found is not None:
+            scopes.append(found[0])
+    for scope in scopes:
+        try:
+            total += int(scope.evaluate(INDICATORS_JS) or 0)
+        except Exception:  # noqa: BLE001
+            pass
+    return total
 
 
 def _tuple_diff(before: list, after: list) -> str | None:
@@ -683,6 +853,8 @@ def compare_fingerprint(before: dict, after: dict, operation: str, target_idx=No
         return "title changed"
     if before.get("text_head") != after.get("text_head"):
         return "visible text changed"
+    if before.get("frame_heads") != after.get("frame_heads"):
+        return "visible text changed in a frame"  # both absent (no frames observed) compare equal
     if before.get("covered") is not None and after.get("covered") is not None and before["covered"] != after["covered"]:
         # a loading overlay lifted off a form (or a dialog closed): nothing tagged changed, the page did
         return f"covered controls changed: {before['covered']} -> {after['covered']}"

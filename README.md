@@ -41,6 +41,9 @@ python3 -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
 export TYPESAFE_API_KEY=...                # https://console.typesafe.ai/keys, or a .env in the project
 ```
 
+On Windows the interpreter is `.venv\Scripts\python.exe` (`python -m venv .venv` creates it); everything else is the
+same, from Git Bash or PowerShell.
+
 Keep real credentials out of specs: use `${ENV_VAR}` in `data`, list the key under `secrets`, or better, log in with
 plain Playwright in `setup` so the credential never reaches Jev.
 
@@ -54,6 +57,7 @@ python scripts/scaffold.py --url URL --goal '... so that <the visible outcome>' 
 python scripts/run_test.py specs/<id>.json                 # one run -> runs/<id>/<ts>/result.json + trace.json + screenshots
 python scripts/summarize_trace.py runs/<id>/<ts>/trace.json --result
 python scripts/run_suite.py specs/*.json --repeat 3        # specs x repeats -> results.md with a computed flaky verdict
+python scripts/run_suite.py specs/*.json --junit junit.xml # the same, plus a JUnit report for a CI dashboard
 python scripts/report.py runs/<id>/<ts>                    # a self-contained report.html
 ```
 
@@ -79,6 +83,20 @@ spec or environment problem. `SKILL.md` is what Claude follows (how to write a s
 as PASS / BUG / TEST_ISSUE / FLAKY / NEEDS_HUMAN, and close the loop); `references/` has the spec format, the trace
 format, the verdict rubric and the runner design.
 
+A spec can also declare, each in a line or two ([`references/spec-format.md`](references/spec-format.md) has them all):
+
+| | |
+|---|---|
+| `teardown` | scripted steps after the verdict, whatever it was: delete what the run created |
+| `setup` steps `upload`, `hover`, `drag`, `"frame"` | the interactions Jev is not offered, scripted; selectors reach into shadow DOM |
+| `observation.frames` | iframes whose controls Jev may use: a card form, an embedded widget |
+| `browser.device` | a phone or tablet: `"iPhone 13"`, `"Pixel 7"` (also `--device`) |
+| `browser.follow_new_tabs` | carry on in the tab a click opens |
+| `no_page_errors`, `no_failed_requests` | assertions on what the browser recorded: no uncaught exception, no 5xx, no failed request |
+
+Every run also records the browser's own diagnostics (JavaScript exceptions, failed requests, 4xx and 5xx responses)
+beside what the page showed, so a bug report can say what was behind a button that did nothing.
+
 ## Examples
 
 `specs/examples/` holds twenty-two specs against public demo sites: a shop checkout (including the accounts the site
@@ -103,8 +121,8 @@ driving the same flow step by step with a snapshot tool. Every number, and how i
 
 ```
 SKILL.md          the instructions Claude loads
-scripts/          scaffold, run_test, run_suite, report, summarize_trace, spec, bench, selftest, unit_tests;
-                  observe / policy / rules / jev_client are the runner's parts
+scripts/          scaffold, run_test, run_suite, report, summarize_trace, spec, bench, junit, selftest
+                  (with selftest_capabilities), unit_tests; observe / policy / rules / jev_client are the runner's parts
 references/       spec-format, trace-format, verdict-rubric, suites, troubleshooting, runner-design
 specs/            two smoke specs; examples/ (public sites), compare/ (the Jev vs Playwright-CLI comparison)
 ```

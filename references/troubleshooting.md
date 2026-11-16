@@ -5,6 +5,13 @@ the app. `$SKILL` is the skill directory. Exit 2 is never a verdict: fix it firs
 
 | Symptom | Cause / fix |
 |---|---|
+| The control Jev needs is on screen but never in the element table, and the summary ends with `hint: ... <iframe>` | It is inside an iframe. List the frame's CSS selector in `observation.frames` (its controls then join the table, marked `in "frame: ..."`), or script the step in `setup` with `"frame"` |
+| The same, with `hint: ... shadow DOM` | The control is inside a web component. Script the step in `setup`: Playwright selectors reach into open shadow roots (`my-widget button`) |
+| A click opened a new tab and the run stalled on the old page (`NEW-TAB(not followed)`) | Set `browser.follow_new_tabs: true`: the run then carries on in the tab the click opened |
+| The flow needs a file upload, a menu that opens on hover, or a drag | Not offered to Jev. Script it in `setup`: `upload {selector, path}`, `hover {selector}` then `click`, `drag {selector, to}` |
+| A run leaves records behind and the next run trips over them | `${RUN_STAMP}` in the data keeps runs apart; a `teardown` block deletes what the run created, after the verdict and whatever it was |
+| `JS-ERROR`, `HTTP-5xx` or `REQ-FAILED` on the step after an action | The browser's own report of what the action caused: `result.diagnostics` has the exception or the request. Evidence for the ticket, and the difference between a dead control and a failing backend; add `{"no_page_errors": true}` / `{"no_failed_requests": true}` to `assert` to make a clean console and network part of the pass |
+| exit 2 with `unknown browser.device` | The name is not in Playwright's device list; the message names the closest ones (`iPhone 13`, `Pixel 7`, `iPad Mini`) |
 | `TYPESAFE_API_KEY is not set` | Export the key or put it in `.env` in the directory you run from |
 | No window appears, or one appears unannounced | The launch line says which mode ran: `browser: headed` or `browser: headless (...)`. Precedence: `--headed` / `--headless`, then `JEV_HEADED` in `.env`, then the spec's `browser.headless` (default true). A window no run announced belongs to another tool's browser, not to this runner |
 | exit 2 with "Spec problems" | Read the list: a `done_when` naming an unknown check, a check written as a question, a missing `${ENV}`, an `assert` of the wrong shape |

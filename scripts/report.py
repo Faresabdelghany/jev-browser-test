@@ -23,7 +23,7 @@ import json
 import os
 import sys
 
-from spec import UNDETERMINED
+from spec import UNDETERMINED, utf8_stdio
 from summarize_trace import _flags
 
 CSS = """
@@ -171,6 +171,21 @@ def render_report(trace: dict, result: dict | None, images: dict[str, bytes], ru
             parts.append("<li>assertions<ul>" + "".join(items) + "</ul></li>")
         if result.get("story"):
             parts.append('<li>story<ol class="story">' + "".join(f"<li>{_e(s)}</li>" for s in result["story"]) + "</ol></li>")
+        diag = trace.get("diagnostics") or {}
+        if diag:
+            # what the browser itself reported during the run, each with the step whose observation first followed it
+            items = [f'<li class="bad">before step {_e(d.get("step"))}: uncaught exception <code>{_e(d.get("text"))}</code></li>' for d in diag.get("page_errors", [])]
+            items += [f'<li class="{"bad" if d.get("status", 0) >= 500 else ""}">before step {_e(d.get("step"))}: HTTP {_e(d.get("status"))} '
+                      f'{_e(d.get("method"))} <code>{_e(d.get("url"))}</code></li>' for d in diag.get("http_errors", [])]
+            items += [f'<li class="bad">before step {_e(d.get("step"))}: request failed {_e(d.get("method"))} <code>{_e(d.get("url"))}</code> '
+                      f'({_e(d.get("failure"))})</li>' for d in diag.get("failed_requests", [])]
+            items += [f'<li>before step {_e(d.get("step"))}: console error <code>{_e(d.get("text"))}</code></li>' for d in diag.get("console_errors", [])]
+            parts.append("<li>browser diagnostics<ul>" + "".join(items) + "</ul></li>")
+        td = result.get("teardown")
+        if td:
+            parts.append(f'<li class="{"ok" if td.get("ok") else "bad"}">teardown: {_e(td.get("ran"))}/{_e(td.get("steps"))} scripted steps ok'
+                         + ("" if td.get("ok") else f' &mdash; step {_e((td.get("failed") or {}).get("n"))} failed: <code>{_e((td.get("failed") or {}).get("error"))}</code>; the result stands')
+                         + "</li>")
         parts.append("</ul>")
     parts.append("<h2>Steps</h2><table><tr><th>#</th><th>operation</th><th>target / value</th><th>checks</th><th>outcome</th>"
                  "<th>flags</th><th>executed · settle · ms</th><th>page</th></tr>")
@@ -199,7 +214,8 @@ def render_report(trace: dict, result: dict | None, images: dict[str, bytes], ru
         parts.append("<h2>Final page</h2>" + f'<div class="probs"><code>{_e(final.get("url"))}</code> · {_e(final.get("title"))}</div>'
                      + _img(images, final.get("screenshot"), "final page"))
     if run_dir:
-        parts.append(f'<p class="probs">trace: <code>{_e(os.path.join(run_dir, "trace.json"))}</code> · result: <code>{_e(os.path.join(run_dir, "result.json"))}</code></p>')
+        shown_dir = run_dir.replace(os.sep, "/").rstrip("/")  # a path a reader can paste on any system
+        parts.append(f'<p class="probs">trace: <code>{_e(shown_dir + "/trace.json")}</code> · result: <code>{_e(shown_dir + "/result.json")}</code></p>')
     parts.append("</body></html>")
     return "\n".join(parts)
 
@@ -258,6 +274,7 @@ def _suite_results(arg: str) -> str | None:
 
 
 def main(argv: list[str]) -> int:
+    utf8_stdio()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run_dirs", nargs="+", help="run directories (each holding trace.json), or a suite directory / its results.json")
     ap.add_argument("--out", help="output file (only with a single run directory; default <run dir>/report.html)")

@@ -123,11 +123,12 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `${RUN_STAMP}` | placeholder | fresh per run | Anywhere in the spec (`data`, `goal`, `notes`, outcome `when`s, `assert`, `setup` values): one value per run, eight lowercase letters and digits (the epoch second in base 36 plus two random characters), so data the application keeps is unique across runs, repeats and parallel workers without anyone exporting a variable. `RUN_STAMP` in the environment wins over a fresh one (export it to rerun, or clean up after, one run's data). Recorded as `result.run_stamp` and `trace.spec.run_stamp`; `null` when the spec never mentions it |
 | `secrets` | list | `[]` | Names in `data` whose values must never appear in the trace or in the state sent to Jev. Shown as `<secret>` in `available_data_values`, and masked again in every observation (a secret typed into a plain text field or a contenteditable reads back as `<secret>`, not as the value). Masking replaces **every occurrence**, so a value shorter than 6 characters after `${ENV}` substitution (`1`, `2024`, `admin`) also rewrites unrelated page text Jev decides on; `spec.py` and the runner print a warning on stderr for it (exit code unchanged): use a longer test credential, or leave a non-confidential value out of `secrets` |
 | `setup` | list | `[]` | Deterministic Playwright steps run **before** Jev takes over (see below) |
+| `teardown` | list | `[]` | Deterministic steps run **after the verdict**, whatever it was: delete the record the flow created, log out (the same actions as `setup`, see below). Best effort: a failing step is reported in `result.teardown` and never changes the outcome, the verdict or the exit code |
 | `checks` | object | `{}` | `name -> statement` evaluated as a Noul (0–1) against the page at every step |
 | `done_when` | list | `[]` | Check names that must all be ≥ `thresholds.check_true` for the synthesized `goal_reached` pass outcome. Required when no `outcomes` are declared; ignored when they are |
 | `never` | list | `[]` | Check names that end the run as the synthesized `never_<check>` outcome (verdict `bug`) at `thresholds.never_true`. Ignored when `outcomes` are declared |
 | `outcomes` | object | `{}` | `name -> {when, verdict, requires?, requires_action?, after?, note?}`: the endings the run may return, see above. Names are identifiers; `none_yet` and the reserved question names are not allowed |
-| `assert` | list | `[]` | Exact expectations checked in code on the final page before a pass counts, see above (`url_matches`, `text_contains`, `text_in`, `text_order`, `field_value`, `element_present`, `element_absent`) |
+| `assert` | list | `[]` | Exact expectations checked in code on the final page before a pass counts, see above (`url_matches`, `text_contains`, `text_in`, `text_order`, `field_value`, `element_present`, `element_absent`), and two that read what the browser recorded during the run instead: `{"no_page_errors": true}` (no uncaught JavaScript exception) and `{"no_failed_requests": true}` (no request failed outright, no 5xx response), see "Browser diagnostics" below |
 | `expect` | object | none | The result an expected-red spec should end in (`outcome`, `status`, `verdict`, `blocked_reason`, `stuck_reason`, `suggested_verdict`), see above. Exit 0 and suite verdict `expected` when it matches |
 | `auto_done` | bool | `true` | Start the confirmation as soon as a pass outcome is seen, even if Jev has not chosen DONE (false: only Jev's DONE starts it) |
 | `confirm` | `"assert"` \| `"recheck"` | `"assert"` | How a pass sighting is confirmed. `"assert"`: when the spec has an `assert` block and every assertion already holds on the page the pass was seen on, that is the confirmation, at once and in code (`result.confirmed_by: "assertions"`; the evidence line then costs one request). Otherwise, and always with `"recheck"`, the runner pauses `settle_ms`, observes again and asks Jev once more, with the evidence questions riding in that request (`confirmed_by: "recheck"`). Measured on the demo login `"assert"` saves ~0.5 s a pass; use `"recheck"` for a flow that can show a late error after its success, or write an assertion on the stable state. A success toast that vanishes is not a reason: toasts are captured as `announcements` as they appear and stay in Jev's state for three observations, so an outcome anchored on one survives the recheck |
@@ -145,6 +146,8 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `thresholds.max_stale` | int | 3 | Consecutive decisions invalidated because the page changed while Jev was deciding (nothing executed) → `unstable_page` |
 | `browser.headless` | bool | `true` | Last word on the mode: `--headed` / `--headless` on the CLI win, then `JEV_HEADED` in the environment or `.env` (`1`/`true`/`yes`/`on`/`headed`, `0`/`false`/`no`/`off`/`headless`), then this. Ignored with `cdp_url` (that browser is already open). The runner prints the mode at launch and records it in `trace.browser.headless` |
 | `browser.viewport` | [w, h] | [1280, 800] | |
+| `browser.device` | string | null | Emulate a Playwright device: `"iPhone 13"`, `"Pixel 7"`, `"iPad Mini"` (any name in Playwright's device list). Its viewport, user agent, pixel ratio and touch replace `viewport`; `--device NAME` on `run_test.py` overrides it. A misspelt name is exit 2 with the closest names. Ignored with `cdp_url` |
+| `browser.follow_new_tabs` | bool | `false` | A click that opens a new tab (`target=_blank`, `window.open`): `true` carries the run on in that tab, as a person would; `false` stays on the page the run started on and flags the step `NEW-TAB(not followed)` |
 | `browser.settle_ms` | int | 400 | **Cap** on the wait after every action: the runner observes as soon as two animation frames have passed and the DOM has been quiet for `quiet_ms`, or when this cap is reached. Raise for slow apps (specs that raised it for the old fixed pause just get a longer cap). A WAIT Jev chooses pauses at most this long; chosen again on an unchanged page the ceiling doubles, × 2, × 4 and then × 4 (block F), but the WAIT ends as soon as the page has changed (the fingerprint is re-read every 100 ms), so a loader that finishes early is not waited out |
 | `browser.quiet_ms` | int | 100 | How long the DOM must go without a mutation before the page counts as settled. Must be ≤ `settle_ms` |
 | `browser.action_timeout_ms` | int | 8000 | Playwright timeout per click/fill |
@@ -154,6 +157,7 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `browser.cdp_url` | URL | null | Attach to a browser that is already running instead of launching one (see below). `storage_state`, `headless` and `channel` are ignored when attached |
 | `observation.max_elements` | int | 200 | Cap on numbered elements per step (largest Choice Jev sees), 1–250. Elements beyond it are reported as `truncated_elements` and cannot be chosen |
 | `observation.max_text_chars` | int | 2000 | Visible text sent as state, viewport-first: what is on screen comes first, then the rest of the page, cut here (≥ 100). Was 4000; 2000 saved ~450 input tokens on each step of a long article with the same decisions (block F). Raise it for a page whose deciding text sits below the first screen |
+| `observation.frames` | list | `[]` | CSS selectors of the `<iframe>`s whose controls Jev may use as well, five at most (`["iframe#card-frame"]`): a payment form, an embedded widget. See "Frames, shadow DOM, uploads, hover" below. Empty: only the main frame is observed |
 | `observation.screenshots` | `true` \| `false` \| `"key"` | `"key"` | Which steps get a `steps/NNN.png`, taken after Jev's answer and before the action (so it shows the page Jev decided on). `"key"`: the terminal step and any step flagged `outcome_seen`, `pending_outcome`, `outcome_unconfirmed`, `never_violated`, `low_confidence`, `stale`, `repeat_count ≥ 2`, `outcome_deferred` or `after_no_effect` (the observation right after an action that changed nothing: the picture of the unchanged page), plus `NNN-failed.png` after a failed action and `steps/final.png`. `true`: every step. `false`: nothing. CLI: `--screenshots all|key|none`. Capture, not encoding, is the cost, so `"key"` is the default; rerun with `--screenshots all` when a human needs the picture of an ordinary step |
 
 ## Attach to a running browser
@@ -200,6 +204,76 @@ Actions: `goto {url}`, `click {selector}`, `fill {selector, value}`, `press {sel
 `select {selector, value}`, `wait {ms}`, `wait_for {selector?, url?, state?, timeout_ms?}` (state defaults
 to `visible`; `url` is a Playwright glob). Prefer `wait_for` over `wait`: fixed pauses were 61% of the
 wall-clock in the first real run, and they either waste time or flake. `fill` values are redacted in the trace.
+
+Four more, for the interactions Jev is not offered: `hover {selector}` (a menu that opens on hover: the pointer
+stays there, so the next step can click the item), `check {selector}` / `uncheck {selector}` (a checkbox or radio,
+set rather than toggled), `upload {selector, path}` (an `<input type=file>`; `path` is a file or a list of files,
+relative to the directory you run from) and `drag {selector, to}` (drag one element onto another).
+
+Any step with a `selector` may also carry **`frame`**: the CSS selector of the `<iframe>` the element lives in
+(a list for nested frames, outermost first). Selectors reach into open shadow roots by themselves.
+
+```json
+{ "action": "fill", "frame": "iframe#card-frame", "selector": "input[name=cardnumber]", "value": "${TEST_CARD}" }
+```
+
+## Teardown steps
+
+`teardown` takes the same steps and runs them after the verdict and its picture, on whatever page the run ended
+on (in the tab it ended in), for a pass and for a red run alike:
+
+```json
+"teardown": [
+  { "action": "goto", "url": "https://app.example.com/employees?name=Runner${RUN_STAMP}" },
+  { "action": "click", "selector": "button[aria-label='Delete']" },
+  { "action": "click", "selector": "button:has-text('Yes, delete')" },
+  { "action": "wait_for", "selector": "text=Successfully Deleted" }
+]
+```
+
+It is best effort and never part of the result: the first failing step ends the teardown and is reported
+(`result.teardown: {ok: false, failed: {n, action, error}}`, the summary's `teardown:` line, `trace.teardown` step
+by step), and the outcome, the verdict and the exit code stay what the flow earned. Use it where a separate cleanup
+spec was needed before: with `${RUN_STAMP}` in the data and the same placeholder in the teardown, a run removes
+exactly the record it created. It is skipped only when the start page never loaded. When the cleanup matters as
+much as the flow, give it its own spec instead: a teardown cannot be red.
+
+## Frames, shadow DOM, uploads, hover
+
+What the observer offers Jev by itself is the main frame's visible controls. Beyond that:
+
+- **`<iframe>`s.** List the frame in `observation.frames` and its controls join the element table after the
+  page's own, each marked `in "frame: <the iframe's title, name or id>"`, numbered on from the page's elements;
+  Jev types into them and clicks them like any other, and the frame's visible text follows the page's in the state
+  (up to a third of `max_text_chars`). A listed frame that is not on the page yet is skipped until it is
+  (`step.frames` says what each selector contributed). Unlisted frames contribute nothing: an advert's buttons do
+  not become choices. Assert on a frame's content with `text_in` and `frame`:
+  `{"text_in": {"frame": "iframe#card-frame", "selector": "#status", "equals": "Paid"}}`. Two limits: the evidence
+  line is quoted from the main frame's text, and `text_contains` looks at the main frame only.
+- **Shadow DOM.** Controls inside a web component's shadow root are not offered to Jev. Script those steps in
+  `setup` (Playwright's selectors pierce open shadow roots: `{"action": "click", "selector": "my-widget button"}`).
+- **File uploads, hover menus, drag and drop.** Script them in `setup` with `upload`, `hover` and `drag`.
+- **New tabs.** `browser.follow_new_tabs: true` when the flow continues in the tab a click opens.
+
+A run that stalls (`stuck`, `blocked`, `low_confidence`, `budget_exhausted`) on a page with an unlisted
+`<iframe>`, or with controls inside shadow DOM, says so under its step table, with which of these to reach for.
+
+## Browser diagnostics
+
+While a run goes, the runner records what the browser itself reports, beside what the page shows: uncaught
+JavaScript exceptions, `console.error` messages, requests that failed outright (refused, reset, DNS; a request a
+navigation cancelled is not one) and responses with a status of 400 or more (a missing `favicon.ico` aside). None of it reaches Jev or changes a
+decision. It is evidence: a Save that does nothing with a 500 behind it is a different ticket from a Save that
+does nothing with nothing behind it.
+
+- `result.json` gets a `diagnostics` block when there is anything to report: the counts, and the first five
+  exceptions, 5xx responses and failed requests. `trace.diagnostics` has every entry (fifty a kind at most), each
+  with the `step` whose observation first followed it, the convention the announcements use.
+- The step table flags them on that step: `JS-ERROR:n`, `HTTP-5xx:n`, `HTTP-4xx:n`, `REQ-FAILED:n`,
+  `CONSOLE-ERR:n`.
+- Two assertions make them a condition of a pass: `{"no_page_errors": true}` and `{"no_failed_requests": true}`
+  (a 4xx does not fail the second: a 401 is the right answer to a wrong password). A page that says 'Saved' over
+  a 500 then ends `assert_failed`, with the request in `reason.failed_assertions`.
 
 ## Writing good checks
 
@@ -259,6 +333,8 @@ Checks are Noul questions: Jev returns the probability that the statement is tru
   wants a `suggestion_not_found` bug outcome with `requires_action` and `after: {type: <the field's label or
   placeholder>}`, beside the `invalid_search_name` test issue for a suggestion offered but not chosen: the run then
   ends declared, with the dropdown's own words as evidence.
+- **Phones.** `browser.device` (`"iPhone 13"`, `"Pixel 7"`) gives the page a phone's screen, touch and user agent;
+  say in the goal what a phone user does differently ("open the menu with the ☰ button first").
 - Test credentials go in `data` via `${ENV_VAR}` and are listed in `secrets`. Never paste real
   passwords into a spec file. Prefer `setup` for the login itself so the credential never reaches Jev at all.
   The one exception is a credential the site itself publishes (the demo accounts a practice site prints on its
