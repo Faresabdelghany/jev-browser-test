@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: unit tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # Standard library only: the pure parts of the runner need neither Playwright nor a key.
+      - run: python scripts/unit_tests.py
+
+  selftest:
+    name: offline self-test (local pages, a fake Jev)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+      - run: pip install -r scripts/requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      # No TYPESAFE_API_KEY and no network: every page is a local file and Jev is a rule-based fake.
+      - run: python scripts/selftest.py
+
+  metadata:
+    name: version and changelog agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: plugin.json, marketplace.json and CHANGELOG.md name the same version
+        run: |
+          python - <<'PY'
+          import json, re, sys
+          plugin = json.load(open(".claude-plugin/plugin.json"))["version"]
+          market = json.load(open(".claude-plugin/marketplace.json"))["plugins"][0]["version"]
+          log = open("CHANGELOG.md", encoding="utf-8").read()
+          problems = []
+          if plugin != market:
+              problems.append(f"plugin.json says {plugin}, marketplace.json says {market}")
+          if not re.search(rf"^## \[{re.escape(plugin)}\]", log, re.M):
+              problems.append(f"CHANGELOG.md has no '## [{plugin}]' section")
+          if problems:
+              sys.exit("\n".join(problems))
+          print("version", plugin)
+          PY

@@ -1,6 +1,6 @@
 """Run several specs, each N times, on a pool of runner subprocesses, and write one verdict per spec.
 
-    python scripts/run_suite.py specs/*.json [--repeat 3] [--workers 4] [--out runs/suite/<ts>]
+    python scripts/run_suite.py specs/*.json [--repeat 3] [--workers 2] [--out runs/suite/<ts>]
                                 [--run-arg=--screenshots=none ...] [--label name]
 
 Every (spec, repeat) is its own `run_test.py` subprocess with its own browser and Jev connection, so the
@@ -308,7 +308,9 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("specs", nargs="+", help="spec files to run")
     ap.add_argument("--repeat", type=int, default=1, help="runs per spec (default 1; use 3-5 to measure agreement)")
-    ap.add_argument("--workers", type=int, default=4, help="runner subprocesses at once (default 4)")
+    ap.add_argument("--workers", type=int, default=2,
+                    help="runner subprocesses at once (default 2: more than that against one shared host turns its "
+                         "load timeouts into your flakiness; raise it for an app you host yourself)")
     ap.add_argument("--out", help="output directory (default runs/suite/<timestamp>)")
     ap.add_argument("--label", default="", help="free-text label stored in results.json")
     ap.add_argument("--run-arg", action="append", default=[], help="extra argument passed through to run_test.py (repeatable)")

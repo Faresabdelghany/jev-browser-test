@@ -20,10 +20,10 @@ This repository is the skill (`SKILL.md` at the root, `scripts/`, `references/`,
 
 ```bash
 # personal skill, every project on this machine
-git clone https://github.com/Faresabdelghany/jev-browser-test ~/.claude/skills/jev-browser-test
+git clone --depth 1 https://github.com/Faresabdelghany/jev-browser-test ~/.claude/skills/jev-browser-test
 
 # or a project skill, committed with the repository you are testing
-git clone https://github.com/Faresabdelghany/jev-browser-test .claude/skills/jev-browser-test
+git clone --depth 1 https://github.com/Faresabdelghany/jev-browser-test .claude/skills/jev-browser-test
 
 # or a plugin, from inside Claude Code
 /plugin marketplace add Faresabdelghany/jev-browser-test
@@ -97,7 +97,7 @@ Keep specs for a private application under `specs/local/` (git-ignored).
 The demo login (three actions) takes about 5 s a run, of which 2 s is the site's own page load: 5 Jev requests of
 ~0.3 s and ~6k input tokens. Rerunning a finished spec costs Claude a few thousand tokens, against tens of thousands for
 driving the same flow step by step with a snapshot tool. Every number, and how it was measured, is in
-[`docs/superpowers/measurements/README.md`](docs/superpowers/measurements/README.md).
+[`docs/superpowers/measurements/README.md`](https://github.com/Faresabdelghany/jev-browser-test/blob/dev-docs/docs/superpowers/measurements/README.md) on the `dev-docs` branch.
 
 ## Layout
 
@@ -107,9 +107,25 @@ scripts/          scaffold, run_test, run_suite, report, summarize_trace, spec, 
                   observe / policy / rules / jev_client are the runner's parts
 references/       spec-format, trace-format, verdict-rubric, suites, troubleshooting, runner-design
 specs/            two smoke specs; examples/ (public sites), compare/ (the Jev vs Playwright-CLI comparison)
-evals/            the skill's eval prompts and their input files
-docs/superpowers/ design spec, plans and the measurement files
 ```
+
+## Development
+
+```bash
+python scripts/unit_tests.py     # standard library only, a few seconds
+python scripts/selftest.py       # offline: local pages and a fake Jev, about a minute
+```
+
+CI runs both on every push and pull request. The design notes, session handoffs, measurement files and the skill's
+evals live on the [`dev-docs`](https://github.com/Faresabdelghany/jev-browser-test/tree/dev-docs) branch, so that an
+install carries only the skill; check it out beside the code with
+`git fetch origin dev-docs && git worktree add dev origin/dev-docs -B dev-docs` (`dev/` is git-ignored here).
+To release, bump `version` in `.claude-plugin/plugin.json` and `marketplace.json` and add its section to
+[`CHANGELOG.md`](CHANGELOG.md): merging to `main` tags `v<version>` and publishes the release.
+
+## License
+
+[MIT](LICENSE).
 
 Related: [browser-use/jev-ultrafast](https://github.com/browser-use/jev-ultrafast) uses the same observe → choose →
 act loop; this runner drops the text model from the loop and adds the spec and result contract so Claude can judge

@@ -1,0 +1,37 @@
+name: Release
+
+# When main carries a version in .claude-plugin/plugin.json that has no tag yet, tag it and publish a GitHub release
+# with that version's CHANGELOG.md section as the notes. Bump the version in a pull request; the merge does the rest.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .claude-plugin/plugin.json
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag and release the version if it is new
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python -c "import json; print(json.load(open('.claude-plugin/plugin.json'))['version'])")
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag exists already: nothing to release"
+            exit 0
+          fi
+          python - "$version" > notes.md <<'PY'
+          import re, sys
+          log = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(rf"^## \[{re.escape(sys.argv[1])}\][^\n]*\n(.*?)(?=^## \[|\Z)", log, re.M | re.S)
+          print(m.group(1).strip() if m else f"Version {sys.argv[1]}.")
+          PY
+          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --notes-file notes.md
