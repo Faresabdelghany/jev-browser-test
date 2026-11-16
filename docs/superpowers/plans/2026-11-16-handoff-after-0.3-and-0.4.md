@@ -1,15 +1,15 @@
 # Handoff after the 0.3.0 and 0.4.0 pull requests (2026-11-16)
 
-Fares asked for the review's quick wins and capability gaps. Both are open as pull requests; nothing is merged and
-`main` is still at `28a5506`. This session had no TypeSafe key and no access to the demo sites: **every runner change
+Fares asked for the review's quick wins and capability gaps. #1 is merged (`main` at `b202145`, released as `v0.3.0`
+by the new release workflow); #2 is open against `main`. This session had no TypeSafe key and no access to the demo sites: **every runner change
 was verified offline only** (unit tests, the self-test with a scripted Jev, CI on Linux, macOS and Windows).
 
 ## The two pull requests
 
-- **#1 `chore/quick-wins` → main, version 0.3.0.** MIT `LICENSE`, `CHANGELOG.md`, CI (`.github/workflows/ci.yml`), a
+- **#1 `chore/quick-wins` → main, version 0.3.0, merged.** MIT `LICENSE`, `CHANGELOG.md`, CI (`.github/workflows/ci.yml`), a
   release workflow that tags `v<version>` when main carries an untagged version, `run_suite.py --workers` default 2,
   `SKILL.md` 3,910 → 3,330 words, and `docs/` + `evals/` moved to this branch (`dev-docs`).
-- **#2 `feat/capabilities` → `chore/quick-wins`, version 0.4.0.** Browser diagnostics, `teardown`, scripted
+- **#2 `feat/capabilities` → main, version 0.4.0, open.** Browser diagnostics, `teardown`, scripted
   `upload` / `hover` / `drag` / `check` and `"frame"` on a step, `observation.frames`, `browser.device`,
   `browser.follow_new_tabs`, `--junit`, Windows, the loading-indicator rule (open item 1 of the 2026-09-24 handoff),
   `selftest_capabilities.py`. `CHANGELOG.md` on that branch has the list.
@@ -32,7 +32,7 @@ The eval prompts name their inputs as `evals/files/...`: run them from `dev/`.
 2. **`dynamic-controls` x 5.** The indicator rule should turn the 1/2 and 2/3 into passes: `LOADING-IND:1` on the
    undecided looks beside 'Wait for it...', five looks instead of three. If it still fails, the trace says whether
    the indicator was found (`step.loading_indicators`).
-3. **Skill evals 0–5** on #1's `SKILL.md` and again on #2's. The triage section now points at the rubric instead of
+3. **Skill evals 0–5** on main's `SKILL.md` (0.3.0, merged without an eval run) and again on #2's. The triage section now points at the rubric instead of
    repeating it; evals 1 and 4 are the ones that would show a regression. Iteration 3's 30/33 is the reference.
 4. **One live frames run.** A page with a real cross-origin iframe (a payment sandbox), `observation.frames` set.
    Offline it works against a same-origin frame on 127.0.0.1; what Jev makes of the `frame: <title>` context is
