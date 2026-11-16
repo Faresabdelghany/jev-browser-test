@@ -337,6 +337,8 @@ class Diagnostics:
 
         def on_response(resp) -> None:
             if resp.status >= 400:
+                if resp.status == 404 and resp.url.split("?", 1)[0].endswith("/favicon.ico"):
+                    return  # the browser asks for it by itself; a site without one is not reporting an error
                 req = resp.request
                 self._add("http_errors", {"status": resp.status, "method": req.method, "url": self._text(resp.url, 200),
                                           "resource": req.resource_type})

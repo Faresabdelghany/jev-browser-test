@@ -262,7 +262,7 @@ A run that stalls (`stuck`, `blocked`, `low_confidence`, `budget_exhausted`) on 
 
 While a run goes, the runner records what the browser itself reports, beside what the page shows: uncaught
 JavaScript exceptions, `console.error` messages, requests that failed outright (refused, reset, DNS; a request a
-navigation cancelled is not one) and responses with a status of 400 or more. None of it reaches Jev or changes a
+navigation cancelled is not one) and responses with a status of 400 or more (a missing `favicon.ico` aside). None of it reaches Jev or changes a
 decision. It is evidence: a Save that does nothing with a 500 behind it is a different ticket from a Save that
 does nothing with nothing behind it.
 

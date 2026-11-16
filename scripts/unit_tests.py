@@ -2474,7 +2474,10 @@ class DiagnosticsTests(unittest.TestCase):
         d, page = self.make()
         page.emit("requestfailed", _Obj(failure="net::ERR_ABORTED", method="GET", url="http://x/old", resource_type="document"))
         page.emit("console", _Obj(type="error", text="Failed to load resource: the server responded with a status of 404", location={}))
+        page.emit("response", _Obj(status=404, url="http://x/favicon.ico", request=_Obj(method="GET", resource_type="other")))
         self.assertFalse(d.any())
+        page.emit("response", _Obj(status=500, url="http://x/favicon.ico", request=_Obj(method="GET", resource_type="other")))
+        self.assertEqual(d.counts["http_errors"], 1)  # only the missing favicon is noise
 
     def test_secrets_are_masked_and_a_broken_event_is_dropped(self) -> None:
         d, page = self.make(["hunter2-secret"])
