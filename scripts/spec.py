@@ -51,8 +51,28 @@ ASSERTIONS = {
     "field_value": dict,      # {"label": ..., "equals": ...}: a text field / select found by its accessible name
     "element_present": dict,  # {"role": ..., "name"?: ...} in the final element table
     "element_absent": dict,   # the same shape, must not be there
+    # What the browser itself recorded during the run (run_test's diagnostics), not what the final page shows:
+    "no_page_errors": bool,      # true: no uncaught JavaScript exception was thrown on the page
+    "no_failed_requests": bool,  # true: no request failed outright and no response had a 5xx status
 }
-SETUP_ACTIONS = {"goto", "click", "fill", "press", "wait", "wait_for", "select"}
+DIAGNOSTIC_ASSERTIONS = ("no_page_errors", "no_failed_requests")
+# The scripted steps of `setup` and `teardown` (plain Playwright, no Jev). Every step that takes a `selector` may
+# also take `frame`: the CSS selector of the <iframe> the element lives in (a list for nested frames).
+SETUP_ACTIONS = {"goto", "click", "fill", "press", "wait", "wait_for", "select", "hover", "check", "uncheck", "upload", "drag"}
+SETUP_FIELDS = {
+    "goto": ["url"],
+    "click": ["selector"],
+    "fill": ["selector", "value"],
+    "press": ["selector", "key"],
+    "wait": ["ms"],
+    "select": ["selector", "value"],
+    "wait_for": [],
+    "hover": ["selector"],     # a menu that opens on hover: the pointer stays there for the next step
+    "check": ["selector"],     # a checkbox or radio, set (idempotent, unlike click)
+    "uncheck": ["selector"],
+    "upload": ["selector", "path"],  # an <input type=file>; `path` is a file path or a list of them, relative to the working directory
+    "drag": ["selector", "to"],      # drag `selector` onto the element `to` selects
+}
 SECRET_MIN_LEN = 6  # a shorter secret is masked wherever it occurs and rewrites unrelated page text: a warning, not a problem
 ENV_RE = re.compile(r"\$\{([A-Z0-9_]+)\}")
 DOTENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -80,6 +100,10 @@ DEFAULTS = {
     "data": {},
     "secrets": [],
     "setup": [],
+    # Scripted steps after the verdict, whatever it was (delete the record the flow created, log out): the same
+    # actions as `setup`. Best effort: a failing step is recorded (trace.teardown, result.teardown) and never changes
+    # the outcome, the verdict or the exit code.
+    "teardown": [],
     "checks": {},
     "done_when": [],
     "never": [],
@@ -128,12 +152,20 @@ DEFAULTS = {
         "storage_state": None,
         "channel": None,
         "cdp_url": None,    # attach to a running browser (Chrome started with --remote-debugging-port) instead of launching
+        # A Playwright device name ("iPhone 13", "Pixel 7", "iPad Mini"): its viewport, user agent, pixel ratio and
+        # touch replace `viewport`. Ignored when attached to a running browser (that browser is what it is).
+        "device": None,
+        # A click that opens a new tab (target=_blank, window.open): true carries the run on in that tab, as a person
+        # would; false (the default) stays on the page it started on and flags the step NEW-TAB.
+        "follow_new_tabs": False,
     },
     # 200 elements: the Choice cap is 255 and the table-row "stuck" seen in real runs was truncation at 60.
     # 2000 chars of viewport-first text (lever F5; was 4000): what is on screen comes first, so the toast the checks
     # look for is not crowded out by the header; a long article's four steps each saved ~450 tokens at no change.
     # screenshots "key": only terminal and flagged steps (plus final.png); true = every step; false = none.
-    "observation": {"max_elements": 200, "max_text_chars": 2000, "screenshots": "key"},  # lever F5: was 4000
+    # frames: CSS selectors of <iframe>s whose controls Jev may use as well (a payment form, an embedded widget): their
+    # elements join the table after the page's own, marked with the frame. Empty = the main frame only, as before.
+    "observation": {"max_elements": 200, "max_text_chars": 2000, "screenshots": "key", "frames": []},  # lever F5: was 4000
 }
 
 
@@ -221,6 +253,34 @@ def load_dotenv(path: str = ".env") -> list[str]:
     return loaded
 
 
+def validate_step(list_name: str, i: int, step) -> list[str]:
+    """Problems of one scripted `setup` / `teardown` step (empty list means valid)."""
+    errors: list[str] = []
+    act = step.get("action") if isinstance(step, dict) else None
+    if act not in SETUP_ACTIONS:
+        return [f"{list_name}[{i}]: action must be one of {sorted(SETUP_ACTIONS)}"]
+    for field in SETUP_FIELDS[act]:
+        if field not in step:
+            errors.append(f"{list_name}[{i}] ({act}): missing '{field}'")
+    if act == "wait_for":
+        if not (step.get("selector") or step.get("url")):
+            errors.append(f"{list_name}[{i}] (wait_for): needs 'selector' and/or 'url'")
+        if step.get("state", "visible") not in ("attached", "detached", "visible", "hidden"):
+            errors.append(f"{list_name}[{i}] (wait_for): 'state' must be attached|detached|visible|hidden")
+    if act == "upload" and "path" in step:
+        paths = step["path"] if isinstance(step["path"], list) else [step["path"]]
+        if not paths or any(not isinstance(p, str) or not p.strip() for p in paths):
+            errors.append(f"{list_name}[{i}] (upload): 'path' must be a file path or a non-empty list of file paths")
+    frame = step.get("frame")
+    if frame is not None:
+        frames = frame if isinstance(frame, list) else [frame]
+        if not frames or any(not isinstance(f, str) or not f.strip() for f in frames):
+            errors.append(f"{list_name}[{i}] ({act}): 'frame' must be the CSS selector of an <iframe> (or a list, outermost first)")
+        elif not step.get("selector"):
+            errors.append(f"{list_name}[{i}] ({act}): 'frame' needs a 'selector' to look for inside that frame")
+    return errors
+
+
 def validate(spec: dict) -> list[str]:
     """Return a list of human-readable problems (empty list means valid)."""
     errors: list[str] = []
@@ -301,6 +361,9 @@ def validate(spec: dict) -> list[str]:
         (kind, arg), = a.items()
         if kind not in ASSERTIONS:
             errors.append(f"assert[{i}]: unknown assertion '{kind}' (one of {sorted(ASSERTIONS)})")
+        elif kind in DIAGNOSTIC_ASSERTIONS:
+            if arg is not True:
+                errors.append(f"assert[{i}] ({kind}): write {{\"{kind}\": true}}; leave the assertion out to allow them")
         elif not isinstance(arg, ASSERTIONS[kind]) or (isinstance(arg, str) and not arg.strip()):
             errors.append(f"assert[{i}] ({kind}): expected a {ASSERTIONS[kind].__name__}")
         elif kind == "field_value" and not (isinstance(arg.get("label"), str) and isinstance(arg.get("equals"), str)):
@@ -324,28 +387,13 @@ def validate(spec: dict) -> list[str]:
         if s not in data:
             errors.append(f"'secrets' names '{s}' which is not a key in 'data'")
 
-    for i, step in enumerate(spec.get("setup", [])):
-        act = step.get("action") if isinstance(step, dict) else None
-        if act not in SETUP_ACTIONS:
-            errors.append(f"setup[{i}]: action must be one of {sorted(SETUP_ACTIONS)}")
+    for list_name in ("setup", "teardown"):
+        steps = spec.get(list_name, [])
+        if not isinstance(steps, list):
+            errors.append(f"'{list_name}' must be a list of steps")
             continue
-        need = {
-            "goto": ["url"],
-            "click": ["selector"],
-            "fill": ["selector", "value"],
-            "press": ["selector", "key"],
-            "wait": ["ms"],
-            "select": ["selector", "value"],
-            "wait_for": [],
-        }[act]
-        for field in need:
-            if field not in step:
-                errors.append(f"setup[{i}] ({act}): missing '{field}'")
-        if act == "wait_for":
-            if not (step.get("selector") or step.get("url")):
-                errors.append(f"setup[{i}] (wait_for): needs 'selector' and/or 'url'")
-            if step.get("state", "visible") not in ("attached", "detached", "visible", "hidden"):
-                errors.append(f"setup[{i}] (wait_for): 'state' must be attached|detached|visible|hidden")
+        for i, step in enumerate(steps):
+            errors.extend(validate_step(list_name, i, step))
 
     b = spec.get("budget", {})
     ms = b.get("max_steps", 1)
@@ -369,6 +417,11 @@ def validate(spec: dict) -> list[str]:
         errors.append("'browser.settle_ms' must be an integer between 0 and 10000 (the cap on the post-action settle)")
     elif not (isinstance(quiet_ms, int) and not isinstance(quiet_ms, bool) and 0 <= quiet_ms <= settle_ms):
         errors.append("'browser.quiet_ms' must be an integer between 0 and browser.settle_ms")
+    device = br.get("device")
+    if device is not None and not (isinstance(device, str) and device.strip()):
+        errors.append("'browser.device' must be a Playwright device name such as \"iPhone 13\" or \"Pixel 7\"")
+    if not isinstance(br.get("follow_new_tabs", False), bool):
+        errors.append("'browser.follow_new_tabs' must be true or false")
     cdp = br.get("cdp_url")
     if cdp is not None and not (isinstance(cdp, str) and cdp.startswith(("http://", "https://", "ws://", "wss://"))):
         errors.append("'browser.cdp_url' must be an http(s):// or ws(s):// URL of a browser's remote-debugging endpoint")
@@ -388,6 +441,9 @@ def validate(spec: dict) -> list[str]:
     mt = o.get("max_text_chars", 100)
     if not (isinstance(mt, int) and not isinstance(mt, bool) and mt >= 100):
         errors.append("'observation.max_text_chars' must be an integer >= 100")
+    fr = o.get("frames", [])
+    if not (isinstance(fr, list) and all(isinstance(f, str) and f.strip() for f in fr) and len(fr) <= 5):
+        errors.append("'observation.frames' must be a list of at most 5 CSS selectors, one per <iframe> whose controls Jev may use")
     ss = o.get("screenshots", "key")
     if not (ss is True or ss is False or ss == "key"):
         errors.append("'observation.screenshots' must be true, false or \"key\"")
@@ -478,6 +534,21 @@ def effective_outcomes(spec: dict) -> dict:
     return out
 
 
+def utf8_stdio() -> None:
+    """On Windows, print in UTF-8 whatever the console's code page is. The summaries use ✓, ✗, × and …; a Windows
+    console, and a pipe there, default to a legacy code page that cannot encode them, and the print would raise.
+    Every script's main() calls this first. Elsewhere it does nothing."""
+    if os.name != "nt":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
 def load_spec(path: str, run_stamp: str | None = None) -> dict:
     """Load, apply defaults, substitute ${ENV} and validate. Raises ValueError on problems.
 
@@ -502,6 +573,7 @@ def load_spec(path: str, run_stamp: str | None = None) -> dict:
 
 
 def main(argv: list[str]) -> int:
+    utf8_stdio()
     if len(argv) == 2 and argv[1] in ("-h", "--help"):
         print("usage: python scripts/spec.py path/to/spec.json\n\nValidates a spec without opening a browser: exit 0 and a summary when it is "
               "valid, exit 1 with the list of problems otherwise. The format is documented in references/spec-format.md.")

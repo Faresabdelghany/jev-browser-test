@@ -19,6 +19,7 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import pathlib
 import re
 import sys
 import tempfile
@@ -26,7 +27,7 @@ import threading
 import time
 
 from run_test import run, exit_code
-from spec import load_dotenv
+from spec import load_dotenv, utf8_stdio
 from summarize_trace import summarize
 
 PAGE = """<!doctype html><html><head><title>Mini Shop</title>
@@ -1082,6 +1083,11 @@ def state_shape_check(state: dict, trace: dict) -> list[str]:
     return failures
 
 
+def file_url(path: str) -> str:
+    """A fixture file as a URL the browser opens on any system: file:///tmp/x.html, file:///C:/Users/x.html."""
+    return pathlib.Path(path).as_uri()
+
+
 def base_spec(url: str) -> dict:
     from spec import DEFAULTS, _merge, validate
 
@@ -1159,11 +1165,12 @@ def result_shape_check(trace: dict, out: str) -> list[str]:
 
 
 def main() -> int:
+    utf8_stdio()
     tmp = tempfile.mkdtemp(prefix="jev-selftest-")
     html = os.path.join(tmp, "shop.html")
     with open(html, "w", encoding="utf-8") as f:
         f.write(PAGE)
-    url = "file://" + html
+    url = file_url(html)
     controls = os.path.join(tmp, "controls.html")
     with open(controls, "w", encoding="utf-8") as f:
         f.write(CONTROLS_PAGE)
@@ -1173,13 +1180,13 @@ def main() -> int:
     failures = []
 
     # 0. observer: hidden-input checkboxes are seen, described with their row, and clickable
-    failures += observer_check("file://" + controls)
+    failures += observer_check(file_url(controls))
     covered_html = os.path.join(tmp, "covered.html")
     with open(covered_html, "w", encoding="utf-8") as f:
         f.write(COVERED_PAGE)
-    failures += covered_check("file://" + covered_html)
+    failures += covered_check(file_url(covered_html))
     # 0b. settle: ends on DOM quiet, on the cap, or on a visible autocomplete option
-    failures += settle_check("file://" + settle_html)
+    failures += settle_check(file_url(settle_html))
 
     # 1. happy path -> passed via auto_done
     spec = base_spec(url)
@@ -1324,7 +1331,7 @@ def main() -> int:
     loading_html = os.path.join(tmp, "loading.html")
     with open(loading_html, "w", encoding="utf-8") as f:
         f.write(LOADING_PAGE)
-    spec = loading_spec("file://" + loading_html)
+    spec = loading_spec(file_url(loading_html))
     jev = FakeJev()
     out = os.path.join(tmp, "run-loading")
     trace = run(spec, jev, out, screenshots="key")
@@ -1354,7 +1361,7 @@ def main() -> int:
 
     # 4d. a loader that never finishes (?ms=0) with a small budget: the budget ends the run, not `stuck`, and the
     #     result carries the last still_loading (the final look asks none) so the suggestion is flaky, not test_issue
-    spec = loading_spec("file://" + loading_html + "?ms=0", max_steps=5)
+    spec = loading_spec(file_url(loading_html) + "?ms=0", max_steps=5)
     out = os.path.join(tmp, "run-loading-forever")
     trace = run(spec, FakeJev(), out, screenshots=False)
     print(summarize(trace, out))
@@ -1386,7 +1393,7 @@ def main() -> int:
     #     waits like a chosen WAIT (settle_ms x 1, 2, 4, ending the moment the page changes) and the count restarts
     #     when the page changes, so the run ends low_confidence only after max_low_confidence_steps undecided steps
     #     on ONE page (live: three flat pauses, ~2 s, ended a run while a 5 s loader was still running).
-    spec = loading_spec("file://" + loading_html + "?ms=900")
+    spec = loading_spec(file_url(loading_html) + "?ms=900")
     spec["browser"]["settle_ms"], spec["browser"]["quiet_ms"] = 300, 20
     spec["outcomes"] = {"loaded": {"when": "The text 'Goodbye' is displayed", "verdict": "pass"}}
     out = os.path.join(tmp, "run-undecided-loading")
@@ -1406,7 +1413,7 @@ def main() -> int:
 
     # 4g. the same indecision with a reachable pass: the waits outlive the 900 ms loader, "Hello World!" comes into
     #     view and the run passes, the pass confirmed by its assertion.
-    spec = loading_spec("file://" + loading_html + "?ms=900")
+    spec = loading_spec(file_url(loading_html) + "?ms=900")
     spec["browser"]["settle_ms"], spec["browser"]["quiet_ms"] = 300, 20
     out = os.path.join(tmp, "run-undecided-then-pass")
     trace = run(spec, FakeJev("undecided_while_loading"), out, screenshots=False)
@@ -1421,7 +1428,7 @@ def main() -> int:
     #     pause ("Almost there...") and shows no pass, so it is not the settled page: the runner looks again (settle_ms
     #     x 2, ending when the page changes) and the second look sees "Hello World!" -> passed. One look ended it
     #     done_unverified before (live: a Save that navigated during the pause, then the next page's loading overlay).
-    spec = loading_spec("file://" + loading_html + "?ms=900&stage=250")
+    spec = loading_spec(file_url(loading_html) + "?ms=900&stage=250")
     spec["browser"]["settle_ms"], spec["browser"]["quiet_ms"] = 300, 20
     out = os.path.join(tmp, "run-done-while-staged-loading")
     trace = run(spec, FakeJev("done_after_start"), out, screenshots=False)
@@ -1436,7 +1443,7 @@ def main() -> int:
     # 4i. typing while the form is covered: Jev's marginal TYPE_TEXT (0.65) into the one free box, the sidebar-like
     #     Search, while three controls sit under a loading overlay is deferred once (a runner WAIT ending when the
     #     overlay goes), and the next decision types into First Name; the deferral is in the trace and in Jev's history.
-    covered_spec = base_spec("file://" + covered_html)
+    covered_spec = base_spec(file_url(covered_html))
     covered_spec.update({"goal": "Type the given first name into First Name so that the page says Typed: Jevtest",
                          "data": {"first_name": "Jevtest"}, "secrets": [], "checks": {}, "done_when": [], "never": [],
                          "outcomes": {"typed": {"when": "The page says Typed: Jevtest", "verdict": "pass"}},
@@ -1469,7 +1476,7 @@ def main() -> int:
     # 4j. the layer never lifts (?stay=1: a blank layer that stays): the deferral fires deferral_limit times on the one
     #     page, waiting settle_ms x 1, 2, 4, 4, 4, and the same marginal typing is then executed (into Search, the only
     #     field there is), the step marked deferrals_exhausted.
-    stay_spec = dict(covered_spec, start_url="file://" + covered_html + "?stay=1", browser=dict(covered_spec["browser"], settle_ms=200))
+    stay_spec = dict(covered_spec, start_url=file_url(covered_html) + "?stay=1", browser=dict(covered_spec["browser"], settle_ms=200))
     out = os.path.join(tmp, "run-type-while-covered-stays")
     trace = run(stay_spec, FakeJev("type_while_covered"), out, screenshots=False)
     print(summarize(trace, out))
@@ -1489,7 +1496,7 @@ def main() -> int:
     #      waiting settle_ms x1, x2, x4, the third wait ending the moment the overlay goes, and the next decision types
     #      into First Name (live: the deferral fired once per page, and the second identical decision typed the first
     #      name into the sidebar's filter while the form was still loading, three runs of three).
-    slow_spec = dict(covered_spec, start_url="file://" + covered_html + "?ms=2400", browser=dict(covered_spec["browser"], settle_ms=400))
+    slow_spec = dict(covered_spec, start_url=file_url(covered_html) + "?ms=2400", browser=dict(covered_spec["browser"], settle_ms=400))
     out = os.path.join(tmp, "run-type-while-covered-slow")
     trace = run(slow_spec, FakeJev("type_while_covered"), out, screenshots=False)
     print(summarize(trace, out))
@@ -1510,7 +1517,7 @@ def main() -> int:
     #      blank layer are bounded by max_low_confidence_steps + BUSY_EXTRA_LOOKS, not max_low_confidence_steps alone
     #      (live: three looks ended a run one look before the fields rendered), so the fourth wait outlives the overlay
     #      and the run types into First Name and passes.
-    undecided_spec = dict(covered_spec, start_url="file://" + covered_html + "?ms=3000", browser=dict(covered_spec["browser"], settle_ms=300))
+    undecided_spec = dict(covered_spec, start_url=file_url(covered_html) + "?ms=3000", browser=dict(covered_spec["browser"], settle_ms=300))
     out = os.path.join(tmp, "run-undecided-while-covered")
     trace = run(undecided_spec, FakeJev("undecided_while_covered"), out, screenshots=False)
     print(summarize(trace, out))
@@ -1525,7 +1532,7 @@ def main() -> int:
     # 4j4. a dialog over the form (?dialog=1: the layer has an Ok button of its own): Jev's marginal click on Ok (0.65)
     #      is executed at once, not deferred; the layer's controls are the controls.
     dialog_spec = dict(covered_spec)
-    dialog_spec.update({"start_url": "file://" + covered_html + "?dialog=1", "goal": "Click Ok in the dialog so that the page says Confirmed",
+    dialog_spec.update({"start_url": file_url(covered_html) + "?dialog=1", "goal": "Click Ok in the dialog so that the page says Confirmed",
                         "outcomes": {"confirmed": {"when": "The page says Confirmed", "verdict": "pass"}},
                         "assert": [{"text_contains": "Confirmed"}]})
     out = os.path.join(tmp, "run-click-ok-under-dialog")
@@ -1543,7 +1550,7 @@ def main() -> int:
     #      placeholder row is not offered and counts as loading; Jev's marginal click on Go (0.7) while it shows is deferred
     #      (a wait ending when the suggestion arrives), the suggestion is then chosen and Go clicked, and the page says
     #      Result: Blue Hoodie. Live: Search clicked over the placeholder at 0.66-0.70 in two Leave runs of nine.
-    ph_spec = base_spec("file://" + settle_html + "?placeholder=1")
+    ph_spec = base_spec(file_url(settle_html) + "?placeholder=1")
     ph_spec.update({"goal": "Type the given query into Product, wait for the suggestion Blue Hoodie and choose it, then click Go, so that the page says Result: Blue Hoodie",
                     "data": {"query": "blu"}, "secrets": [], "checks": {}, "done_when": [], "never": [],
                     "outcomes": {"found": {"when": "The page says Result: Blue Hoodie", "verdict": "pass"}},
@@ -1587,7 +1594,7 @@ def main() -> int:
     toast_html = os.path.join(tmp, "toast.html")
     with open(toast_html, "w", encoding="utf-8") as f:
         f.write(TOAST_PAGE)
-    toast_spec = base_spec("file://" + toast_html)
+    toast_spec = base_spec(file_url(toast_html))
     toast_spec.update({"goal": "Click Save so that the page confirms the save", "data": {}, "secrets": [], "checks": {},
                        "done_when": [], "never": [], "confirm": "recheck",
                        "outcomes": {"saved": {"when": "A toast says Saved successfully", "verdict": "pass"}}, "assert": []})
@@ -1669,7 +1676,7 @@ def main() -> int:
     saving_html = os.path.join(tmp, "saving.html")
     with open(saving_html, "w", encoding="utf-8") as f:
         f.write(SAVING_PAGE)
-    saving_spec = base_spec("file://" + saving_html)
+    saving_spec = base_spec(file_url(saving_html))
     saving_spec.update({"goal": "Click Save so that the Personal Details page is shown", "data": {}, "secrets": [], "checks": {},
                         "done_when": [], "never": [],
                         "outcomes": {"saved": {"when": "A toast says Saved successfully", "verdict": "pass"}},
@@ -1699,7 +1706,7 @@ def main() -> int:
     #     the record's; both are pages still on their way (page_busy), so the look parks again each time, past the bound
     #     of two that a page with controls gets, and the fourth look passes. Live: a slow demo's Save went covered form,
     #     empty shell, covered record page, and the bound of two ended the run assert_failed one look before the fields.
-    shell_spec = dict(saving_spec, start_url="file://" + saving_html + "?shell=1")
+    shell_spec = dict(saving_spec, start_url=file_url(saving_html) + "?shell=1")
     jev = FakeJev("toast")
     out = os.path.join(tmp, "run-pass-while-saving-shell")
     trace = run(shell_spec, jev, out, screenshots=False)
@@ -1725,7 +1732,7 @@ def main() -> int:
     #      may take to arrive here, navigation_timeout_ms (15 s in this spec), so the looks go on while the page stays
     #      busy and the pass is confirmed on the record. Live: a slow demo's record page rendered 30 s after Save, four
     #      busy looks were 27.5 s of waits at settle_ms 2500, and the run ended done_unverified one look early.
-    slow_shell_spec = dict(saving_spec, start_url="file://" + saving_html + "?shell=1&scale=3",
+    slow_shell_spec = dict(saving_spec, start_url=file_url(saving_html) + "?shell=1&scale=3",
                            browser=dict(saving_spec["browser"], settle_ms=300, navigation_timeout_ms=15000))
     out = os.path.join(tmp, "run-pass-while-saving-slow-shell")
     trace = run(slow_shell_spec, FakeJev("toast"), out, screenshots=False)
@@ -2179,6 +2186,11 @@ def main() -> int:
         failures.append("a missing .env should load nothing")
     print("dotenv: loaded", loaded, "| preset kept:", os.environ["SELFTEST_PRESET"])
     print()
+
+    # The capabilities added in 0.4.0 (browser diagnostics, teardown, scripted hover / upload / drag, frames, device
+    # emulation, new tabs, loading indicators, JUnit) have their own pages and scripted Jev: selftest_capabilities.py.
+    from selftest_capabilities import run_checks as capability_checks
+    failures += capability_checks(tmp)
 
     if failures:
         print("SELFTEST FAILED:")

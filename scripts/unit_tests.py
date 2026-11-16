@@ -17,6 +17,7 @@ import http.server
 import json
 import math
 import os
+import tempfile
 import threading
 import unittest
 from unittest import mock
@@ -2363,6 +2364,248 @@ class AssertionsCanWaitTests(unittest.TestCase):
         from summarize_trace import _flags
         self.assertEqual(_flags({"recheck_again": 1, "assertions_pending": [{"url_matches": "**/x", "ok": False}]}), "RECHECK:1 ASSERT-PENDING:1")
         self.assertEqual(_flags({"recheck_again": 2}), "RECHECK:2")
+
+
+class CapabilitySpecTests(unittest.TestCase):
+    """The spec fields added in 0.4.0: teardown, the new scripted actions, frames, device, the diagnostic assertions."""
+
+    def spec(self, **over) -> dict:
+        base = {"id": "t", "start_url": "http://x/", "goal": "Do it, so that it is done.",
+                "outcomes": {"done": {"when": "The page says it is done", "verdict": "pass"}}}
+        return _merge(_merge(DEFAULTS, base), over)
+
+    def problems(self, **over) -> list[str]:
+        from spec import validate
+        return validate(self.spec(**over))
+
+    def test_defaults_keep_the_old_behaviour(self) -> None:
+        spec = self.spec()
+        self.assertEqual(spec["teardown"], [])
+        self.assertEqual(spec["observation"]["frames"], [])
+        self.assertIsNone(spec["browser"]["device"])
+        self.assertFalse(spec["browser"]["follow_new_tabs"])
+        self.assertEqual(self.problems(), [])
+
+    def test_new_scripted_actions_validate_in_setup_and_teardown(self) -> None:
+        steps = [{"action": "hover", "selector": "#menu"}, {"action": "check", "selector": "#a"},
+                 {"action": "uncheck", "selector": "#a"}, {"action": "upload", "selector": "#f", "path": ["a.pdf", "b.pdf"]},
+                 {"action": "drag", "selector": "#chip", "to": "#drop"},
+                 {"action": "fill", "frame": ["#outer", "#inner"], "selector": "#card", "value": "1"}]
+        self.assertEqual(self.problems(setup=steps), [])
+        self.assertEqual(self.problems(teardown=steps), [])
+
+    def test_step_problems_name_the_list_and_the_field(self) -> None:
+        self.assertIn("teardown[0] (drag): missing 'to'", self.problems(teardown=[{"action": "drag", "selector": "#a"}]))
+        self.assertIn("setup[0] (upload): missing 'path'", self.problems(setup=[{"action": "upload", "selector": "#f"}]))
+        got = self.problems(setup=[{"action": "upload", "selector": "#f", "path": []}])
+        self.assertTrue(any("'path' must be a file path" in p for p in got), got)
+        got = self.problems(setup=[{"action": "wait", "ms": 5, "frame": "#f"}])
+        self.assertTrue(any("'frame' needs a 'selector'" in p for p in got), got)
+        got = self.problems(teardown=[{"action": "fly"}])
+        self.assertTrue(got and got[0].startswith("teardown[0]: action must be one of"), got)
+        self.assertTrue(any("'teardown' must be a list" in p for p in self.problems(teardown={"action": "click"})))
+
+    def test_frames_device_and_new_tabs(self) -> None:
+        self.assertEqual(self.problems(observation={"frames": ["iframe#pay"]}, browser={"device": "Pixel 7", "follow_new_tabs": True}), [])
+        self.assertTrue(any("observation.frames" in p for p in self.problems(observation={"frames": "iframe"})))
+        self.assertTrue(any("observation.frames" in p for p in self.problems(observation={"frames": ["a"] * 6})))
+        self.assertTrue(any("browser.device" in p for p in self.problems(browser={"device": ""})))
+        self.assertTrue(any("follow_new_tabs" in p for p in self.problems(browser={"follow_new_tabs": "yes"})))
+
+    def test_diagnostic_assertions_are_written_as_true(self) -> None:
+        self.assertEqual(self.problems(**{"assert": [{"no_page_errors": True}, {"no_failed_requests": True}]}), [])
+        got = self.problems(**{"assert": [{"no_page_errors": False}]})
+        self.assertTrue(any('{"no_page_errors": true}' in p for p in got), got)
+
+    def test_teardown_fill_values_are_redacted_in_the_trace(self) -> None:
+        from run_test import redacted_spec
+        spec = self.spec(teardown=[{"action": "fill", "selector": "#pw", "value": "hunter2"}])
+        self.assertEqual(redacted_spec(spec)["teardown"][0]["value"], "<redacted>")
+        self.assertEqual(spec["teardown"][0]["value"], "hunter2")  # the run still types the real value
+
+
+class _FakeEmitter:
+    """A page as Diagnostics.attach sees it: `on(event, handler)`, and `emit` to play an event."""
+
+    def __init__(self) -> None:
+        self.handlers: dict = {}
+
+    def on(self, event: str, handler) -> None:
+        self.handlers[event] = handler
+
+    def emit(self, event: str, arg) -> None:
+        self.handlers[event](arg)
+
+
+class _Obj:
+    def __init__(self, **kw) -> None:
+        self.__dict__.update(kw)
+
+
+class DiagnosticsTests(unittest.TestCase):
+    def make(self, secrets=None):
+        from run_test import Diagnostics
+        d, page = Diagnostics(secrets or []), _FakeEmitter()
+        d.attach(page)
+        return d, page
+
+    def test_kinds_counts_and_step_stamps(self) -> None:
+        d, page = self.make()
+        self.assertFalse(d.any())
+        self.assertEqual(d.take(1), {})
+        page.emit("pageerror", _Obj(message="boom"))
+        page.emit("console", _Obj(type="error", text="bad thing", location={"url": "http://x/app.js"}))
+        page.emit("console", _Obj(type="log", text="just a log", location={}))
+        page.emit("response", _Obj(status=500, url="http://x/api", request=_Obj(method="POST", resource_type="fetch")))
+        page.emit("response", _Obj(status=404, url="http://x/img.png", request=_Obj(method="GET", resource_type="image")))
+        page.emit("response", _Obj(status=200, url="http://x/", request=_Obj(method="GET", resource_type="document")))
+        page.emit("requestfailed", _Obj(failure="net::ERR_CONNECTION_REFUSED", method="GET", url="http://y/", resource_type="xhr"))
+        self.assertEqual(d.take(3), {"page_errors": 1, "console_errors": 1, "http_errors": 2, "server_errors": 1, "failed_requests": 1})
+        self.assertEqual(d.take(4), {})  # taken once
+        t = d.for_trace()
+        self.assertEqual(t["counts"], {"page_errors": 1, "console_errors": 1, "failed_requests": 1, "http_errors": 2, "server_errors": 1})
+        self.assertEqual(t["page_errors"], [{"text": "boom", "step": 3}])
+        self.assertEqual([e["status"] for e in t["http_errors"]], [500, 404])
+        r = d.for_result()
+        self.assertEqual([e["status"] for e in r["server_errors"]], [500])  # the 404 stays in the trace
+        self.assertNotIn("console_errors", r)
+
+    def test_noise_is_left_out(self) -> None:
+        d, page = self.make()
+        page.emit("requestfailed", _Obj(failure="net::ERR_ABORTED", method="GET", url="http://x/old", resource_type="document"))
+        page.emit("console", _Obj(type="error", text="Failed to load resource: the server responded with a status of 404", location={}))
+        self.assertFalse(d.any())
+
+    def test_secrets_are_masked_and_a_broken_event_is_dropped(self) -> None:
+        d, page = self.make(["hunter2-secret"])
+        page.emit("pageerror", _Obj(message="token hunter2-secret rejected"))
+        page.emit("response", _Obj(status=500, url="http://x/?t=hunter2-secret", request=_Obj(method="GET", resource_type="fetch")))
+        page.emit("response", object())  # no .status: the handler must not raise
+        t = d.for_trace()
+        self.assertNotIn("hunter2", json.dumps(t))
+        self.assertEqual(t["counts"]["http_errors"], 1)
+
+    def test_only_the_first_fifty_of_a_kind_are_kept_and_all_are_counted(self) -> None:
+        from run_test import DIAGNOSTICS_KEPT
+        d, page = self.make()
+        for i in range(DIAGNOSTICS_KEPT + 7):
+            page.emit("pageerror", _Obj(message=f"e{i}"))
+        self.assertEqual(d.counts["page_errors"], DIAGNOSTICS_KEPT + 7)
+        self.assertEqual(len(d.for_trace()["page_errors"]), DIAGNOSTICS_KEPT)
+
+    def test_assertions_read_the_diagnostics(self) -> None:
+        from run_test import check_assertions
+        d, page = self.make()
+        spec = {"assert": [{"no_page_errors": True}, {"no_failed_requests": True}]}
+        fake = _Obj(url="http://x/")
+        self.assertEqual([a["ok"] for a in check_assertions(spec, fake, {"elements": []}, [], d)], [True, True])
+        page.emit("response", _Obj(status=404, url="http://x/missing", request=_Obj(method="GET", resource_type="fetch")))
+        self.assertEqual([a["ok"] for a in check_assertions(spec, fake, {"elements": []}, [], d)], [True, True])  # a 4xx is not a failed request
+        page.emit("response", _Obj(status=503, url="http://x/api", request=_Obj(method="GET", resource_type="fetch")))
+        page.emit("pageerror", _Obj(message="boom"))
+        got = check_assertions(spec, fake, {"elements": []}, [], d)
+        self.assertEqual([a["ok"] for a in got], [False, False])
+        self.assertEqual(got[0]["actual"], ["boom"])
+        self.assertEqual(got[1]["actual"], ["503 GET http://x/api"])
+
+
+class FrameFingerprintTests(unittest.TestCase):
+    def test_a_frame_whose_text_changed_is_a_changed_page(self) -> None:
+        from observe import compare_fingerprint
+        before = {"url": "u", "title": "t", "text_head": "h", "nodes": {}, "covered": 0, "loading": 0, "frames": ["#f"], "frame_heads": ["Pay"]}
+        self.assertIsNone(compare_fingerprint(before, dict(before), "DONE"))
+        self.assertEqual(compare_fingerprint(before, {**before, "frame_heads": ["Paid"]}, "DONE"), "visible text changed in a frame")
+        self.assertEqual(compare_fingerprint(before, {**before, "frame_heads": []}, "DONE"), "visible text changed in a frame")  # the frame is gone
+        self.assertIsNone(compare_fingerprint(before, {**before, "frame_heads": ["Paid"]}, "WAIT"))
+
+    def test_without_frames_nothing_is_compared(self) -> None:
+        from observe import compare_fingerprint
+        plain = {"url": "u", "title": "t", "text_head": "h", "nodes": {}, "covered": 0, "loading": 0}
+        self.assertIsNone(compare_fingerprint(plain, dict(plain), "DONE"))
+
+    def test_the_undecided_look_limit(self) -> None:
+        from run_test import BUSY_EXTRA_LOOKS, loading_indicated, low_confidence_limit, page_busy, page_loading
+        th = {"max_low_confidence_steps": 3}
+        obs = {"elements": [{"idx": 0}]}  # nothing covered: the observation itself says nothing about a spinner
+        step = {"n": 2, "loading_indicators": 1}  # counted for the step when its decision came back undecided
+        self.assertTrue(loading_indicated(step))
+        self.assertFalse(page_loading(obs))  # not a blank layer: no deferral, no extended confirmation
+        self.assertFalse(page_busy(obs))
+        self.assertEqual(low_confidence_limit(th, page_loading(obs) or loading_indicated(step)), 3 + BUSY_EXTRA_LOOKS)
+        self.assertEqual(low_confidence_limit(th, loading_indicated({"n": 2})), 3)
+
+    def test_the_indicator_script_is_not_part_of_the_observation(self) -> None:
+        from observe import FINGERPRINT_JS, INDICATORS_JS, OBSERVE_JS
+        self.assertIn("indicatorsNow", INDICATORS_JS)
+        self.assertNotIn("indicatorsNow", OBSERVE_JS)  # an ordinary step does not walk the page's text for it
+        self.assertNotIn("indicatorsNow", FINGERPRINT_JS)
+
+
+class JUnitTests(unittest.TestCase):
+    def test_run_case_keeps_the_three_exit_codes_apart(self) -> None:
+        from junit import run_case
+        ok = run_case({"spec_id": "a", "outcome": "done", "verdict": "pass", "status": "passed", "duration_ms": 1500}, 0)
+        self.assertEqual((ok["kind"], ok["time_ms"], ok["classname"]), ("pass", 1500, "jev.a"))
+        red = run_case({"spec_id": "a", "outcome": "undetermined", "verdict": None, "status": "stuck",
+                        "reason": {"stuck_reason": "control_had_no_effect", "suggested_verdict": "bug"}}, 1)
+        self.assertEqual((red["kind"], red["type"]), ("failure", "bug"))
+        self.assertIn("stuck_reason: control_had_no_effect", red["text"])
+        env = run_case({"spec_id": "a", "outcome": "undetermined", "status": "error", "reason": {"phase": "setup", "error": "setup[0] failed"}}, 2)
+        self.assertEqual((env["kind"], env["type"]), ("error", "environment"))
+        expected = run_case({"spec_id": "a", "outcome": "broken", "verdict": "bug", "status": "outcome", "expected": {"matched": True}}, 0)
+        self.assertEqual(expected["kind"], "pass")  # an expected-red spec that matched is green
+
+    def test_render_is_well_formed_and_drops_what_xml_cannot_hold(self) -> None:
+        import xml.etree.ElementTree as ET
+        from junit import render_junit, write_junit
+        cases = [{"name": "a<b>", "classname": "jev.a", "time_ms": 1234, "kind": "failure", "type": "bug",
+                  "message": 'said "no" & left\x00\x1b', "text": "line 1\nline 2 \x08"}]
+        xml = render_junit("s & t", cases)
+        root = ET.fromstring(xml.split("\n", 1)[1])
+        case = root.find("testsuite/testcase")
+        self.assertEqual(case.get("name"), "a<b>")
+        self.assertEqual(case.get("time"), "1.234")
+        self.assertEqual(case.find("failure").get("message"), 'said "no" & left')
+        self.assertEqual(case.find("failure").text, "line 1\nline 2 ")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_junit(os.path.join(tmp, "deep", "junit.xml"), "s", cases)  # the directory is made
+            self.assertTrue(open(path, encoding="utf-8").read().startswith('<?xml version="1.0" encoding="UTF-8"?>'))
+
+    def test_run_suite_writes_the_file(self) -> None:
+        from junit import suite_cases
+        report = {"specs": {"a": {"verdict": "expected", "runs": [{"run": 1, "outcome": "broken", "status": "outcome", "wall_ms": 900}]},
+                            "b": {"verdict": "bug", "outcome_counts": {"unsorted": 3},
+                                  "runs": [{"run": i, "outcome": "unsorted", "status": "outcome", "wall_ms": 1000, "evidence_line": "Backpack"} for i in (1, 2, 3)]}}}
+        cases = {c["name"]: c for c in suite_cases(report)}
+        self.assertEqual(cases["a"]["kind"], "pass")
+        self.assertEqual((cases["b"]["kind"], cases["b"]["type"], cases["b"]["message"], cases["b"]["time_ms"]), ("failure", "bug", "bug: unsorted x3", 3000))
+        self.assertEqual(cases["b"]["text"].count("evidence: Backpack"), 3)
+
+
+class SummaryFlagTests(unittest.TestCase):
+    def test_the_new_flags(self) -> None:
+        from summarize_trace import _flags
+        step = {"n": 2, "diagnostics": {"page_errors": 2, "http_errors": 3, "server_errors": 1, "failed_requests": 1, "console_errors": 4},
+                "loading_indicators": 1, "new_tab": {"followed": False}}
+        got = _flags(step).split()
+        for flag in ("JS-ERROR:2", "HTTP-5xx:1", "HTTP-4xx:2", "REQ-FAILED:1", "CONSOLE-ERR:4", "LOADING-IND:1", "NEW-TAB(not"):
+            self.assertIn(flag, got)
+        self.assertIn("NEW-TAB", _flags({"n": 1, "new_tab": {"followed": True}}).split())
+        self.assertEqual(_flags({"n": 1}), "")
+
+    def test_the_hint_speaks_only_for_a_stalled_run(self) -> None:
+        from summarize_trace import _hidden_controls_hint
+        step = {"n": 3, "iframes": 2, "shadow_hosts": 1}
+        stalled = {"status": "stuck", "steps": [step], "spec": {"observation": {"frames": []}}}
+        hints = _hidden_controls_hint(stalled)
+        self.assertEqual(len(hints), 2)
+        self.assertIn("observation.frames", hints[0])
+        self.assertIn("shadow DOM", hints[1])
+        self.assertEqual(_hidden_controls_hint({**stalled, "status": "passed"}), [])
+        self.assertEqual(_hidden_controls_hint({**stalled, "status": "outcome"}), [])
+        listed = {"status": "stuck", "spec": {"observation": {"frames": ["#a", "#b"]}},
+                  "steps": [{"n": 1, "iframes": 2, "frames": [{"selector": "#a", "elements": 3}, {"selector": "#b", "elements": 1}]}]}
+        self.assertEqual(_hidden_controls_hint(listed), [])  # every frame on the page is already observed
 
 
 class _FixedRand:
