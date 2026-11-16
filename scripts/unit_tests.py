@@ -1470,7 +1470,7 @@ class SuiteTests(unittest.TestCase):
         # every path under specs is relative to the output directory (the top-level out_dir is the directory as given)
         first = report["specs"]["always-pass"]["runs"][0]
         self.assertEqual((first["out_dir"], first["trace"], first["result"]), ("always-pass/01", "always-pass/01/trace.json", "always-pass/01/result.json"))
-        self.assertEqual(report["specs"]["always-pass"]["spec"], os.path.join("..", "always-pass.json"))
+        self.assertEqual(report["specs"]["always-pass"]["spec"], "../always-pass.json")  # "/" on every system
         self.assertEqual(report["out_dir"], out)
         self.assertNotIn(tmp, json.dumps(report["specs"]))
         self.assertNotIn("trace", report["specs"]["broken"]["runs"][0])           # no trace was written
