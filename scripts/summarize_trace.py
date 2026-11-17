@@ -260,7 +260,7 @@ def _hidden_controls_hint(trace: dict) -> list[str]:
                        "(or script them in setup with \"frame\").")
     if last.get("shadow_hosts"):
         hints.append(f"  hint: {last['shadow_hosts']} element(s) on the last page keep controls inside shadow DOM, which the observer "
-                     "does not offer unless the spec says \"observation\": {\"shadow_dom\": true} (or --shadow-dom). A scripted setup "
+                     "does not offer because the spec turns it off (\"observation\": {\"shadow_dom\": false} or --no-shadow-dom). A scripted setup "
                      "step reaches them too: Playwright selectors go into open shadow roots.")
     spec = trace.get("spec") or {}
     if not spec.get("files") and any(e.get("role") == "file" for e in last.get("elements") or []):

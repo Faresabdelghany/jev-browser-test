@@ -59,11 +59,13 @@ class ScriptedJev:
     A move is played once (`once=True`, the default for click and type) and then skipped. When nothing applies the
     answer is DONE. The outcome Choice is answered by `outcome_rules`: {outcome name: substring of the page text}."""
 
-    def __init__(self, moves: list[tuple], outcome_rules: dict[str, str] | None = None, undecided_while: str | None = None):
+    def __init__(self, moves: list[tuple], outcome_rules: dict[str, str] | None = None, undecided_while: str | None = None,
+                 undecided_ms: int = 0):
         self.moves = [list(m) for m in moves]
         self.played: set[int] = set()
         self.outcome_rules = outcome_rules or {}
         self.undecided_while = undecided_while  # text on the page while which every decision is an undecided WAIT
+        self.undecided_ms = undecided_ms  # how long an undecided answer takes: the page may move meanwhile
         self.requests = 0
         self.seen_states: list[dict] = []
 
@@ -116,6 +118,9 @@ class ScriptedJev:
         uploads = questions.get("upload_target", {}).get("criteria", {})
         if self.undecided_while and self.undecided_while in text:
             answers["operation"] = self._choice("WAIT", ops, conf=0.3)
+            if self.undecided_ms:
+                import time
+                time.sleep(self.undecided_ms / 1000)
             return {"answers": answers, "usage": usage, "model": "scripted-jev", "latency_ms": 1}
         for i, move in enumerate(self.moves):
             kind = move[0]
@@ -256,6 +261,7 @@ RECEIPT_PAGE = """<!doctype html><html><head><title>Receipt</title></head><body>
 SPINNER_PAGE = """<!doctype html><html><head><title>Spinner</title></head><body>
 <h1>Report</h1><button id="unrelated" type="button">Help</button>
 <div class="report-spinner" id="spin" style="width:24px;height:24px;border:3px solid #999;border-radius:50%"></div>
+<script>if (new URLSearchParams(location.search).get('plain')) document.getElementById('spin').className = '';</script>
 <p id="msg">Crunching the numbers</p>
 <script>
   const ms = Number(new URLSearchParams(location.search).get('ms') || 2500);
@@ -309,6 +315,16 @@ UPLOAD_PAGE = """<!doctype html><html><head><title>Upload</title><style>.btn{dis
     document.getElementById('msg').textContent = ok ? 'Saved successfully' : 'Both files are required'; });
 </script></body></html>"""
 
+# the-internet's /upload: the form's own field, and a drag-and-drop library's hidden input appended to the body.
+DROPZONE_PAGE = """<!doctype html><html><head><title>Upload</title></head><body>
+<form id="f" onsubmit="event.preventDefault(); document.getElementById('msg').textContent = document.getElementById('file-upload').files.length ? 'Saved successfully' : 'Internal Server Error'">
+<input id="file-upload" type="file" name="file"> <input type="submit" value="Upload"></form>
+<div id="drop" style="width:300px;height:120px;border:2px dashed #888">drop files here</div><p id="msg"></p>
+<script>const i = document.createElement('input'); i.type = 'file'; i.className = 'dz-hidden-input';
+i.style.cssText = 'visibility:hidden;position:absolute;top:0;left:0;height:0;width:0'; document.body.appendChild(i);</script>
+</body></html>"""
+DROPZONE_ONLY_PAGE = DROPZONE_PAGE.replace('<input id="file-upload" type="file" name="file"> ', '')
+
 # A navigation bar whose submenu exists only while the pointer is over its parent item (CSS :hover, no script).
 HOVER_PAGE = """<!doctype html><html><head><title>Hover menu</title><style>
   nav ul{list-style:none;margin:0;padding:0} nav > ul > li{display:inline-block;position:relative;padding:8px}
@@ -320,7 +336,14 @@ HOVER_PAGE = """<!doctype html><html><head><title>Hover menu</title><style>
   <li><a href="#docs">Documentation</a></li></ul></li><li><a href="#about">About</a></li></ul></nav>
 <h1>Welcome</h1><p id="msg"></p></body></html>"""
 
-ROUTES = {"/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
+# The same menu opened the way jQuery UI opens one: by a script, 300 ms after the pointer arrives (its default delay).
+HOVER_DELAY_PAGE = HOVER_PAGE.replace("#products:hover .sub{display:block}", "").replace("</body>", """<script>
+const li = document.getElementById('products'), sub = li.querySelector('.sub'); let t;
+li.addEventListener('mouseenter', () => { t = setTimeout(() => { sub.style.display = 'block'; }, 300); });
+li.addEventListener('mouseleave', () => { clearTimeout(t); sub.style.display = 'none'; });
+</script></body>""")
+
+ROUTES = {"/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
           "/device": DEVICE_PAGE, "/tabs": TABS_PAGE, "/receipt": RECEIPT_PAGE, "/spinner": SPINNER_PAGE, "/shadow": SHADOW_PAGE}
 
 
@@ -542,8 +565,18 @@ def run_checks(tmp: str | None = None) -> list[str]:
     if trace["status"] != "low_confidence" or len(trace["steps"]) != 3 or any(s.get("loading_indicators") for s in trace["steps"]):
         failures.append(f"G: a page with no indicator keeps the three-look limit: {trace['status']} {len(trace['steps'])} steps")
 
+    # G2. the page moves while Jev decides the last undecided look (live: dynamic-controls' loader ended between the
+    # observation and the indicator check): no indicator here, so three looks; each answer takes 2 s and the text
+    # changes at 6.2 s, inside the third answer (looks at ~0.2, ~2.6, ~5.2 s). Without the check the run ends
+    # low_confidence on a page that has finished; with it the count starts again and the next look sees the result.
+    moving = make_spec(base + "/spinner?ms=6200&plain=1", goal=spin["goal"], budget={"max_steps": 8, "max_seconds": 60})
+    trace, out = go("moved-while-deciding", moving, ScriptedJev([], SAVED, undecided_while="Crunching the numbers", undecided_ms=2000))
+    if trace["status"] != "passed" or not any(s.get("moved_while_deciding") for s in trace["steps"]):
+        failures.append(f"G2: a page that moved while the last undecided look was decided restarts the count: {trace['status']} "
+                        f"{[(s['n'], s.get('low_streak'), s.get('moved_while_deciding')) for s in trace['steps']]}")
+
     # H. shadow DOM --------------------------------------------------------------------------------------------------------
-    shadow = make_spec(base + "/shadow", budget={"max_steps": 3, "max_seconds": 30})
+    shadow = make_spec(base + "/shadow", budget={"max_steps": 3, "max_seconds": 30}, observation={"shadow_dom": False})
     trace, out = go("shadow-hint", shadow, ScriptedJev([("undecided",)], SAVED))
     if trace["steps"][-1].get("shadow_hosts") != 1 or "shadow DOM" not in flags_of(trace, out):
         failures.append(f"H: a stalled run on a page with controls in shadow DOM should say so: {trace['steps'][-1].get('shadow_hosts')}")
@@ -606,7 +639,12 @@ def run_checks(tmp: str | None = None) -> list[str]:
     acted = [s["executed"] for s in trace["steps"] if s.get("executed", {}).get("action") in ("TYPE_TEXT", "CLICK")]
     if len(acted) != 2 or not all(a["ok"] for a in acted) or any(s.get("stale") for s in trace["steps"]):
         failures.append(f"J: both actions should land, with no stale decision (the fingerprint re-reads the shadow nodes): {acted}")
-    shallow = make_spec(base + "/shadow-app", goal=deep["goal"], data=deep["data"], budget={"max_steps": 3, "max_seconds": 30})
+    shallow = make_spec(base + "/shadow-app", goal=deep["goal"], data=deep["data"], budget={"max_steps": 3, "max_seconds": 30},
+                        observation={"shadow_dom": False})
+    by_default = make_spec(base + "/shadow-app", goal=deep["goal"], data=deep["data"], **{"assert": deep["assert"]})  # 0.6.0: on unless a spec turns it off
+    trace, out = go("shadow-default", by_default, ScriptedJev([("type", "Nickname", "nickname"), ("click", "Save profile")], SAVED))
+    if trace["status"] != "passed":
+        failures.append(f"J: shadow DOM is observed by default (0.6.0): {trace['status']} {trace.get('error')}")
     trace, out = go("shadow-off", shallow, ScriptedJev([("type", "Nickname", "nickname"), ("click", "Save profile"), ("undecided",)], SAVED))
     if trace["status"] == "passed" or any(e.get("name") in ("Nickname", "Save profile") for s in trace["steps"] for e in s["elements"]) \
             or "shadow DOM" not in flags_of(trace, out):
@@ -642,6 +680,16 @@ def run_checks(tmp: str | None = None) -> list[str]:
     story = trace["result"]["story"]
     if len(story) < 2 or not story[0].endswith("<- file resume") or not story[1].endswith("<- file photo"):
         failures.append(f"K: the story should name the file attached at each upload: {story}")
+    dz = make_spec(base + "/dropzone", goal="Attach the resume and click Upload, so that the page says it was saved.", files={"resume": upload})
+    trace, out = go("upload-dropzone", dz, ScriptedJev([("upload", "file", "resume"), ("click", "Upload")], SAVED))
+    files_seen = [e for e in trace["steps"][0]["elements"] if e["role"] == "file"]
+    if trace["status"] != "passed" or len(files_seen) != 1 or files_seen[0].get("hidden"):
+        failures.append(f"K: beside the form's own file field a library's orphan input is not offered: {trace['status']} {files_seen}")
+    only = make_spec(base + "/dropzone-only", goal=dz["goal"], files={"resume": upload}, budget={"max_steps": 2, "max_seconds": 30})
+    trace, out = go("upload-dropzone-only", only, ScriptedJev([("undecided",)], SAVED))
+    files_seen = [e for e in trace["steps"][0]["elements"] if e["role"] == "file"]
+    if len(files_seen) != 1 or files_seen[0].get("context") != "not in a form or a label":
+        failures.append(f"K: when the orphan is the page's only file input it is offered, and says what it is: {files_seen}")
     plain = make_spec(base + "/upload", goal=apply["goal"], budget={"max_steps": 2, "max_seconds": 30})
     trace, out = go("upload-off", plain, ScriptedJev([("undecided",)], SAVED))
     first = trace["steps"][0]
@@ -659,6 +707,13 @@ def run_checks(tmp: str | None = None) -> list[str]:
         failures.append("L: the submenu item should be offered only after the hover")
     if trace["steps"][0].get("page_changed") is not True:
         failures.append("L: the hover changed what Jev sees, so it is not a no-effect action")
+    slow = make_spec(base + "/hover-delay", goal=menu["goal"], extra_operations=["HOVER"])
+    trace, out = go("hover-delayed", slow, ScriptedJev([("hover", "Products"), ("click", "Pricing")], SAVED))
+    hovered = [s for s in trace["steps"] if (s.get("executed") or {}).get("action") == "HOVER"]
+    if trace["status"] != "passed" or not hovered or (hovered[0]["executed"].get("reveal") or {}).get("ended") != "changed" \
+            or hovered[0].get("no_effect") or hovered[0].get("page_changed") is not True:
+        failures.append(f"L: a menu that opens 300 ms after the hover is waited for, not flagged NO-EFFECT: {trace['status']} "
+                        f"{[h['executed'].get('reveal') for h in hovered]}")
     still = make_spec(base + "/hover", goal=menu["goal"], budget={"max_steps": 2, "max_seconds": 30})
     trace, out = go("hover-off", still, ScriptedJev([("hover", "Products"), ("click", "Pricing"), ("undecided",)], SAVED))
     if any("HOVER" in s["offered_operations"] for s in trace["steps"]) or "hover_target" in json.dumps(trace["steps"][0].get("target") or {}):

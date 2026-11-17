@@ -434,6 +434,19 @@ def can_recheck(busy: bool, rechecks: int, waited_ms: int = 0, navigation_timeou
     return rechecks < recheck_limit(busy) or (busy and waited_ms < navigation_timeout_ms)
 
 
+def moved_since(page, before: dict | None) -> bool:
+    """Has the page changed since the observation `before` is the fingerprint of (the whole-page comparison a WAIT uses)?
+    Asked once, before an undecided streak ends the run: live, 0.5.1, dynamic-controls' loader ended in the ~0.3 s
+    between the third undecided observation and the loading-indicator check, the check found nothing, the limit fell
+    from five looks to three, and the run ended low_confidence on a page that had just finished."""
+    if not before:
+        return False
+    try:
+        return compare_fingerprint(before, fingerprint(page, before.get("frames"), before.get("deep")), "DONE") is not None
+    except Exception:  # noqa: BLE001 - the document navigated meanwhile: that is a change
+        return True
+
+
 def low_confidence_limit(th: dict, blank: bool) -> int:
     """How many consecutive undecided (low-confidence) decisions on one page end the run `low_confidence`: the spec's
     max_low_confidence_steps on a settled page, BUSY_EXTRA_LOOKS more while the page says it is loading (`blank`: a
@@ -461,6 +474,9 @@ def deferral_limit(th: dict) -> int:
     while the loader was still up."""
     return th["max_low_confidence_steps"] + BUSY_EXTRA_LOOKS
 WAIT_POLL_MS = 100  # a WAIT re-reads the page's fingerprint this often and ends as soon as the page has changed
+HOVER_REVEAL_MS = 800  # a hover menu may open after a delay (jQuery UI's default is 300 ms, hover-intent scripts 100-500):
+# after a HOVER the runner waits up to this long for the page to change, ending the moment it does. Live, 0.5.0: the
+# settle went quiet at ~110 ms, the jQuery UI submenu opened at 300, and every hover was flagged NO-EFFECT
 NO_EFFECT_ACTIONS = {"CLICK", "TYPE_TEXT", "SELECT", "PRESS_ENTER", "HOVER", "UPLOAD_FILE"}  # an executed one of these that changed nothing is flagged
 NAVIGATION_PENDING_MARKER = "waiting for scheduled navigations to finish"  # Playwright's call log after "click action done"
 
@@ -606,6 +622,7 @@ def execute(page, spec: dict, operation: str, target: dict | None, value_key: st
             # the pointer stays where it is put: the menu it opens is on the next observation, and a click on one of its
             # items moves the pointer there without leaving the menu
             loc.hover(timeout=timeout)
+            res["reveal"] = wait_for_change(page, before, HOVER_REVEAL_MS)  # {"ended": "changed" | "timeout" | ..., "ms"}
         elif operation == "UPLOAD_FILE":
             files = spec.get("files") or {}
             if not value_key or value_key not in files:
@@ -1682,9 +1699,14 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                         if found:
                             step["loading_indicators"] = found
                     if low_streak >= low_confidence_limit(th, page_loading(obs) or loading_indicated(step)):
-                        ask_reason(step, state)
-                        finish(page, step, "low_confidence", dict(STOP))
-                        break
+                        if not moved_since(page, obs.get("fingerprint")):
+                            ask_reason(step, state)
+                            finish(page, step, "low_confidence", dict(STOP))
+                            break
+                        # the page moved while Jev was deciding (a loader that ended after the observation, before the
+                        # indicator check): the looks were about a page that is gone, so the count starts again
+                        step["moved_while_deciding"] = True
+                        low_streak, last_low_sig = 0, None
                     park(step, f"low confidence; {operation} not executed",
                          wait_entry(n, "WAIT", "undecided between the offered options; nothing was executed"), sig,
                          wait_ms=spec["browser"]["settle_ms"] * min(2 ** (low_streak - 1), WAIT_BACKOFF_MAX),
@@ -1981,7 +2003,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--evidence", choices=("always", "failures"),
                     help="failures = do not ask for the evidence line of a pass whose assertions hold (one request fewer per pass); overrides the spec")
     ap.add_argument("--hover", action="store_true", help="offer the HOVER operation (adds it to the spec's extra_operations)")
-    ap.add_argument("--shadow-dom", action="store_true", help="observe inside open shadow roots too (observation.shadow_dom)")
+    deep = ap.add_mutually_exclusive_group()
+    deep.add_argument("--shadow-dom", action="store_true", help="observe inside open shadow roots (observation.shadow_dom; the default)")
+    deep.add_argument("--no-shadow-dom", action="store_true", help="observe the document's own tree only (observation.shadow_dom false)")
     ap.add_argument("--junit", metavar="FILE", help="also write the result as a JUnit XML report (one test case) for a CI dashboard")
     args = ap.parse_args(argv[1:])
 
@@ -1995,8 +2019,8 @@ def main(argv: list[str]) -> int:
             spec["evidence"] = args.evidence
         if args.hover and "HOVER" not in spec["extra_operations"]:
             spec["extra_operations"] = [*spec["extra_operations"], "HOVER"]
-        if args.shadow_dom:
-            spec["observation"]["shadow_dom"] = True
+        if args.shadow_dom or args.no_shadow_dom:
+            spec["observation"]["shadow_dom"] = bool(args.shadow_dom)
         missing_files = [f"{k}: {v}" for k, v in spec["files"].items() if not os.path.isfile(v)]
         if missing_files:
             raise ValueError("Spec problems:\n  - files: no such file (paths are relative to " + os.getcwd() + "): " + ", ".join(missing_files))

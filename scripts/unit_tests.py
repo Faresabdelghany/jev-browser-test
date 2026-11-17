@@ -2720,6 +2720,34 @@ class JevDrivenTests(unittest.TestCase):
         self.assertIsNone(compare_fingerprint(before, {"url": "u", "nodes": {"3": tup, "4": [True, True, "x", None, False, "abc"]}}, "HOVER", 3))
         self.assertEqual(compare_fingerprint(before, {"url": "u", "nodes": {"4": tup}}, "UPLOAD_FILE", 3), "target [3] is no longer on the page")
 
+    def test_shadow_dom_is_on_by_default_and_can_be_turned_off(self) -> None:
+        # 0.6.0: the A/B on the 22 examples found no shadow root on any page (identical observations), and on pages built
+        # from web components the option is the difference between seeing the page and not (Polymer shop, MDN 0/5 vs 5/5)
+        import tempfile
+        from spec import DEFAULTS, load_spec
+        self.assertIs(DEFAULTS["observation"]["shadow_dom"], True)
+        self.assertIs(self.spec()["observation"]["shadow_dom"], True)
+        tmp = tempfile.mkdtemp(prefix="jev-shadow-")
+        path = os.path.join(tmp, "s.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"id": "s", "start_url": "https://example.com/", "goal": "Open it, so that it is open.",
+                       "outcomes": {"ok": {"when": "It is open", "verdict": "pass"}}, "observation": {"shadow_dom": False}}, f)
+        self.assertIs(load_spec(path)["observation"]["shadow_dom"], False)  # a spec that turns it off keeps it off
+        sc = ScaffoldTests()
+        code, spec, text = sc.run_scaffold("--url", "https://example.com/", "--goal", "Open it, so that it is open.", "--no-shadow-dom")
+        self.assertEqual((code, spec["observation"]), (0, {"shadow_dom": False}), text)
+        code, spec, text = sc.run_scaffold("--url", "https://example.com/", "--goal", "Open it, so that it is open.")
+        self.assertEqual(code, 0, text)
+        self.assertNotIn("shadow_dom", spec.get("observation", {}))  # the default is not written out
+
+    def test_the_run_flags_for_shadow_dom(self) -> None:
+        import run_test
+        with mock.patch.object(run_test, "load_spec", side_effect=SystemExit(9)):
+            for flags in (["--shadow-dom", "--no-shadow-dom"],):
+                with self.assertRaises(SystemExit) as cm, mock.patch("sys.stderr"):
+                    run_test.main(["run_test.py", "x.json", *flags])
+                self.assertEqual(cm.exception.code, 2)  # argparse: the two are mutually exclusive
+
     def test_the_scripts_take_the_deep_flag(self) -> None:
         from observe import FINGERPRINT_JS, LINES_JS, OBSERVE_JS
         self.assertTrue(OBSERVE_JS.startswith("(args) => {\n  const deep = !!args.shadowDom;"))

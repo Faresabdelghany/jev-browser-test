@@ -233,16 +233,20 @@ pass and its evidence line.
 
 ## Known limits
 
-What Jev is offered by default: the main frame's controls. A spec adds, each with one field: the `<iframe>`s it
-lists (`observation.frames`, below), open shadow roots (`observation.shadow_dom`), file fields as upload targets
+What Jev is offered by default: the main frame's controls, those inside open shadow roots included
+(`observation.shadow_dom`, on since 0.6.0). A spec adds, each with one field: the `<iframe>`s it
+lists (`observation.frames`, below), file fields as upload targets
 (`files`), and hovering (`extra_operations: ["HOVER"]`); see "Operations and observation a spec turns on" below.
 Never offered: drag-and-drop and canvas content (a `drag` step can be scripted), closed shadow roots. One tab at a
 time: a tab the flow opens is followed with `browser.follow_new_tabs`, otherwise flagged and left.
 
 ## Operations and observation a spec turns on
 
-The rule for all three is the one the standing rules taught: what is asked on every step is paid for on every
-step, in tokens and in confidence, so nothing joins the questions unless the spec says so. With none of them set the
+The rule is the one the standing rules taught: what is asked on every step is paid for on every step, in tokens and
+in confidence, so nothing joins the questions unless the spec says so, or an A/B says it is free. Shadow DOM passed that
+test and is on by default since 0.6.0 (2026-11-17: identical observations on the 22 examples, none of which has a
+shadow root; MDN, whose content sits in web components, 0/5 without and 5/5 with on a light-DOM flow, confidence
+0.53 vs 0.56; about 12 ms more per observation on a page with 121 shadow hosts). HOVER and uploads stay opt-in. With none of them set the
 `operation` Choice, the target questions, the state and the observation are what they were (the observation was
 compared field by field against the previous release's on 80 page states of the self-test's fixtures: identical).
 `scripts/ab.py` is how "could it be the default" gets answered: both arms over the same specs, interleaved.

@@ -183,8 +183,11 @@ DEFAULTS = {
     # frames: CSS selectors of <iframe>s whose controls Jev may use as well (a payment form, an embedded widget): their
     # elements join the table after the page's own, marked with the frame. Empty = the main frame only, as before.
     # shadow_dom: also observe inside open shadow roots (web components): their controls join the table, their text the
-    # state, and assertions and evidence lines look there too. False: the document's own tree only, as before.
-    "observation": {"max_elements": 200, "max_text_chars": 2000, "screenshots": "key", "frames": [], "shadow_dom": False},  # lever F5: was 4000
+    # state, and assertions and evidence lines look there too. On by default since 0.6.0: on the 22 example specs it
+    # changed nothing (no example page has a shadow root: identical observations, A/B 2026-11-17), and on pages built
+    # from web components it is the difference between seeing the page and not (the Polymer shop: a stall without it,
+    # a pass with it; MDN: 0/5 without, 5/5 with). False: the document's own tree only, the 0.5 behaviour.
+    "observation": {"max_elements": 200, "max_text_chars": 2000, "screenshots": "key", "frames": [], "shadow_dom": True},  # lever F5: was 4000
 }
 
 
@@ -634,7 +637,7 @@ def main(argv: list[str]) -> int:
     print(f"  data keys: {list(spec['data'])}  secrets: {spec['secrets']}")
     if spec["files"]:
         print(f"  files: {list(spec['files'])}" + "".join(f"\n    warning: {k}: no such file from here: {v}" for k, v in spec["files"].items() if not os.path.isfile(v)))
-    if spec["extra_operations"] or spec["observation"]["shadow_dom"]:
+    if spec["extra_operations"] or not spec["observation"]["shadow_dom"]:
         print(f"  extra operations: {spec['extra_operations']}  shadow_dom: {spec['observation']['shadow_dom']}")
     if spec.get("run_stamp"):
         print(f"  run stamp: {spec['run_stamp']} (this validation's example; every run makes its own ${{RUN_STAMP}}, export RUN_STAMP to pin one)")

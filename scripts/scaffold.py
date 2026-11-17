@@ -229,8 +229,8 @@ def build(args: argparse.Namespace) -> dict:
         spec["files"] = parse_data(args.file)
     if args.hover:
         spec["extra_operations"] = ["HOVER"]
-    if args.shadow_dom:
-        spec.setdefault("observation", {})["shadow_dom"] = True
+    if args.no_shadow_dom:
+        spec.setdefault("observation", {})["shadow_dom"] = False  # the default is on (0.6.0); only "off" is worth writing
     if args.frame:
         spec.setdefault("observation", {})["frames"] = [f.strip() for f in args.frame]
     if args.device:
@@ -288,7 +288,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--file", action="append", default=[], metavar="KEY=PATH",
                     help="a file Jev may attach to a file field, by name (files; repeatable): offers UPLOAD_FILE")
     ap.add_argument("--hover", action="store_true", help="offer the HOVER operation, for a menu that only opens on hover (extra_operations)")
-    ap.add_argument("--shadow-dom", action="store_true", help="observe inside open shadow roots: web components (observation.shadow_dom)")
+    ap.add_argument("--shadow-dom", action="store_true", help="observe inside open shadow roots: the default since 0.6.0, kept so older commands still work")
+    ap.add_argument("--no-shadow-dom", action="store_true", help="observe the document's own tree only (observation.shadow_dom false)")
     ap.add_argument("--device", help="emulate a Playwright device, e.g. 'iPhone 13' (browser.device)")
     ap.add_argument("--follow-new-tabs", action="store_true", help="carry on in a tab the flow opens (browser.follow_new_tabs)")
     ap.add_argument("--notes", help="hints Jev reads every step, about the page and the flow")

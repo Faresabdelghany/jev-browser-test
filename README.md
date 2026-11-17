@@ -90,7 +90,7 @@ A spec can also declare, each in a line or two ([`references/spec-format.md`](re
 | `teardown` | scripted steps after the verdict, whatever it was: delete what the run created |
 | `setup` steps `upload`, `hover`, `drag`, `"frame"` | interactions scripted as preconditions; selectors reach into shadow DOM |
 | `observation.frames` | iframes whose controls Jev may use: a card form, an embedded widget |
-| `observation.shadow_dom` | Jev sees and uses the controls inside web components |
+| `observation.shadow_dom` | on by default: Jev sees and uses the controls inside web components (`false` turns it off) |
 | `files` | files Jev may attach to a file field, hidden ones included |
 | `extra_operations: ["HOVER"]` | Jev may hover to open a menu that only shows on hover |
 | `browser.device` | a phone or tablet: `"iPhone 13"`, `"Pixel 7"` (also `--device`) |

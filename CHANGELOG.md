@@ -3,6 +3,43 @@
 Notable changes to the jev-browser-test skill. Versions follow [semantic versioning](https://semver.org); the version
 is the one in `.claude-plugin/plugin.json`, and merging a new one to `main` tags and releases it.
 
+## [0.6.0] - 2026-11-17
+
+The defaults for 0.5.0's three Jev-driven options, decided from live A/B runs (the protocol and every number are on
+the `dev-docs` branch, `docs/superpowers/measurements/2026-11-17-*`), and two defects the live runs of HOVER and
+UPLOAD_FILE found.
+
+### Changed
+- **`observation.shadow_dom` is on by default** (`false` or `--no-shadow-dom` for the way back; `scaffold.py
+  --no-shadow-dom`). The 22 example specs x 3, interleaved: no example page has a shadow root, the two arms' first
+  observations are identical wherever the host was stable, nothing moved in every run. Where it matters it decides
+  the run: the Polymer shop (controls in nested shadow roots) stalls without it and passes with it; on MDN, whose
+  content sits in web components, a light-DOM flow passed 0/5 without and 5/5 with, confidence 0.53 / 0.56. Cost:
+  ~12 ms more per observation on a page with 121 shadow hosts. The equivalence 0.5.0 claimed ("a spec that does not
+  ask is sent what 0.4.0 sent") now holds for pages without open shadow roots only.
+
+### Fixed
+- **HOVER waits for a menu that opens after a delay.** jQuery UI opens a submenu 300 ms after the pointer arrives;
+  the settle went quiet at ~110 ms, every hover was flagged `NO-EFFECT` and Jev was told it changed nothing. A hover
+  now waits up to 800 ms for the page to change (`executed.reveal`). Live after: HOVER, CLICK, pass, 5/5.
+- **An undecided streak does not end the run on a page that moved while Jev decided.** Live, 0.6.0 suite:
+  `dynamic-controls`' loader ended in the ~0.3 s between the third undecided observation and the loading-indicator
+  check; the check found nothing, the limit fell from five looks to three, and the run ended `low_confidence` on a
+  finished page. Before stopping, the runner now re-reads the page; if it changed, the count starts again
+  (`step.moved_while_deciding`). Selftest G2.
+- **Uploads: a drag-and-drop library's orphan file input is not offered beside a real file field.** On
+  the-internet's /upload both inputs read `file "file"`, the orphan sorted first and Jev chose it (an empty form,
+  500). A boxless file input with no label, no form and no rendered owner is now offered only when the page has no
+  other file field, then marked `not in a form or a label`. Live after: 'File Uploaded!'.
+
+### Measured and kept
+- **HOVER stays opt-in.** On the 22 examples x 5 Jev never chose it (top probability 0.10), no ending moved, no
+  confidence fell, and it cost **+14.6% input tokens** on every step (the `hover_target` question). A spec with a
+  hover-only menu turns it on with one line.
+- **`evidence` stays `"always"`.** `"failures"` saved 10.5% of requests (one per pass) and 7.4% of tokens, no
+  measurable wall-clock (host noise is larger), and costs the quoted line on every pass. Use it on green-most-days
+  suites.
+
 ## [0.5.1] - 2026-11-17
 
 The first runs of 0.3.0 to 0.5.0 against the live Jev API (the smoke specs, the 22 examples x 3, `dynamic-controls`
