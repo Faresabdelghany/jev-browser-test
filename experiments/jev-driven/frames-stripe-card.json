@@ -1,0 +1,41 @@
+{
+  "id": "exp-frames-stripe-card",
+  "comment": "Probe for 0.4.0's observation.frames on a real cross-origin iframe (js.stripe.com inside stripe-payments-demo.appspot.com). Written 2026-11-17 after a Playwright probe of the observer (the frame is 323 x 18 px; below 0.5.1 it was skipped as too small). The pass wording is a draft until a run has been read. Run once at 0.5.1 (2026-11-17): Jev typed the number, the expiry and the CVC into the three inputs of the cross-origin frame at 0.75-1.00, each named by its own aria-label; the pay step cannot complete because the demo's own backend answers 500 to POST /payment_intents on every call (its Stripe account no longer enables the 'wechat' payment method, checked with plain Playwright), so Pay is NO-EFFECT and the run ends budget_exhausted. An invisible captcha frame counted as a blank layer (COVERED:1, layer 0) deferred marginal clicks on Pay five times per page: noted, not changed.",
+  "start_url": "https://stripe-payments-demo.appspot.com/",
+  "goal": "Fill in the shipping details with the given values, type the given test card number, expiry date and CVC into the card field, and click Pay, so that the page confirms the payment.",
+  "notes": "The card field is one line holding three parts: the card number, then the expiry date (MM / YY), then the CVC; type each value into its own part. It is a test-mode demo: the card number is Stripe's published test card.",
+  "data": {
+    "name": "Jev Tester",
+    "email": "jev.test@example.com",
+    "address": "185 Berry Street",
+    "city": "San Francisco",
+    "state": "CA",
+    "zip": "94107",
+    "card_number": "4242 4242 4242 4242",
+    "card_expiry": "12 / 30",
+    "card_cvc": "123"
+  },
+  "outcomes": {
+    "goal_reached": {
+      "when": "The page says the payment succeeded or thanks the customer for the order",
+      "verdict": "pass"
+    },
+    "card_declined": {
+      "when": "A message says the card was declined, is invalid or incomplete",
+      "verdict": "bug",
+      "requires_action": true,
+      "after": {
+        "click": "Pay"
+      }
+    },
+    "app_error": {
+      "when": "An error page, a stack trace or 'something went wrong' text is shown",
+      "verdict": "bug"
+    }
+  },
+  "observation": {
+    "frames": [
+      "iframe[title=\"Secure card payment input frame\"]"
+    ]
+  }
+}

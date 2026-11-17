@@ -1,0 +1,61 @@
+{
+  "expectations": [
+    {
+      "text": "Verdict is BUG (product defect): the Finish button on Checkout: Overview does nothing",
+      "passed": false,
+      "evidence": "Verdict: TEST_ISSUE ('not a product bug'): the overnight spec lacked the example's expect block"
+    },
+    {
+      "text": "Evidence cites the divergence: the step-8 click on button 'Finish' (target confidence 0.99) followed by BLOCKED at step 9 with no page change",
+      "passed": true,
+      "evidence": "Step 8 CLICK [3] Finish (op 0.62, target 0.99) NO-EFFECT, signature unchanged; step 9 BLOCKED"
+    },
+    {
+      "text": "Evidence cites the run's own reason fields: status blocked, stuck_reason control_had_no_effect, suggested verdict bug",
+      "passed": true,
+      "evidence": "undetermined, status blocked, stuck_reason control_had_no_effect, suggested verdict bug"
+    },
+    {
+      "text": "The report references a screenshot from the run folder (steps/009.png or steps/final.png) as evidence",
+      "passed": true,
+      "evidence": "steps/009.png and steps/final.png cited"
+    },
+    {
+      "text": "The report states expected vs actual: the 'Checkout: Complete!' / 'Thank you for your order!' page was expected, the run stayed on checkout-step-two.html",
+      "passed": true,
+      "evidence": "goal 'Thank you for your order!'; URL stays checkout-step-two.html"
+    },
+    {
+      "text": "The result was read before anything was rerun, and at most one rerun and one control run were made (the report says how many browser runs it made, if any)",
+      "passed": true,
+      "evidence": "evidence read first; 1 rerun (spec fixed, --screenshots all) + 1 control; '2 browser runs' stated"
+    },
+    {
+      "text": "The report answers 'is it flaky?' from the trace's own signals (no stale steps, no failed actions, no retries or reconnects, a deterministic typed reason) rather than from repetition alone",
+      "passed": true,
+      "evidence": "no stale steps, executed.ok everywhere, reconnects 0, settles quiet"
+    },
+    {
+      "text": "The report explicitly rules out a test problem: the earlier steps (add to cart, cart, form filled, Continue) succeeded with high confidence, so the test's actions were reasonable",
+      "passed": false,
+      "evidence": "says Jev followed the flow correctly but classifies the red as a test problem (missing expect) instead of ruling one out"
+    },
+    {
+      "text": "The report notes that the spec's own notes already describe error_user as an account whose Finish button is expected not to work (a known, expected failure) and says how that affects the ticket",
+      "passed": true,
+      "evidence": "quotes the notes 'documented as broken: the finish button is expected not to work' and turns the ticket into a test-suite ticket"
+    },
+    {
+      "text": "The report does not fetch or cite the application's source code; the verdict rests on the run folder",
+      "passed": true,
+      "evidence": "no application source fetched"
+    }
+  ],
+  "summary": {
+    "passed": 8,
+    "failed": 2,
+    "total": 10,
+    "pass_rate": 0.8
+  },
+  "notes": "The September skill (28a5506, old_skill arm) gives the same verdict: this follows the b14d587 triage instruction (compare trace.spec with the example: a missing expect means the fix is in the spec), not the 0.3-0.5 rewording."
+}

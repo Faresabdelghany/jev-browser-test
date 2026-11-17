@@ -924,3 +924,112 @@ missing). Switched back on through Admin > Configuration > Modules (the demo's d
 (`2026-09-24-examples-suite-152a7f5-hrm-two.*`, 1 worker, 170 s): **`hrm-admin-add-user` 3/3** (26.8 s, 18 requests),
 **`hrm-leave-assign` 3/3** (28.5 s, 23 requests). So at `152a7f5` every OrangeHRM flow passes, 15/15 across the two
 suites once the environment was put back.
+
+## First live runs of 0.3.0–0.6.0 (2026-11-17): `8847bbb` → `9b43ae7` / `839d2f5` (0.5.1) → `fdbc6ca` / `e805067` (0.6.0)
+
+0.3.0, 0.4.0 and 0.5.0 were merged on offline evidence only; this is their first contact with the live Jev API. The
+model is **`jev-1.14.0`** (September's files say `jev-1.13.0`), so a difference from September can be the model's as
+well as the runner's or the site's. Every run's `result.json` records the model. Environment of this machine: the
+python.org interpreter has no CA bundle (`SSL_CERT_FILE=/etc/ssl/cert.pem` in `.env`), and its DNS blocks
+`*.log.optimizely.com`, so every the-internet run carries `REQ-FAILED` flags for that beacon (noise, never in Jev's
+state; it does break a spec that asserts `no_failed_requests` there).
+
+**Examples suite at `8847bbb` (= main at 0.5.0)** (`2026-11-17-examples-suite-8847bbb{,-hrm}.*`, 3 repeats; 17 specs on
+2 workers in 131 s, the five hrm specs on 1 worker in 366 s, the demo at 0.4–0.6 s a page). Verdicts against September
+(`2026-09-24-regression-1b69699-examples`, `-0ce1c20-hrm`), each moved one read from its traces:
+
+| spec | September | 8847bbb | cause | done |
+|---|---|---|---|---|
+| `dynamic-controls` | pass | undetermined 3/3 (`done_unverified`) | **site**: the redesigned page has one message line; 'It's enabled!' replaces 'It's gone!' (probed with plain Playwright), so the two-message pass can never be true. The flow was identical in all three runs | pass reworded on the finished page, removal asserted by the checkbox's absence and the Add caption (`9b43ae7`) |
+| `forgot-password` | expected (server_error) | pass 3/3 | **site**: the demo's mailer works now (`/email_sent`) | `expect` removed |
+| `modal-close` | pass, 4 requests | pass, 2 requests, 0 actions | **spec + timing**: the modal shows a moment after load; the first look saw no modal and the assertion confirmed the pass at once | `after: {click: Close}`: 4 requests again |
+| `add-remove-elements` | pass, 5 requests | pass, 3 requests | **spec + model**: one Add already leaves one Delete; Jev stopped there | `after: {click: Delete}`: 5 requests again |
+| `hrm-leave-assign` | pass | undetermined 3/3 | **spec**: the leave date 2026-14-10 had passed; past leave is Taken, the Scheduled filter finds nothing | 2026-16-12 |
+| `hrm-add-employee` | pass 3/3 | 2 pass, 1 `employee_id_taken` | **site**: the declared Id race, with the public demo's other visitors (nothing else of ours on the host) | none |
+
+**Runner regression: none.** The September runner (`28a5506`, `2026-11-17-control-28a5506-modal-addremove.*`) run
+today on the two shortcut specs gives the same steps, requests and tokens as 0.5.0. After the spec fixes
+(`2026-11-17-fixed-specs-9b43ae7{,-hrm}.*`): forgot-password, modal-close, add-remove 3/3, hrm-leave-assign 3/3,
+hrm-add-employee 2/3 (one `low_confidence` on the first field, 0.35–0.47 three times on a loaded form: Jev's reading;
+nothing 0.3–0.5 changed is asked of this spec).
+
+**`dynamic-controls` ×5** (`2026-11-17-dynamic-controls-x5-9b43ae7.*`): 5/5. The 0.4.0 loading-indicator rule fired in
+every run (`LOADING-IND:1` on each undecided look), one run on three undecided looks in a row, which ended
+`low_confidence` before the rule. At `fdbc6ca` one run of three still ended `low_confidence`: the loader finished in the
+~0.3 s between the observation and the indicator check (which runs after Jev's answer), the check found nothing, and
+the limit fell back to three. Fixed in `e805067` (re-read the page before an undecided streak ends the run); ×5 after
+(`2026-11-17-dynamic-controls-x5-e805067.*`): 5/5, the race occurred in two runs (`moved_while_deciding`).
+
+### The A/B protocol (`plans/2026-11-16-ab-protocol-jev-driven.md`)
+
+Arms interleaved by `ab.py`, one at a time per host; hrm specs in a process of their own. Commit `9b43ae7` (runner =
+0.5.0) for the 22 examples; `839d2f5` / `16f9176` for the probes.
+
+**Shadow DOM** (`2026-11-17-ab-shadow-{nonhrm,hrm}.*`, ×3): arm A recorded no `shadow_hosts` on any of the 22 specs, and
+the two arms' first observations are field-for-field identical on 19 of them; the other three differ symmetrically
+(OrangeHRM's dashboard widgets rendering, Wikipedia's appearance panel appearing in some sessions in either arm). No
+spec moved in every run; three hrm specs moved in some (the Id race, the first-field reading above, and
+`hrm-leave-assign` a01, whose arm A ran on the superseded spec during a branch switch: rerun ×3,
+`2026-11-17-ab-shadow-rerun-leave.*`, nothing moved; `modal-close`'s six runs were on its old spec too, rerun
+`-shadow-rerun-modal.*`, nothing moved). Where it matters: the Polymer shop (`experiments/jev-driven/
+shadow-polymer-shop.json`) passes with it (8 requests; Size select M → L, Add to cart) and stalls without it (an empty
+table, `low_confidence`, the hint names the option); on MDN, whose page content sits in web components, a light-DOM
+flow (`shadow-mdn-chrome.json`, `-ab-shadow-mdn.*`, ×5) was **0/5 without and 5/5 with**, confidence 0.53 / 0.56, 6 / 5
+requests, although the option adds 23 chrome controls there (many unnamed). Cost: 19 → 31 ms an observation on MDN
+(121 shadow hosts), nothing measurable on pages without. **Default flipped to on (`74b4a58`).**
+
+**Hover** (`-ab-hover-{nonhrm,hrm}.*`, ×5): HOVER offered on 776 steps (455 non-hrm, 321 hrm), chosen on none (highest probability 0.10); no
+spec moved in every run, no median confidence fell by more than 0.02; the some-run moves are the two random specs and
+`table-sort-due`'s `low_confidence` / `blocked` (both undetermined, both its expected result; ×10 alone,
+`-ab-hover-table-sort-x10.*`: 10/10 vs 9 + 1). Cost: **+14.6% input tokens** (non-hrm) and +15.2% (hrm) for the
+`hover_target` question on every step; requests and latency unchanged. The one spec that needs it
+(`experiments/jev-driven/hover-menu.json`, ×5, `-ab-hover-menu-16f9176.*`): 5/5 with (HOVER, CLICK, pass; 0.70, 4
+requests) and 4/5 without (the menu also opens on a click; 0.50, 5 requests). **Kept opt-in**: safe, not free, and the
+benefit is one line away for the specs that need it. Two defects found on the way, both fixed in 0.6.0: 0.5.0's HOVER
+did not wait for jQuery UI's 300 ms menu delay (every hover flagged NO-EFFECT; `16f9176`), and the experiment's first
+pass statement was true of the start page (the draft's own warning; reworded, with `after`).
+
+**Evidence `"failures"`** (`-ab-evidence-{nonhrm,hrm}.*`, ×3, the two random specs left out): 564 → 505 requests
+(**−10.5%**, one per pass), 2.03 M → 1.88 M input tokens (−7.4%), wall-clock 551 / 556 s (the host's noise is larger than
+the ~210 ms of Jev time saved per pass). `menu-random` and `notify-random` "moved in every run": each run's outcome
+matches what its page showed (four vs five menu entries, success vs failure), and a 12-load probe shows both pages random,
+not alternating; the option acts after the outcome is read, so this is chance. The three confidence warnings fall on
+steps whose requests are identical in both arms. **Kept `"always"`**: the saving is real, the cost is the quoted line
+on every pass, which reports and tickets use.
+
+**Uploads** (`experiments/jev-driven/upload-file.json`): at 0.5.1 Jev chose dropzone's hidden input (`file "file"
+(hidden file field)`, sorted first at 0,0) over the form's field (also `file "file"`) at 0.99 → Upload with the field
+empty → 500 (`server_error`, the test issue the draft foresaw). Fixed in `8fb6478` (an orphan input is offered only when
+the page has no other file field); after: UPLOAD_FILE into the form's field, 'File Uploaded!', 4 requests.
+
+**Frames** (`experiments/jev-driven/frames-stripe-card.json`): the Stripe payments demo's card element is a cross-origin
+iframe 323 × 18 px, under 0.4.0's 40 × 20 floor, so `observation.frames` contributed nothing. Fixed in `a8b0fbc`
+(0.5.1); after: Jev typed number, expiry and CVC into the frame at 0.75–1.00. The pay step cannot complete there: the
+demo's backend answers 500 to every `POST /payment_intents` (its account no longer enables 'wechat'), so the run ends
+`budget_exhausted` with Pay NO-EFFECT. An invisible captcha frame there reads as a blank layer (`COVERED:1`, layer 0)
+and deferred marginal clicks on Pay five times a page: noted, not changed.
+
+**Examples suite at `fdbc6ca` (0.6.0, shadow DOM on)** (`2026-11-17-examples-suite-fdbc6ca.*`, 17 non-hrm ×3, 1 worker,
+261 s): every verdict as expected (the random specs happened to land 3/3 each), `dynamic-controls` 2/3, the race above.
+
+**The five OrangeHRM specs at `e805067` (0.6.0, merged as `b6dc583`)** (`2026-11-17-examples-suite-e805067-hrm.*`, ×3,
+1 worker, 414 s): login, leave, pim-list 3/3; add-employee 2/3 (one `low_confidence` after Save, the app's toast 'Error
+Invalid Parameter', `site_refused_or_error`: the demo's server) and admin 2/3 (three undecided looks at the Status
+dropdown). OrangeHRM pages have no shadow roots, so 0.6.0's default observes them as 0.5 did; the same two stalls
+occurred at 0.5.1 today (`hrm-add-employee` over the whole day: 48 passes, 4 `low_confidence`, 1 Id race).
+
+### Skill evals, iteration 4 (`2026-11-17-skill-eval-iteration-4/`; workspace `~/Studio/jev-browser-test-workspace/iteration-4/`)
+
+With-skill arm on ids 0–5 at `839d2f5` (SKILL.md as of 0.5.0/0.5.1), one run each, graded against `evals/evals.json`:
+0 ticket-sort-bug 9/10, 1 triage-dead-finish-button 8/10, 2 flaky-notification 8/8, 3 slow-spa 11/11, 4
+triage-unverified-save 10/11, 5 fix-loop 10/11. **Ids 0–2: 25/28** (iteration 2: 28/28); **ids 3–5: 31/33**
+(iteration 3: 30/33). Eval 1 again with the September skill (`28a5506`, old_skill arm): 8/10, the same verdict
+(TEST_ISSUE: the overnight spec lacks the example's `expect`), so its two misses come from `b14d587`'s triage rule,
+written after iteration 2, not from the 0.3.0 rewording; the eval expects BUG with an expected-red note. Eval 0's miss
+is the published demo password printed in the ticket block (SKILL.md allows it, unchanged since September). Browser
+runs per eval 3 / 2 / 15 / 4 / 2 / 3 (eval 2: 5 runs of the check as written, 10 of its replacement, 5 of those wasted
+on a `no_failed_requests` assertion against the DNS-blocked beacon). Mean 104k tokens a run.
+
+### Cost of the day
+
+756 runner runs (714 under `runs/`, 42 by the eval agents), **6,344 Jev requests**, 22.9 M input tokens.

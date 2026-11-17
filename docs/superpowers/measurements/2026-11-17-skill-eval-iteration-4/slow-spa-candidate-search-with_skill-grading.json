@@ -1,0 +1,66 @@
+{
+  "expectations": [
+    {
+      "text": "Verdict is PASS: the report says the candidate added under Recruitment was found as exactly one record in the Candidates list",
+      "passed": true,
+      "evidence": "'Verdict: PASS ... exactly one record'"
+    },
+    {
+      "text": "The evidence quotes the page's own line for the pass (a '(1) Record Found' line or the candidate's row), taken from result.json's evidence.line, not only a paraphrase",
+      "passed": true,
+      "evidence": "evidence.line '(1) Record Found' from run3/result.json, quoted"
+    },
+    {
+      "text": "A rerunnable spec is left in outputs and is goal-level: the goal and notes describe what a tester would do, and CSS or XPath selectors appear only in the scripted setup and in the code assertions on the final page",
+      "passed": true,
+      "evidence": "goal-level spec; selectors only in setup (login) and assert (.oxd-table-body); teardown selectors after the verdict"
+    },
+    {
+      "text": "The login is scripted in setup (Admin / admin123 only in setup steps) and never delegated to Jev",
+      "passed": true,
+      "evidence": "setup fills Admin / admin123; never in data"
+    },
+    {
+      "text": "The candidate's name uses ${RUN_STAMP} or another per-run value so a rerun cannot find the previous run's candidate, and the report says so",
+      "passed": true,
+      "evidence": "last name Runner${RUN_STAMP}, e-mail jevtest.${RUN_STAMP}@...; the report's 'Why it can be rerun' section; teardown deletes the run's candidate"
+    },
+    {
+      "text": "The spec declares a bug outcome for an empty result ('No Records Found') guarded with requires_action or after, and a pass outcome worded on the page's own text",
+      "passed": true,
+      "evidence": "no_records bug outcome with requires_action and after: click Search; pass on '(1) Record Found'"
+    },
+    {
+      "text": "The spec accounts for the slow single-page app: the --slow preset or raised settle_ms / navigation_timeout_ms, and notes about the spinners and the type-ahead's loading placeholder ('Searching....')",
+      "passed": true,
+      "evidence": "settle_ms 2500, quiet_ms 200, navigation_timeout_ms 45000, 32 steps / 420 s (the --slow preset); notes on spinners and the 'Searching....' row"
+    },
+    {
+      "text": "The flow really ran: a run folder (result.json, trace.json, screenshots) in outputs shows Recruitment, Add, Save, Candidates and Search, and the pass was confirmed (confirmed_by set)",
+      "passed": true,
+      "evidence": "run3/run4 folders: Recruitment, Add, Save, Candidates, type-ahead, Search; confirmed_by assertions"
+    },
+    {
+      "text": "The answer took at most 6 browser runs in total and the report states the count, the Jev request count and the seconds",
+      "passed": true,
+      "evidence": "4 browser runs; per-run Jev requests and seconds in the results table"
+    },
+    {
+      "text": "The report gives the exact command to rerun the spec",
+      "passed": true,
+      "evidence": "exact run_test.py command with paths"
+    },
+    {
+      "text": "The TypeSafe API key value does not appear in any output file",
+      "passed": true,
+      "evidence": "grep of outputs for the key value: 0 files"
+    }
+  ],
+  "summary": {
+    "passed": 11,
+    "failed": 0,
+    "total": 11,
+    "pass_rate": 1.0
+  },
+  "notes": "Run 2 found the type-ahead matching nothing for the full name with one space (the suggestion reads 'Jevtest  Runner\u2026', two spaces): iteration 3's finding, seen again; the spec types the last name instead."
+}

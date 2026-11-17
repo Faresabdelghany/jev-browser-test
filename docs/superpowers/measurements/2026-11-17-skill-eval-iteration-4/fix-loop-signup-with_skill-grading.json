@@ -1,0 +1,66 @@
+{
+  "expectations": [
+    {
+      "text": "The first run's verdict is BUG: with valid details the page shows the red 'Enter a valid work e-mail address.' message instead of the confirmation, quoted from the page",
+      "passed": true,
+      "evidence": "run 1: 'Enter a valid work e-mail address.' quoted"
+    },
+    {
+      "text": "The cause is identified in the page's code: the e-mail rule in app.js is inverted (it fails when the e-mail is valid), and the fix is the correction of that rule, not a removal of the validation",
+      "passed": true,
+      "evidence": "rules() e-mail rule inverted; fix '!EMAIL.test(email)', validation kept"
+    },
+    {
+      "text": "After the fix an e-mail without '@' is still rejected (the report or a run shows the validation still works), so the fix did not disable the check",
+      "passed": true,
+      "evidence": "run 3: signup-invalid-email still rejected"
+    },
+    {
+      "text": "The same spec (same id, goal, outcomes and assertions) was rerun after the fix and returned PASS, with the green welcome message quoted ('Welcome, <first name>! We sent a confirmation link to ...')",
+      "passed": true,
+      "evidence": "same spec signup-valid-details rerun: PASS, 'Welcome, Jevtest! We sent a confirmation link to ...' quoted"
+    },
+    {
+      "text": "Both runs' artifacts (result.json and trace.json of the red run and of the green run) and the spec are saved in outputs, and the report names which folder is which",
+      "passed": true,
+      "evidence": "outputs/runs/<spec>/<stamp> for red, green and invalid; the report names each folder"
+    },
+    {
+      "text": "The spec is goal-level: the flow is described as a tester would (fill the fields, tick the terms box, click Create account); CSS or XPath selectors appear only in code assertions on the final page, if at all",
+      "passed": true,
+      "evidence": "goal-level spec; one selector, in text_in on the final page"
+    },
+    {
+      "text": "The password value is masked through secrets (listed, or a credential-like key the scaffold masked) and appears in no report text",
+      "passed": true,
+      "evidence": "secrets: [password]; the value is in no report or run file (grep)"
+    },
+    {
+      "text": "The report follows the rubric's template: verdict, flow, runs made / Jev requests / seconds, the story, the evidence (step, action, confidence, quoted line, screenshot), what was expected, the next step",
+      "passed": false,
+      "evidence": "report has runs/requests/seconds, a story and screenshots, but no confidences in the evidence and no explicit Verdict/Expected lines of the rubric template"
+    },
+    {
+      "text": "The spec was not loosened to get green: the pass outcome after the fix is still the welcome message and the bug outcome for the e-mail error is kept",
+      "passed": true,
+      "evidence": "pass outcome and email_rejected bug outcome unchanged"
+    },
+    {
+      "text": "At most 6 browser runs were made in total, the report states the count, and the exact change to app.js (a diff or the before/after line) is given",
+      "passed": true,
+      "evidence": "3 browser runs stated; the diff of app.js line 22 given"
+    },
+    {
+      "text": "The TypeSafe API key value does not appear in any output file",
+      "passed": true,
+      "evidence": "grep of outputs for the key value: 0 files"
+    }
+  ],
+  "summary": {
+    "passed": 10,
+    "failed": 1,
+    "total": 11,
+    "pass_rate": 0.909
+  },
+  "notes": ""
+}

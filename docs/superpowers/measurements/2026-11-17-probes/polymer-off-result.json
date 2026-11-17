@@ -1,0 +1,43 @@
+{
+  "spec_id": "exp-shadow-polymer-shop-off",
+  "outcome": "undetermined",
+  "verdict": null,
+  "note": null,
+  "probability": null,
+  "confidence": null,
+  "seen_at_step": null,
+  "first_seen_at_step": null,
+  "confirmed": false,
+  "confirmed_by": null,
+  "path_confidence": 0.51,
+  "reason": {
+    "status": "low_confidence",
+    "blocked_reason": "control_not_on_page",
+    "stuck_reason": null,
+    "suggested_verdict": "bug"
+  },
+  "evidence": {
+    "line": null,
+    "present": null,
+    "screenshot": "steps/final.png",
+    "checks": {}
+  },
+  "assertions": [],
+  "outcomes_seen_earlier": [],
+  "announcements": [],
+  "story": [
+    "2 SCROLL_DOWN",
+    "3 SCROLL_DOWN"
+  ],
+  "run_stamp": null,
+  "status": "low_confidence",
+  "duration_ms": 5695,
+  "usage": {
+    "jev_requests": 7,
+    "input_tokens": 6128,
+    "output_tokens": 821,
+    "model": "jev-1.14.0",
+    "reconnects": 0
+  },
+  "trace": "runs/probe/polymer-off/trace.json"
+}

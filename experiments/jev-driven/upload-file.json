@@ -1,17 +1,33 @@
 {
   "id": "exp-upload-file",
-  "comment": "Experiment for 0.5.0 (files / UPLOAD_FILE), written without access to the site: probe before trusting the outcomes. Run from the directory that holds experiments/ (the dev-docs worktree), so the file path resolves. Known trap on this page: besides the form's own file field there is a drag-and-drop area whose library adds a second, hidden file input to the page; a file put there is shown in the drop area but is not what the Upload button submits, and Upload with the form's field empty answers 500.",
+  "comment": "Experiment for 0.5.0 (files / UPLOAD_FILE), written without access to the site: probe before trusting the outcomes. Run from the directory that holds experiments/ (the dev-docs worktree), so the file path resolves. Known trap on this page: besides the form's own file field there is a drag-and-drop area whose library adds a second, hidden file input to the page; a file put there is shown in the drop area but is not what the Upload button submits, and Upload with the form's field empty answers 500. Run 2026-11-17: at 0.5.1 Jev chose the dropzone's hidden input (both read file \"file\", the orphan sorted first at 0,0) at 0.99, Upload went with the form's field empty and the run ended server_error, as foreseen; with 0.6.0's orphan rule (8fb6478) the hidden input is not offered beside the form's field, and the run passes: UPLOAD_FILE into the form's field, CLICK Upload, 'File Uploaded!', 4 requests.",
   "start_url": "https://the-internet.herokuapp.com/upload",
   "goal": "Attach the sample file to the form's file field and click Upload, so that the page says 'File Uploaded!' and names the file.",
   "notes": "Use the file field of the form beside the Upload button, not the drag-and-drop area below it.",
-  "files": { "sample": "experiments/jev-driven/sample.txt" },
+  "files": {
+    "sample": "experiments/jev-driven/sample.txt"
+  },
   "outcomes": {
-    "uploaded": { "when": "The page heading says 'File Uploaded!'. The file name 'sample.txt' is shown below the heading.", "verdict": "pass" },
-    "server_error": { "when": "The page says 'Internal Server Error'", "verdict": "test_issue", "requires_action": true,
-                      "note": "Upload was clicked with the form's file field empty: the file went to the drag-and-drop input, or nowhere." }
+    "uploaded": {
+      "when": "The page heading says 'File Uploaded!'. The file name 'sample.txt' is shown below the heading.",
+      "verdict": "pass"
+    },
+    "server_error": {
+      "when": "The page says 'Internal Server Error'",
+      "verdict": "test_issue",
+      "requires_action": true,
+      "note": "Upload was clicked with the form's file field empty: the file went to the drag-and-drop input, or nowhere."
+    }
   },
   "assert": [
-    { "text_in": { "selector": "#uploaded-files", "contains": "sample.txt" } },
-    { "no_page_errors": true }
+    {
+      "text_in": {
+        "selector": "#uploaded-files",
+        "contains": "sample.txt"
+      }
+    },
+    {
+      "no_page_errors": true
+    }
   ]
 }

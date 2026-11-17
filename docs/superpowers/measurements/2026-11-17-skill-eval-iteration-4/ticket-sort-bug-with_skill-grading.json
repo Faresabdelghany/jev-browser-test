@@ -1,0 +1,61 @@
+{
+  "expectations": [
+    {
+      "text": "Verdict is BUG: the report says the reported sort defect is real for problem_user",
+      "passed": true,
+      "evidence": "Verdict: BUG. It reproduces. For problem_user ... the list stays in name order"
+    },
+    {
+      "text": "Evidence names the actual first item after sorting (Sauce Labs Backpack, $29.99) and the expected one (Sauce Labs Onesie, $7.99)",
+      "passed": true,
+      "evidence": "Actual 'Sauce Labs Backpack $29.99' first; expected 'Sauce Labs Onesie' $7.99"
+    },
+    {
+      "text": "A screenshot of the list after choosing Price (low to high) is saved in outputs and referenced by the report",
+      "passed": true,
+      "evidence": "runs/.../20261117-114705/steps/002.png referenced as 'After choosing Price (low to high)'"
+    },
+    {
+      "text": "The flow really ran in a browser as problem_user: a run artifact (trace, log or result file) shows the login and the sort action",
+      "passed": true,
+      "evidence": "trace of runs/sort-price-low-high-problem-user: setup login 4 steps, step 1 SELECT 'Price (low to high)'"
+    },
+    {
+      "text": "A rerunnable regression test is left in outputs as a goal-level spec: it names the goal in plain language and declares the endings it accepts (a pass and a bug outcome with the page's own wording); CSS or XPath selectors drive nothing in the flow and appear only in the scripted login setup and in the code assertions on the final page",
+      "passed": true,
+      "evidence": "spec goal is plain language; outcomes sorted_low_to_high (pass) / not_reordered (bug); selectors only in setup and assert"
+    },
+    {
+      "text": "The regression test's passing condition is the correct order (Onesie / $7.99 first), so it fails today and passes once fixed, and the report gives the exact command to rerun it",
+      "passed": true,
+      "evidence": "pass outcome = Onesie $7.99 first and Bike Light second; rerun command given"
+    },
+    {
+      "text": "The report quotes at least one line of the page's own text as evidence (an evidence line copied verbatim, such as the dropdown's text or the first product's name), not only a paraphrase",
+      "passed": true,
+      "evidence": "evidence line quoted from the page: \"Name (A to Z)\""
+    },
+    {
+      "text": "Login is done deterministically (scripted setup), not delegated to the AI decision step, and the demo password appears nowhere but the setup step",
+      "passed": false,
+      "evidence": "Login is scripted in setup, but the report's ticket block prints 'account: problem_user / secret_sauce'; SKILL.md (unchanged since 28a5506) allows a published demo credential plainly, the assertion does not"
+    },
+    {
+      "text": "The answer was reached with at most 6 browser runs in total (single runs plus every repeat of a suite), and the report states how many runs were made",
+      "passed": true,
+      "evidence": "3 browser runs, stated"
+    },
+    {
+      "text": "The TypeSafe API key value does not appear in any output file",
+      "passed": true,
+      "evidence": "grep of outputs for the key value: 0 files"
+    }
+  ],
+  "summary": {
+    "passed": 9,
+    "failed": 1,
+    "total": 10,
+    "pass_rate": 0.9
+  },
+  "notes": ""
+}

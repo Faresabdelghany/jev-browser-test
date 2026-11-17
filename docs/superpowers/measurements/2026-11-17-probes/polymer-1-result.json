@@ -1,0 +1,57 @@
+{
+  "spec_id": "exp-shadow-polymer-shop",
+  "outcome": "goal_reached",
+  "verdict": "pass",
+  "note": null,
+  "probability": 1.0,
+  "confidence": 1.0,
+  "seen_at_step": 7,
+  "first_seen_at_step": 7,
+  "confirmed": true,
+  "confirmed_by": "assertions",
+  "path_confidence": 0.66,
+  "reason": null,
+  "evidence": {
+    "line": "Added to cart",
+    "present": 1.0,
+    "screenshot": "steps/007.png",
+    "checks": {}
+  },
+  "assertions": [
+    {
+      "text_contains": "Men's Tech Shell Full-Zip",
+      "ok": true,
+      "actual": "  \n            \n          \n        \n        \n      \n    \n\n\n\nMen's Tech Shell Full-Zip\n$50.20\n\n\nAnvil L/S Crew Neck - Grey\n$22.15\n\n\nGreen Flex Fle"
+    },
+    {
+      "element_present": {
+        "role": "button",
+        "name": "Shopping cart: 1 item"
+      },
+      "ok": true,
+      "actual": [
+        "[2] button \"Shopping cart: 1 item\""
+      ]
+    }
+  ],
+  "outcomes_seen_earlier": [],
+  "announcements": [],
+  "story": [
+    "1 CLICK [2] link \"Men's Outerwear Shop Now\" text=\"SHOP NOW\"",
+    "2 SCROLL_DOWN",
+    "3 CLICK [6] clickable \"Men's Tech Shell Full-Zip\"",
+    "5 SELECT [11] select \"Size\" value=\"M\" -> \"L\"",
+    "6 CLICK [13] button \"Add this item to cart\" text=\"ADD TO CART\""
+  ],
+  "run_stamp": null,
+  "status": "passed",
+  "duration_ms": 5000,
+  "usage": {
+    "jev_requests": 8,
+    "input_tokens": 18723,
+    "output_tokens": 2082,
+    "model": "jev-1.14.0",
+    "reconnects": 0
+  },
+  "trace": "runs/probe/polymer-1/trace.json"
+}

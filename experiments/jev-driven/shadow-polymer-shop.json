@@ -1,0 +1,42 @@
+{
+  "id": "exp-shadow-polymer-shop",
+  "comment": "Probe for 0.5.0 observation.shadow_dom on a real page: the Polymer shop keeps every control in nested open shadow roots (without the option the table is empty). Written 2026-11-17 after a Playwright probe of the observer, not from memory.",
+  "start_url": "https://shop.polymer-project.org/",
+  "goal": "Open Men's Outerwear, open the product 'Men's Tech Shell Full-Zip', choose size L and add it to the cart, so that the cart says it holds 1 item.",
+  "outcomes": {
+    "goal_reached": {
+      "when": "A message says the item was added to the cart, or the shopping cart button says it holds 1 item",
+      "verdict": "pass"
+    },
+    "wrong_item": {
+      "when": "The product page or the cart shows a product other than Men's Tech Shell Full-Zip",
+      "verdict": "bug",
+      "requires_action": true,
+      "after": {
+        "click": "Add"
+      }
+    },
+    "app_error": {
+      "when": "An error page, a stack trace or 'something went wrong' text is shown",
+      "verdict": "bug"
+    }
+  },
+  "assert": [
+    {
+      "text_contains": "Men's Tech Shell Full-Zip"
+    },
+    {
+      "element_present": {
+        "role": "button",
+        "name": "Shopping cart: 1 item"
+      }
+    }
+  ],
+  "observation": {
+    "shadow_dom": true
+  },
+  "budget": {
+    "max_steps": 14,
+    "max_seconds": 120
+  }
+}

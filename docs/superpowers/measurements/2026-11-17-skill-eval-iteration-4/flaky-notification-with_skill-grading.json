@@ -1,0 +1,51 @@
+{
+  "expectations": [
+    {
+      "text": "The report concludes the page is random by design (the page itself lists both messages as examples), so a check demanding 'Action successful' cannot be a deterministic smoke check",
+      "passed": true,
+      "evidence": "'picks one of two notifications at random on every click'; the page's copy lists both messages"
+    },
+    {
+      "text": "Both outcomes were observed in the runs and the report names them with the page's own message text ('Action successful' and 'Action unsuccesful, please try again')",
+      "passed": true,
+      "evidence": "'Action successful' and 'Action unsuccesful, please try again' (the page's spelling)"
+    },
+    {
+      "text": "The report gives the numbers: how many runs and how many of each outcome (or an agreement / pass rate)",
+      "passed": true,
+      "evidence": "table: 55 observations 26/29; as-written suite 2 pass / 3 bug, 60% agreement"
+    },
+    {
+      "text": "The conclusion rests on between 3 and 10 browser runs of the check, not on a single run and not on dozens; the report states the count",
+      "passed": true,
+      "evidence": "5 browser runs of the check as written (15 browser runs in all: 10 of the replacement spec, 5 of them wasted on its first revision); graded as iteration 2 graded 11 runs"
+    },
+    {
+      "text": "The report separates the page's designed randomness from any environment failure (a load timeout, a stalled request) instead of folding them into one 'flaky'",
+      "passed": true,
+      "evidence": "'The flake is not environmental': no stale, reconnects, timeouts, page errors, 5xx"
+    },
+    {
+      "text": "The report recommends a concrete change to the check (accept either message with an element-scoped assertion / assert only that a notification appears / quarantine it) rather than rerun-until-green, and warns that a page-wide text check would always pass because the body copy contains both messages",
+      "passed": true,
+      "evidence": "fix: text_in on #flash accepting either message; warns page-wide text_contains always passes; no retries"
+    },
+    {
+      "text": "Per-run artifacts are saved in outputs (suite results or per-run logs) and their counts match the numbers in the report",
+      "passed": true,
+      "evidence": "suite/ and suite-fixed-rev2/ results.json match the counts"
+    },
+    {
+      "text": "The runs were made in a real browser against the live page, not reasoned from the page description alone",
+      "passed": true,
+      "evidence": "15 headless browser runs with Jev against the live page"
+    }
+  ],
+  "summary": {
+    "passed": 8,
+    "failed": 0,
+    "total": 8,
+    "pass_rate": 1.0
+  },
+  "notes": "15 browser runs is above the 3-10 the prompt's 'a handful' suggests; 5 were spent on a replacement spec that asserted no_failed_requests on a page whose analytics beacon is DNS-blocked on this machine."
+}

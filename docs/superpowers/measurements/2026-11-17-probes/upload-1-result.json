@@ -1,0 +1,93 @@
+{
+  "spec_id": "exp-upload-file",
+  "outcome": "server_error",
+  "verdict": "test_issue",
+  "note": "Upload was clicked with the form's file field empty: the file went to the drag-and-drop input, or nowhere.",
+  "probability": 1.0,
+  "confidence": 1.0,
+  "seen_at_step": 3,
+  "first_seen_at_step": 3,
+  "confirmed": false,
+  "confirmed_by": null,
+  "path_confidence": 0.72,
+  "reason": null,
+  "evidence": {
+    "line": "Internal Server Error",
+    "present": 0.97,
+    "screenshot": "steps/003.png",
+    "checks": {}
+  },
+  "assertions": [],
+  "outcomes_seen_earlier": [],
+  "announcements": [],
+  "story": [
+    "1 UPLOAD_FILE [1] file \"file\" (hidden file field) <- file sample",
+    "2 CLICK [3] submit \"Upload\""
+  ],
+  "run_stamp": null,
+  "status": "outcome",
+  "duration_ms": 3331,
+  "usage": {
+    "jev_requests": 4,
+    "input_tokens": 4495,
+    "output_tokens": 583,
+    "model": "jev-1.14.0",
+    "reconnects": 0
+  },
+  "trace": "../runs/probe/upload-1/trace.json",
+  "diagnostics": {
+    "counts": {
+      "page_errors": 0,
+      "console_errors": 0,
+      "failed_requests": 5,
+      "http_errors": 1,
+      "server_errors": 1
+    },
+    "server_errors": [
+      {
+        "status": 500,
+        "method": "POST",
+        "url": "https://the-internet.herokuapp.com/upload",
+        "resource": "document",
+        "step": 3
+      }
+    ],
+    "failed_requests": [
+      {
+        "method": "GET",
+        "url": "https://298279967.log.optimizely.com/event?a=298279967&d=298279967&y=false&n=https%3A%2F%2Fthe-internet.herokuapp.com%2Fupload&u=oeu1794909169568r0.527066491983923&wxhr=true&t=1794909169571&f=29834975",
+        "resource": "xhr",
+        "failure": "net::ERR_NAME_NOT_RESOLVED",
+        "step": 1
+      },
+      {
+        "method": "GET",
+        "url": "https://298279967.log.optimizely.com/event?a=298279967&d=298279967&y=false&n=engagement&g=298283957&u=oeu1794909169568r0.527066491983923&wxhr=true&t=1794909170699&f=298349752,318188263",
+        "resource": "xhr",
+        "failure": "net::ERR_NAME_NOT_RESOLVED",
+        "step": 3
+      },
+      {
+        "method": "GET",
+        "url": "https://298279967.log.optimizely.com/event?a=298279967&d=298279967&y=false&n=https%3A%2F%2Fthe-internet.herokuapp.com%2Fupload&u=oeu1794909169568r0.527066491983923&wxhr=true&t=1794909169571&f=29834975",
+        "resource": "xhr",
+        "failure": "net::ERR_NAME_NOT_RESOLVED",
+        "step": 3
+      },
+      {
+        "method": "GET",
+        "url": "https://298279967.log.optimizely.com/event?a=298279967&d=298279967&y=false&n=https%3A%2F%2Fthe-internet.herokuapp.com%2Fupload&u=oeu1794909169568r0.527066491983923&wxhr=true&t=1794909170868&f=29834975",
+        "resource": "xhr",
+        "failure": "net::ERR_NAME_NOT_RESOLVED",
+        "step": 3
+      },
+      {
+        "method": "GET",
+        "url": "https://298279967.log.optimizely.com/event?a=298279967&d=298279967&y=false&n=engagement&g=298283957&u=oeu1794909169568r0.527066491983923&wxhr=true&t=1794909170699&f=298349752,318188263",
+        "resource": "xhr",
+        "failure": "net::ERR_NAME_NOT_RESOLVED",
+        "step": 3
+      }
+    ]
+  }
+}

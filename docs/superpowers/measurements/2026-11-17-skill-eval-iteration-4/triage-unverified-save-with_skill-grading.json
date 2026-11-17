@@ -1,0 +1,66 @@
+{
+  "expectations": [
+    {
+      "text": "The verdict is not BUG: the report finds no evidence of a product defect in the run",
+      "passed": true,
+      "evidence": "'not a PIM bug'; no failure outcome above 0.01"
+    },
+    {
+      "text": "The report says the employee was saved, citing the 'Successfully Saved' announcement (step 15) and the final URL on the new employee's Personal Details page (viewPersonalDetails/empNumber/...)",
+      "passed": true,
+      "evidence": "'Successfully Saved' at step 15; /pim/viewPersonalDetails/empNumber/339 at step 16"
+    },
+    {
+      "text": "The report explains why no pass was confirmed: the record page was still under a loading layer at the last looks (COVERED / RECHECK flags on steps 13-18) in a slow hour (SLOW-NAV 14.9 s on the first click, 99.5 s for ten actions), so the confirmation window ran out before the name rendered",
+      "passed": true,
+      "evidence": "COVERED:15, RECHECK:1-4 on the record page; SLOW-NAV:14.9s on step 1; 99.5 s for ten actions"
+    },
+    {
+      "text": "The NO-EFFECT flag on the Save click (step 11) is read as the save being in flight (the toast and the record page followed), not as a dead control",
+      "passed": false,
+      "evidence": "the NO-EFFECT flag on Save (step 11) is not mentioned; the report only says the save went through"
+    },
+    {
+      "text": "'Is it flaky?' is answered from the trace's own signals (no STALE steps, no executed.ok false, no retries or reconnects, no error status) and a single run is not called flaky by itself",
+      "passed": true,
+      "evidence": "reconnects 0, no error page, no JS errors or 5xx, SLOW-NAV and the busy record page as the signatures; FLAKY only after the passing rerun"
+    },
+    {
+      "text": "The verdict is TEST_ISSUE, or FLAKY (environment) only after a rerun that passed unchanged, or NEEDS_HUMAN with a specific question; it is not PASS (an undetermined run is not a pass without the confirmation) and not BUG",
+      "passed": true,
+      "evidence": "FLAKY (environment) after one rerun that passed (the current spec, Runner${RUN_STAMP})"
+    },
+    {
+      "text": "The report states expected vs actual: the Personal Details page showing 'Jevtest Runner' was expected; the run reached that page but it was still loading when the run ended",
+      "passed": true,
+      "evidence": "expected the Personal Details page with the name; reached it with the form under a spinner"
+    },
+    {
+      "text": "The report references a screenshot from the run folder (steps/016.png, steps/018.png or steps/final.png)",
+      "passed": true,
+      "evidence": "steps/012.png, steps/018.png = final.png"
+    },
+    {
+      "text": "The result was read before anything was rerun, at most one rerun and one control run were made, and the report says how many browser runs it made",
+      "passed": true,
+      "evidence": "read first; 1 control + 1 rerun; '2 browser runs' stated"
+    },
+    {
+      "text": "The report gives a concrete next step (rerun once in a normal hour, a longer navigation_timeout_ms or settle for the confirmation, the hrm specs on one worker) instead of filing a product bug, and does not cite the application's source code",
+      "passed": true,
+      "evidence": "navigation_timeout_ms 45000 -> ~60000, one worker; no source cited"
+    },
+    {
+      "text": "The TypeSafe API key value does not appear in any output file",
+      "passed": true,
+      "evidence": "grep of outputs for the key value: 0 files"
+    }
+  ],
+  "summary": {
+    "passed": 10,
+    "failed": 1,
+    "total": 11,
+    "pass_rate": 0.909
+  },
+  "notes": "The control run hit the demo's Employee Id race and did not answer the timing question; the rerun did."
+}

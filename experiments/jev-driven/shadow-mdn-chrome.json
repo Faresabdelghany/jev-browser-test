@@ -1,0 +1,21 @@
+{
+  "id": "exp-shadow-mdn-chrome",
+  "comment": "A/B probe for defaulting observation.shadow_dom (2026-11-17): MDN's page chrome (search, theme and language switchers, the sidebar filter, the interactive example, the history buttons) is web components with open shadow roots, about 23 controls, many unnamed; the flow uses only the light-DOM table of contents. Run with ab.py --b-arg=--shadow-dom: does the extra chrome cost the flow anything.",
+  "start_url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/checkbox",
+  "goal": "Use the page's 'In this article' list to jump to the Browser compatibility section, so that the 'Browser compatibility' heading is shown.",
+  "outcomes": {
+    "goal_reached": {
+      "when": "The 'Browser compatibility' section heading is shown on the page, with the compatibility table or its note below it",
+      "verdict": "pass"
+    },
+    "app_error": {
+      "when": "An error page, a stack trace or 'something went wrong' text is shown",
+      "verdict": "bug"
+    }
+  },
+  "assert": [
+    {
+      "url_matches": "**#browser_compatibility"
+    }
+  ]
+}

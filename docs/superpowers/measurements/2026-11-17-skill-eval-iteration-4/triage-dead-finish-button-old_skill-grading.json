@@ -1,0 +1,61 @@
+{
+  "expectations": [
+    {
+      "text": "Verdict is BUG (product defect): the Finish button on Checkout: Overview does nothing",
+      "passed": false,
+      "evidence": "'not a new product bug ... The test is what needs fixing'"
+    },
+    {
+      "text": "Evidence cites the divergence: the step-8 click on button 'Finish' (target confidence 0.99) followed by BLOCKED at step 9 with no page change",
+      "passed": true,
+      "evidence": "table: step 8 CLICK Finish (0.62 / 0.99), same signature; step 9 BLOCKED 0.83"
+    },
+    {
+      "text": "Evidence cites the run's own reason fields: status blocked, stuck_reason control_had_no_effect, suggested verdict bug",
+      "passed": true,
+      "evidence": "status blocked, stuck_reason control_had_no_effect, suggested verdict bug"
+    },
+    {
+      "text": "The report references a screenshot from the run folder (steps/009.png or steps/final.png) as evidence",
+      "passed": true,
+      "evidence": "steps/009.png = steps/final.png"
+    },
+    {
+      "text": "The report states expected vs actual: the 'Checkout: Complete!' / 'Thank you for your order!' page was expected, the run stayed on checkout-step-two.html",
+      "passed": true,
+      "evidence": "expected 'Checkout: Complete!' / 'Thank you for your order!'; still on /checkout-step-two.html"
+    },
+    {
+      "text": "The result was read before anything was rerun, and at most one rerun and one control run were made (the report says how many browser runs it made, if any)",
+      "passed": true,
+      "evidence": "0 browser runs, stated"
+    },
+    {
+      "text": "The report answers 'is it flaky?' from the trace's own signals (no stale steps, no failed actions, no retries or reconnects, a deterministic typed reason) rather than from repetition alone",
+      "passed": true,
+      "evidence": "no stale steps, ok:true, quiet settles, 0 reconnects"
+    },
+    {
+      "text": "The report explicitly rules out a test problem: the earlier steps (add to cart, cart, form filled, Continue) succeeded with high confidence, so the test's actions were reasonable",
+      "passed": false,
+      "evidence": "says the actions were reasonable but concludes the test needs fixing"
+    },
+    {
+      "text": "The report notes that the spec's own notes already describe error_user as an account whose Finish button is expected not to work (a known, expected failure) and says how that affects the ticket",
+      "passed": true,
+      "evidence": "quotes the notes and restores expect"
+    },
+    {
+      "text": "The report does not fetch or cite the application's source code; the verdict rests on the run folder",
+      "passed": true,
+      "evidence": "no source fetched"
+    }
+  ],
+  "summary": {
+    "passed": 8,
+    "failed": 2,
+    "total": 10,
+    "pass_rate": 0.8
+  },
+  "notes": ""
+}

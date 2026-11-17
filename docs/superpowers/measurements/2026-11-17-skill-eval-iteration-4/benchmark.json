@@ -1,0 +1,563 @@
+{
+  "metadata": {
+    "skill_name": "jev-browser-test",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-11-17T10:33:28Z",
+    "evals_run": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "runs_per_configuration": 1
+  },
+  "runs": [
+    {
+      "eval_id": 5,
+      "eval_name": "fix-loop-signup",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.909,
+        "passed": 10,
+        "failed": 1,
+        "total": 11,
+        "time_seconds": 165.0,
+        "tokens": 94225,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The first run's verdict is BUG: with valid details the page shows the red 'Enter a valid work e-mail address.' message instead of the confirmation, quoted from the page",
+          "passed": true,
+          "evidence": "run 1: 'Enter a valid work e-mail address.' quoted"
+        },
+        {
+          "text": "The cause is identified in the page's code: the e-mail rule in app.js is inverted (it fails when the e-mail is valid), and the fix is the correction of that rule, not a removal of the validation",
+          "passed": true,
+          "evidence": "rules() e-mail rule inverted; fix '!EMAIL.test(email)', validation kept"
+        },
+        {
+          "text": "After the fix an e-mail without '@' is still rejected (the report or a run shows the validation still works), so the fix did not disable the check",
+          "passed": true,
+          "evidence": "run 3: signup-invalid-email still rejected"
+        },
+        {
+          "text": "The same spec (same id, goal, outcomes and assertions) was rerun after the fix and returned PASS, with the green welcome message quoted ('Welcome, <first name>! We sent a confirmation link to ...')",
+          "passed": true,
+          "evidence": "same spec signup-valid-details rerun: PASS, 'Welcome, Jevtest! We sent a confirmation link to ...' quoted"
+        },
+        {
+          "text": "Both runs' artifacts (result.json and trace.json of the red run and of the green run) and the spec are saved in outputs, and the report names which folder is which",
+          "passed": true,
+          "evidence": "outputs/runs/<spec>/<stamp> for red, green and invalid; the report names each folder"
+        },
+        {
+          "text": "The spec is goal-level: the flow is described as a tester would (fill the fields, tick the terms box, click Create account); CSS or XPath selectors appear only in code assertions on the final page, if at all",
+          "passed": true,
+          "evidence": "goal-level spec; one selector, in text_in on the final page"
+        },
+        {
+          "text": "The password value is masked through secrets (listed, or a credential-like key the scaffold masked) and appears in no report text",
+          "passed": true,
+          "evidence": "secrets: [password]; the value is in no report or run file (grep)"
+        },
+        {
+          "text": "The report follows the rubric's template: verdict, flow, runs made / Jev requests / seconds, the story, the evidence (step, action, confidence, quoted line, screenshot), what was expected, the next step",
+          "passed": false,
+          "evidence": "report has runs/requests/seconds, a story and screenshots, but no confidences in the evidence and no explicit Verdict/Expected lines of the rubric template"
+        },
+        {
+          "text": "The spec was not loosened to get green: the pass outcome after the fix is still the welcome message and the bug outcome for the e-mail error is kept",
+          "passed": true,
+          "evidence": "pass outcome and email_rejected bug outcome unchanged"
+        },
+        {
+          "text": "At most 6 browser runs were made in total, the report states the count, and the exact change to app.js (a diff or the before/after line) is given",
+          "passed": true,
+          "evidence": "3 browser runs stated; the diff of app.js line 22 given"
+        },
+        {
+          "text": "The TypeSafe API key value does not appear in any output file",
+          "passed": true,
+          "evidence": "grep of outputs for the key value: 0 files"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "flaky-notification",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 8,
+        "failed": 0,
+        "total": 8,
+        "time_seconds": 280.8,
+        "tokens": 108279,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The report concludes the page is random by design (the page itself lists both messages as examples), so a check demanding 'Action successful' cannot be a deterministic smoke check",
+          "passed": true,
+          "evidence": "'picks one of two notifications at random on every click'; the page's copy lists both messages"
+        },
+        {
+          "text": "Both outcomes were observed in the runs and the report names them with the page's own message text ('Action successful' and 'Action unsuccesful, please try again')",
+          "passed": true,
+          "evidence": "'Action successful' and 'Action unsuccesful, please try again' (the page's spelling)"
+        },
+        {
+          "text": "The report gives the numbers: how many runs and how many of each outcome (or an agreement / pass rate)",
+          "passed": true,
+          "evidence": "table: 55 observations 26/29; as-written suite 2 pass / 3 bug, 60% agreement"
+        },
+        {
+          "text": "The conclusion rests on between 3 and 10 browser runs of the check, not on a single run and not on dozens; the report states the count",
+          "passed": true,
+          "evidence": "5 browser runs of the check as written (15 browser runs in all: 10 of the replacement spec, 5 of them wasted on its first revision); graded as iteration 2 graded 11 runs"
+        },
+        {
+          "text": "The report separates the page's designed randomness from any environment failure (a load timeout, a stalled request) instead of folding them into one 'flaky'",
+          "passed": true,
+          "evidence": "'The flake is not environmental': no stale, reconnects, timeouts, page errors, 5xx"
+        },
+        {
+          "text": "The report recommends a concrete change to the check (accept either message with an element-scoped assertion / assert only that a notification appears / quarantine it) rather than rerun-until-green, and warns that a page-wide text check would always pass because the body copy contains both messages",
+          "passed": true,
+          "evidence": "fix: text_in on #flash accepting either message; warns page-wide text_contains always passes; no retries"
+        },
+        {
+          "text": "Per-run artifacts are saved in outputs (suite results or per-run logs) and their counts match the numbers in the report",
+          "passed": true,
+          "evidence": "suite/ and suite-fixed-rev2/ results.json match the counts"
+        },
+        {
+          "text": "The runs were made in a real browser against the live page, not reasoned from the page description alone",
+          "passed": true,
+          "evidence": "15 headless browser runs with Jev against the live page"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "slow-spa-candidate-search",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 11,
+        "failed": 0,
+        "total": 11,
+        "time_seconds": 469.3,
+        "tokens": 119462,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Verdict is PASS: the report says the candidate added under Recruitment was found as exactly one record in the Candidates list",
+          "passed": true,
+          "evidence": "'Verdict: PASS ... exactly one record'"
+        },
+        {
+          "text": "The evidence quotes the page's own line for the pass (a '(1) Record Found' line or the candidate's row), taken from result.json's evidence.line, not only a paraphrase",
+          "passed": true,
+          "evidence": "evidence.line '(1) Record Found' from run3/result.json, quoted"
+        },
+        {
+          "text": "A rerunnable spec is left in outputs and is goal-level: the goal and notes describe what a tester would do, and CSS or XPath selectors appear only in the scripted setup and in the code assertions on the final page",
+          "passed": true,
+          "evidence": "goal-level spec; selectors only in setup (login) and assert (.oxd-table-body); teardown selectors after the verdict"
+        },
+        {
+          "text": "The login is scripted in setup (Admin / admin123 only in setup steps) and never delegated to Jev",
+          "passed": true,
+          "evidence": "setup fills Admin / admin123; never in data"
+        },
+        {
+          "text": "The candidate's name uses ${RUN_STAMP} or another per-run value so a rerun cannot find the previous run's candidate, and the report says so",
+          "passed": true,
+          "evidence": "last name Runner${RUN_STAMP}, e-mail jevtest.${RUN_STAMP}@...; the report's 'Why it can be rerun' section; teardown deletes the run's candidate"
+        },
+        {
+          "text": "The spec declares a bug outcome for an empty result ('No Records Found') guarded with requires_action or after, and a pass outcome worded on the page's own text",
+          "passed": true,
+          "evidence": "no_records bug outcome with requires_action and after: click Search; pass on '(1) Record Found'"
+        },
+        {
+          "text": "The spec accounts for the slow single-page app: the --slow preset or raised settle_ms / navigation_timeout_ms, and notes about the spinners and the type-ahead's loading placeholder ('Searching....')",
+          "passed": true,
+          "evidence": "settle_ms 2500, quiet_ms 200, navigation_timeout_ms 45000, 32 steps / 420 s (the --slow preset); notes on spinners and the 'Searching....' row"
+        },
+        {
+          "text": "The flow really ran: a run folder (result.json, trace.json, screenshots) in outputs shows Recruitment, Add, Save, Candidates and Search, and the pass was confirmed (confirmed_by set)",
+          "passed": true,
+          "evidence": "run3/run4 folders: Recruitment, Add, Save, Candidates, type-ahead, Search; confirmed_by assertions"
+        },
+        {
+          "text": "The answer took at most 6 browser runs in total and the report states the count, the Jev request count and the seconds",
+          "passed": true,
+          "evidence": "4 browser runs; per-run Jev requests and seconds in the results table"
+        },
+        {
+          "text": "The report gives the exact command to rerun the spec",
+          "passed": true,
+          "evidence": "exact run_test.py command with paths"
+        },
+        {
+          "text": "The TypeSafe API key value does not appear in any output file",
+          "passed": true,
+          "evidence": "grep of outputs for the key value: 0 files"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "eval_name": "ticket-sort-bug",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.9,
+        "passed": 9,
+        "failed": 1,
+        "total": 10,
+        "time_seconds": 220.1,
+        "tokens": 104316,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Verdict is BUG: the report says the reported sort defect is real for problem_user",
+          "passed": true,
+          "evidence": "Verdict: BUG. It reproduces. For problem_user ... the list stays in name order"
+        },
+        {
+          "text": "Evidence names the actual first item after sorting (Sauce Labs Backpack, $29.99) and the expected one (Sauce Labs Onesie, $7.99)",
+          "passed": true,
+          "evidence": "Actual 'Sauce Labs Backpack $29.99' first; expected 'Sauce Labs Onesie' $7.99"
+        },
+        {
+          "text": "A screenshot of the list after choosing Price (low to high) is saved in outputs and referenced by the report",
+          "passed": true,
+          "evidence": "runs/.../20261117-114705/steps/002.png referenced as 'After choosing Price (low to high)'"
+        },
+        {
+          "text": "The flow really ran in a browser as problem_user: a run artifact (trace, log or result file) shows the login and the sort action",
+          "passed": true,
+          "evidence": "trace of runs/sort-price-low-high-problem-user: setup login 4 steps, step 1 SELECT 'Price (low to high)'"
+        },
+        {
+          "text": "A rerunnable regression test is left in outputs as a goal-level spec: it names the goal in plain language and declares the endings it accepts (a pass and a bug outcome with the page's own wording); CSS or XPath selectors drive nothing in the flow and appear only in the scripted login setup and in the code assertions on the final page",
+          "passed": true,
+          "evidence": "spec goal is plain language; outcomes sorted_low_to_high (pass) / not_reordered (bug); selectors only in setup and assert"
+        },
+        {
+          "text": "The regression test's passing condition is the correct order (Onesie / $7.99 first), so it fails today and passes once fixed, and the report gives the exact command to rerun it",
+          "passed": true,
+          "evidence": "pass outcome = Onesie $7.99 first and Bike Light second; rerun command given"
+        },
+        {
+          "text": "The report quotes at least one line of the page's own text as evidence (an evidence line copied verbatim, such as the dropdown's text or the first product's name), not only a paraphrase",
+          "passed": true,
+          "evidence": "evidence line quoted from the page: \"Name (A to Z)\""
+        },
+        {
+          "text": "Login is done deterministically (scripted setup), not delegated to the AI decision step, and the demo password appears nowhere but the setup step",
+          "passed": false,
+          "evidence": "Login is scripted in setup, but the report's ticket block prints 'account: problem_user / secret_sauce'; SKILL.md (unchanged since 28a5506) allows a published demo credential plainly, the assertion does not"
+        },
+        {
+          "text": "The answer was reached with at most 6 browser runs in total (single runs plus every repeat of a suite), and the report states how many runs were made",
+          "passed": true,
+          "evidence": "3 browser runs, stated"
+        },
+        {
+          "text": "The TypeSafe API key value does not appear in any output file",
+          "passed": true,
+          "evidence": "grep of outputs for the key value: 0 files"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "eval_name": "triage-dead-finish-button",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8,
+        "passed": 8,
+        "failed": 2,
+        "total": 10,
+        "time_seconds": 142.0,
+        "tokens": 103072,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Verdict is BUG (product defect): the Finish button on Checkout: Overview does nothing",
+          "passed": false,
+          "evidence": "Verdict: TEST_ISSUE ('not a product bug'): the overnight spec lacked the example's expect block"
+        },
+        {
+          "text": "Evidence cites the divergence: the step-8 click on button 'Finish' (target confidence 0.99) followed by BLOCKED at step 9 with no page change",
+          "passed": true,
+          "evidence": "Step 8 CLICK [3] Finish (op 0.62, target 0.99) NO-EFFECT, signature unchanged; step 9 BLOCKED"
+        },
+        {
+          "text": "Evidence cites the run's own reason fields: status blocked, stuck_reason control_had_no_effect, suggested verdict bug",
+          "passed": true,
+          "evidence": "undetermined, status blocked, stuck_reason control_had_no_effect, suggested verdict bug"
+        },
+        {
+          "text": "The report references a screenshot from the run folder (steps/009.png or steps/final.png) as evidence",
+          "passed": true,
+          "evidence": "steps/009.png and steps/final.png cited"
+        },
+        {
+          "text": "The report states expected vs actual: the 'Checkout: Complete!' / 'Thank you for your order!' page was expected, the run stayed on checkout-step-two.html",
+          "passed": true,
+          "evidence": "goal 'Thank you for your order!'; URL stays checkout-step-two.html"
+        },
+        {
+          "text": "The result was read before anything was rerun, and at most one rerun and one control run were made (the report says how many browser runs it made, if any)",
+          "passed": true,
+          "evidence": "evidence read first; 1 rerun (spec fixed, --screenshots all) + 1 control; '2 browser runs' stated"
+        },
+        {
+          "text": "The report answers 'is it flaky?' from the trace's own signals (no stale steps, no failed actions, no retries or reconnects, a deterministic typed reason) rather than from repetition alone",
+          "passed": true,
+          "evidence": "no stale steps, executed.ok everywhere, reconnects 0, settles quiet"
+        },
+        {
+          "text": "The report explicitly rules out a test problem: the earlier steps (add to cart, cart, form filled, Continue) succeeded with high confidence, so the test's actions were reasonable",
+          "passed": false,
+          "evidence": "says Jev followed the flow correctly but classifies the red as a test problem (missing expect) instead of ruling one out"
+        },
+        {
+          "text": "The report notes that the spec's own notes already describe error_user as an account whose Finish button is expected not to work (a known, expected failure) and says how that affects the ticket",
+          "passed": true,
+          "evidence": "quotes the notes 'documented as broken: the finish button is expected not to work' and turns the ticket into a test-suite ticket"
+        },
+        {
+          "text": "The report does not fetch or cite the application's source code; the verdict rests on the run folder",
+          "passed": true,
+          "evidence": "no application source fetched"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "triage-unverified-save",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.909,
+        "passed": 10,
+        "failed": 1,
+        "total": 11,
+        "time_seconds": 180.9,
+        "tokens": 101658,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The verdict is not BUG: the report finds no evidence of a product defect in the run",
+          "passed": true,
+          "evidence": "'not a PIM bug'; no failure outcome above 0.01"
+        },
+        {
+          "text": "The report says the employee was saved, citing the 'Successfully Saved' announcement (step 15) and the final URL on the new employee's Personal Details page (viewPersonalDetails/empNumber/...)",
+          "passed": true,
+          "evidence": "'Successfully Saved' at step 15; /pim/viewPersonalDetails/empNumber/339 at step 16"
+        },
+        {
+          "text": "The report explains why no pass was confirmed: the record page was still under a loading layer at the last looks (COVERED / RECHECK flags on steps 13-18) in a slow hour (SLOW-NAV 14.9 s on the first click, 99.5 s for ten actions), so the confirmation window ran out before the name rendered",
+          "passed": true,
+          "evidence": "COVERED:15, RECHECK:1-4 on the record page; SLOW-NAV:14.9s on step 1; 99.5 s for ten actions"
+        },
+        {
+          "text": "The NO-EFFECT flag on the Save click (step 11) is read as the save being in flight (the toast and the record page followed), not as a dead control",
+          "passed": false,
+          "evidence": "the NO-EFFECT flag on Save (step 11) is not mentioned; the report only says the save went through"
+        },
+        {
+          "text": "'Is it flaky?' is answered from the trace's own signals (no STALE steps, no executed.ok false, no retries or reconnects, no error status) and a single run is not called flaky by itself",
+          "passed": true,
+          "evidence": "reconnects 0, no error page, no JS errors or 5xx, SLOW-NAV and the busy record page as the signatures; FLAKY only after the passing rerun"
+        },
+        {
+          "text": "The verdict is TEST_ISSUE, or FLAKY (environment) only after a rerun that passed unchanged, or NEEDS_HUMAN with a specific question; it is not PASS (an undetermined run is not a pass without the confirmation) and not BUG",
+          "passed": true,
+          "evidence": "FLAKY (environment) after one rerun that passed (the current spec, Runner${RUN_STAMP})"
+        },
+        {
+          "text": "The report states expected vs actual: the Personal Details page showing 'Jevtest Runner' was expected; the run reached that page but it was still loading when the run ended",
+          "passed": true,
+          "evidence": "expected the Personal Details page with the name; reached it with the form under a spinner"
+        },
+        {
+          "text": "The report references a screenshot from the run folder (steps/016.png, steps/018.png or steps/final.png)",
+          "passed": true,
+          "evidence": "steps/012.png, steps/018.png = final.png"
+        },
+        {
+          "text": "The result was read before anything was rerun, at most one rerun and one control run were made, and the report says how many browser runs it made",
+          "passed": true,
+          "evidence": "read first; 1 control + 1 rerun; '2 browser runs' stated"
+        },
+        {
+          "text": "The report gives a concrete next step (rerun once in a normal hour, a longer navigation_timeout_ms or settle for the confirmation, the hrm specs on one worker) instead of filing a product bug, and does not cite the application's source code",
+          "passed": true,
+          "evidence": "navigation_timeout_ms 45000 -> ~60000, one worker; no source cited"
+        },
+        {
+          "text": "The TypeSafe API key value does not appear in any output file",
+          "passed": true,
+          "evidence": "grep of outputs for the key value: 0 files"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "eval_name": "triage-dead-finish-button",
+      "configuration": "old_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8,
+        "passed": 8,
+        "failed": 2,
+        "total": 10,
+        "time_seconds": 93.0,
+        "tokens": 93352,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Verdict is BUG (product defect): the Finish button on Checkout: Overview does nothing",
+          "passed": false,
+          "evidence": "'not a new product bug ... The test is what needs fixing'"
+        },
+        {
+          "text": "Evidence cites the divergence: the step-8 click on button 'Finish' (target confidence 0.99) followed by BLOCKED at step 9 with no page change",
+          "passed": true,
+          "evidence": "table: step 8 CLICK Finish (0.62 / 0.99), same signature; step 9 BLOCKED 0.83"
+        },
+        {
+          "text": "Evidence cites the run's own reason fields: status blocked, stuck_reason control_had_no_effect, suggested verdict bug",
+          "passed": true,
+          "evidence": "status blocked, stuck_reason control_had_no_effect, suggested verdict bug"
+        },
+        {
+          "text": "The report references a screenshot from the run folder (steps/009.png or steps/final.png) as evidence",
+          "passed": true,
+          "evidence": "steps/009.png = steps/final.png"
+        },
+        {
+          "text": "The report states expected vs actual: the 'Checkout: Complete!' / 'Thank you for your order!' page was expected, the run stayed on checkout-step-two.html",
+          "passed": true,
+          "evidence": "expected 'Checkout: Complete!' / 'Thank you for your order!'; still on /checkout-step-two.html"
+        },
+        {
+          "text": "The result was read before anything was rerun, and at most one rerun and one control run were made (the report says how many browser runs it made, if any)",
+          "passed": true,
+          "evidence": "0 browser runs, stated"
+        },
+        {
+          "text": "The report answers 'is it flaky?' from the trace's own signals (no stale steps, no failed actions, no retries or reconnects, a deterministic typed reason) rather than from repetition alone",
+          "passed": true,
+          "evidence": "no stale steps, ok:true, quiet settles, 0 reconnects"
+        },
+        {
+          "text": "The report explicitly rules out a test problem: the earlier steps (add to cart, cart, form filled, Continue) succeeded with high confidence, so the test's actions were reasonable",
+          "passed": false,
+          "evidence": "says the actions were reasonable but concludes the test needs fixing"
+        },
+        {
+          "text": "The report notes that the spec's own notes already describe error_user as an account whose Finish button is expected not to work (a known, expected failure) and says how that affects the ticket",
+          "passed": true,
+          "evidence": "quotes the notes and restores expect"
+        },
+        {
+          "text": "The report does not fetch or cite the application's source code; the verdict rests on the run folder",
+          "passed": true,
+          "evidence": "no source fetched"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 0.9197,
+        "stddev": 0.0746,
+        "min": 0.8,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 243.0167,
+        "stddev": 121.0837,
+        "min": 142.0,
+        "max": 469.3
+      },
+      "tokens": {
+        "mean": 105168.6667,
+        "stddev": 8380.7544,
+        "min": 94225,
+        "max": 119462
+      }
+    },
+    "old_skill": {
+      "pass_rate": {
+        "mean": 0.8,
+        "stddev": 0.0,
+        "min": 0.8,
+        "max": 0.8
+      },
+      "time_seconds": {
+        "mean": 93.0,
+        "stddev": 0.0,
+        "min": 93.0,
+        "max": 93.0
+      },
+      "tokens": {
+        "mean": 93352.0,
+        "stddev": 0.0,
+        "min": 93352,
+        "max": 93352
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.12",
+      "time_seconds": "+150.0",
+      "tokens": "+11817"
+    }
+  },
+  "notes": [
+    "The old_skill arm (SKILL.md at 28a5506, before the 0.3.0 rewording) ran eval 1 only; the aggregate delta compares 6 evals with 1 and is not meaningful. On eval 1 both arms score 8/10 with the same verdict.",
+    "Per id: 0 ticket-sort-bug 9/10, 1 triage-dead-finish-button 8/10, 2 flaky-notification 8/8, 3 slow-spa 11/11, 4 triage-unverified-save 10/11, 5 fix-loop 10/11. Ids 0-2: 25/28 (iteration 2: 28/28); ids 3-5: 31/33 (iteration 3: 30/33).",
+    "Eval 1's two misses (verdict BUG; 'rules out a test problem') follow the triage instruction added in b14d587 after iteration 2 (compare trace.spec with the skill's example: a missing expect means the fix is in the spec); the September skill gives the same verdict, so not a 0.3-0.5 regression. The eval's expectation and the skill disagree: a decision for the owner.",
+    "Eval 0's miss: the ticket block prints the published demo password; SKILL.md (unchanged since 28a5506) allows a site-published credential plainly, the assertion does not.",
+    "Eval 4's miss (NO-EFFECT on Save not read as in flight) and eval 5's (report lacks per-evidence confidence / Expected line) are single-run omissions; the guidance for both is present in today's SKILL.md and rubric.",
+    "Every subagent's harness refused report.md writes; the reports were saved by the orchestrator from the subagents' final messages (marked at the top of each file). Two agents briefly wrote a spec into the skill directory after a shell cwd reset and moved it; later briefs asked for absolute paths."
+  ]
+}

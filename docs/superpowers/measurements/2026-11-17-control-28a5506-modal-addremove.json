@@ -1,0 +1,268 @@
+{
+  "label": "",
+  "timestamp": "2026-11-17T11:24:17+02:00",
+  "git_commit": "28a5506",
+  "repeat": 2,
+  "workers": 2,
+  "run_args": [],
+  "elapsed_ms": 5269,
+  "out_dir": "/Users/skuser/Studio/jev-browser-test/runs/old-28a5506/pair",
+  "specs": {
+    "modal-close": {
+      "spec": "../../../../../../../private/tmp/claude-502/-Users-skuser/d4b761b5-8a16-446b-8255-d60a2efa6463/scratchpad/old/specs/examples/modal-close.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "modal-close/01",
+          "exit_code": 0,
+          "wall_ms": 2470,
+          "outcome": "modal_closed",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "modal-close/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 2336,
+          "jev_ms": 204,
+          "adjudication_ms": 209,
+          "browser_ms": 0,
+          "requests": 2,
+          "input_tokens": 1796,
+          "output_tokens": 249,
+          "model": "jev-1.14.0",
+          "steps": 1,
+          "actions_executed": 0,
+          "decision_confidence": null,
+          "min_decision_confidence": null,
+          "step_confidences": [],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 204,
+          "jev_warm_ms": null,
+          "browser_per_action_ms": null,
+          "step_jev_ms": [
+            204
+          ],
+          "step_browser_ms": [
+            null
+          ],
+          "action_browser_ms": [],
+          "launch_ms": 185,
+          "navigation_ms": 1472,
+          "setup_ms": 0,
+          "result": "modal-close/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": null,
+          "first_seen_at_step": 1
+        },
+        {
+          "run": 2,
+          "out_dir": "modal-close/02",
+          "exit_code": 0,
+          "wall_ms": 2404,
+          "outcome": "modal_closed",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "modal-close/02/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 2269,
+          "jev_ms": 188,
+          "adjudication_ms": 174,
+          "browser_ms": 0,
+          "requests": 2,
+          "input_tokens": 1796,
+          "output_tokens": 249,
+          "model": "jev-1.14.0",
+          "steps": 1,
+          "actions_executed": 0,
+          "decision_confidence": null,
+          "min_decision_confidence": null,
+          "step_confidences": [],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 188,
+          "jev_warm_ms": null,
+          "browser_per_action_ms": null,
+          "step_jev_ms": [
+            188
+          ],
+          "step_browser_ms": [
+            null
+          ],
+          "action_browser_ms": [],
+          "launch_ms": 186,
+          "navigation_ms": 1439,
+          "setup_ms": 0,
+          "result": "modal-close/02/result.json",
+          "suggested_verdict": null,
+          "evidence_line": null,
+          "first_seen_at_step": 1
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "modal_closed": 2
+      },
+      "verdict_counts": {
+        "pass": 2
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 2437,
+        "duration_ms": 2302.5,
+        "jev_ms": 196,
+        "browser_ms": 0,
+        "requests": 2,
+        "input_tokens": 1796,
+        "decision_confidence": null,
+        "steps": 1
+      },
+      "passes": 2,
+      "environment_failures": [],
+      "reason": null
+    },
+    "add-remove-elements": {
+      "spec": "../../../../../../../private/tmp/claude-502/-Users-skuser/d4b761b5-8a16-446b-8255-d60a2efa6463/scratchpad/old/specs/examples/add-remove-elements.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "add-remove-elements/01",
+          "exit_code": 0,
+          "wall_ms": 2863,
+          "outcome": "one_delete_left",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "add-remove-elements/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 2731,
+          "jev_ms": 373,
+          "adjudication_ms": 195,
+          "browser_ms": 153,
+          "requests": 3,
+          "input_tokens": 3044,
+          "output_tokens": 433,
+          "model": "jev-1.14.0",
+          "steps": 2,
+          "actions_executed": 1,
+          "decision_confidence": 0.99,
+          "min_decision_confidence": 0.99,
+          "step_confidences": [
+            0.99
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 185,
+          "jev_warm_ms": 188,
+          "browser_per_action_ms": 153,
+          "step_jev_ms": [
+            185,
+            188
+          ],
+          "step_browser_ms": [
+            153,
+            null
+          ],
+          "action_browser_ms": [
+            153
+          ],
+          "launch_ms": 169,
+          "navigation_ms": 1547,
+          "setup_ms": 0,
+          "result": "add-remove-elements/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Delete",
+          "first_seen_at_step": 2
+        },
+        {
+          "run": 2,
+          "out_dir": "add-remove-elements/02",
+          "exit_code": 0,
+          "wall_ms": 2771,
+          "outcome": "one_delete_left",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "add-remove-elements/02/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 2642,
+          "jev_ms": 365,
+          "adjudication_ms": 162,
+          "browser_ms": 157,
+          "requests": 3,
+          "input_tokens": 3044,
+          "output_tokens": 433,
+          "model": "jev-1.14.0",
+          "steps": 2,
+          "actions_executed": 1,
+          "decision_confidence": 0.97,
+          "min_decision_confidence": 0.97,
+          "step_confidences": [
+            0.97
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 198,
+          "jev_warm_ms": 167,
+          "browser_per_action_ms": 157,
+          "step_jev_ms": [
+            198,
+            167
+          ],
+          "step_browser_ms": [
+            157,
+            null
+          ],
+          "action_browser_ms": [
+            157
+          ],
+          "launch_ms": 159,
+          "navigation_ms": 1532,
+          "setup_ms": 0,
+          "result": "add-remove-elements/02/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Delete",
+          "first_seen_at_step": 2
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "one_delete_left": 2
+      },
+      "verdict_counts": {
+        "pass": 2
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 2817,
+        "duration_ms": 2686.5,
+        "jev_ms": 369,
+        "browser_ms": 155,
+        "requests": 3,
+        "input_tokens": 3044,
+        "decision_confidence": 0.98,
+        "steps": 2
+      },
+      "passes": 2,
+      "environment_failures": [],
+      "reason": null
+    }
+  },
+  "suite": {
+    "all_pass": true,
+    "verdicts": {
+      "modal-close": "pass",
+      "add-remove-elements": "pass"
+    },
+    "flaky": [],
+    "undetermined": [],
+    "environment_failures": {}
+  }
+}

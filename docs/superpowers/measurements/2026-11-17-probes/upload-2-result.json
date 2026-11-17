@@ -1,0 +1,100 @@
+{
+  "spec_id": "exp-upload-file",
+  "outcome": "uploaded",
+  "verdict": "pass",
+  "note": null,
+  "probability": 1.0,
+  "confidence": 1.0,
+  "seen_at_step": 3,
+  "first_seen_at_step": 3,
+  "confirmed": true,
+  "confirmed_by": "assertions",
+  "path_confidence": 0.88,
+  "reason": null,
+  "evidence": {
+    "line": "File Uploaded!",
+    "present": 0.96,
+    "screenshot": "steps/003.png",
+    "checks": {}
+  },
+  "assertions": [
+    {
+      "text_in": {
+        "selector": "#uploaded-files",
+        "contains": "sample.txt"
+      },
+      "ok": true,
+      "actual": [
+        "sample.txt"
+      ]
+    },
+    {
+      "no_page_errors": true,
+      "ok": true,
+      "actual": "none"
+    }
+  ],
+  "outcomes_seen_earlier": [],
+  "announcements": [],
+  "story": [
+    "1 UPLOAD_FILE [1] file \"file\" <- file sample",
+    "2 CLICK [2] submit \"Upload\""
+  ],
+  "run_stamp": null,
+  "status": "passed",
+  "duration_ms": 3381,
+  "usage": {
+    "jev_requests": 4,
+    "input_tokens": 4384,
+    "output_tokens": 610,
+    "model": "jev-1.14.0",
+    "reconnects": 0
+  },
+  "trace": "../runs/probe/upload-2/trace.json",
+  "diagnostics": {
+    "counts": {
+      "page_errors": 0,
+      "console_errors": 0,
+      "failed_requests": 5,
+      "http_errors": 0,
+      "server_errors": 0
+    },
+    "failed_requests": [
+      {
+        "method": "GET",
+        "url": "https://298279967.log.optimizely.com/event?a=298279967&d=298279967&y=false&n=https%3A%2F%2Fthe-internet.herokuapp.com%2Fupload&u=oeu1794909309940r0.8139639720985836&wxhr=true&t=1794909309943&f=2983497",
+        "resource": "xhr",
+        "failure": "net::ERR_NAME_NOT_RESOLVED",
+        "step": 1
+      },
+      {
+        "method": "GET",
+        "url": "https://298279967.log.optimizely.com/event?a=298279967&d=298279967&y=false&n=engagement&g=298283957&u=oeu1794909309940r0.8139639720985836&wxhr=true&t=1794909311055&f=298349752,318188263",
+        "resource": "xhr",
+        "failure": "net::ERR_NAME_NOT_RESOLVED",
+        "step": 3
+      },
+      {
+        "method": "GET",
+        "url": "https://298279967.log.optimizely.com/event?a=298279967&d=298279967&y=false&n=https%3A%2F%2Fthe-internet.herokuapp.com%2Fupload&u=oeu1794909309940r0.8139639720985836&wxhr=true&t=1794909309943&f=2983497",
+        "resource": "xhr",
+        "failure": "net::ERR_NAME_NOT_RESOLVED",
+        "step": 3
+      },
+      {
+        "method": "GET",
+        "url": "https://298279967.log.optimizely.com/event?a=298279967&d=298279967&y=false&n=engagement&g=298283957&u=oeu1794909309940r0.8139639720985836&wxhr=true&t=1794909311055&f=298349752,318188263",
+        "resource": "xhr",
+        "failure": "net::ERR_NAME_NOT_RESOLVED",
+        "step": 3
+      },
+      {
+        "method": "GET",
+        "url": "https://298279967.log.optimizely.com/event?a=298279967&d=298279967&y=false&n=https%3A%2F%2Fthe-internet.herokuapp.com%2Fupload&u=oeu1794909309940r0.8139639720985836&wxhr=true&t=1794909311225&f=2983497",
+        "resource": "xhr",
+        "failure": "net::ERR_NAME_NOT_RESOLVED",
+        "step": 3
+      }
+    ]
+  }
+}

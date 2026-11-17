@@ -1,12 +1,24 @@
 {
   "id": "exp-hover-menu",
-  "comment": "Experiment for 0.5.0 (extra_operations: HOVER), written without access to the site: probe before trusting the outcomes. The jQuery UI menu opens its submenu on hover and, as far as I know, on click as well, so both arms of an A/B may pass here; what this spec measures is whether Jev chooses HOVER when it is offered and what offering it does to the other steps. A menu that opens on :hover only (most site navigation bars) is the case HOVER exists for: add one from an application of your own.",
+  "comment": "Experiment for 0.5.0 (extra_operations: HOVER), written without access to the site: probe before trusting the outcomes. The jQuery UI menu opens its submenu on hover and, as far as I know, on click as well, so both arms of an A/B may pass here; what this spec measures is whether Jev chooses HOVER when it is offered and what offering it does to the other steps. A menu that opens on :hover only (most site navigation bars) is the case HOVER exists for: add one from an application of your own. Probed 2026-11-17: the first pass statement ('heading says JQuery UI ... Menus are tricky to automate') was already true of the menu page itself ('JQueryUI - Menu', and its paragraph says menus are an automation challenge), so the pass was pending at step 1 with no action and every run ended assert_failed on the url. The pass now names what only the landing page shows, and needs the click (`after`). The submenu opens 300 ms after the pointer arrives (jQuery UI's delay), which 0.5.0's HOVER did not wait for (flagged NO-EFFECT); fixed in 0.6.0.",
   "start_url": "https://the-internet.herokuapp.com/jqueryui/menu",
   "goal": "Open the Enabled menu by hovering over it and choose 'Back to JQuery UI' from the submenu it opens, so that the JQuery UI page is shown.",
   "notes": "The submenu appears only while the pointer is over Enabled.",
-  "extra_operations": ["HOVER"],
+  "extra_operations": [
+    "HOVER"
+  ],
   "outcomes": {
-    "back_on_jquery_ui": { "when": "The page heading says 'JQuery UI'. The page explains that JQuery UI Menus are tricky to automate.", "verdict": "pass" }
+    "back_on_jquery_ui": {
+      "when": "The page heading reads 'JQuery UI' and the text says JQuery UI's set of Widgets causes automation challenges, with a 'Menu' link below it",
+      "verdict": "pass",
+      "after": {
+        "click": "Back to JQuery UI"
+      }
+    }
   },
-  "assert": [ { "url_matches": "**/jqueryui" } ]
+  "assert": [
+    {
+      "url_matches": "**/jqueryui"
+    }
+  ]
 }

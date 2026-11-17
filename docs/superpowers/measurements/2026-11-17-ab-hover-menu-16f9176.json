@@ -1,0 +1,610 @@
+{
+  "timestamp": "2026-11-17T11:52:39",
+  "repeat": 5,
+  "a_args": [],
+  "b_args": [
+    "--hover"
+  ],
+  "specs": {
+    "exp-hover-menu-plain": {
+      "spec": "/private/tmp/claude-502/-Users-skuser/d4b761b5-8a16-446b-8255-d60a2efa6463/scratchpad/hover-menu-plain.json",
+      "a": {
+        "runs": 5,
+        "observed": 5,
+        "green": 4,
+        "endings": {
+          "back_on_jquery_ui": 4,
+          "undetermined:low_confidence": 1
+        },
+        "decision_confidence": 0.5,
+        "min_decision_confidence": 0.2,
+        "low_confidence_steps": 7,
+        "requests": 5,
+        "input_tokens": 6831,
+        "wall_ms": 4128
+      },
+      "b": {
+        "runs": 5,
+        "observed": 5,
+        "green": 5,
+        "endings": {
+          "back_on_jquery_ui": 5
+        },
+        "decision_confidence": 0.7,
+        "min_decision_confidence": 0.59,
+        "low_confidence_steps": 0,
+        "requests": 4,
+        "input_tokens": 6242,
+        "wall_ms": 3873
+      },
+      "compare": {
+        "moved": "some",
+        "confidence_delta": 0.2,
+        "confidence_fell": false,
+        "compared": true
+      },
+      "runs": {
+        "a": [
+          {
+            "out_dir": "/Users/skuser/Studio/jev-browser-test/runs/ab/hover-menu-16f9176/exp-hover-menu-plain/a01",
+            "exit_code": 0,
+            "wall_ms": 3947,
+            "status": "passed",
+            "pass": true,
+            "error": null,
+            "duration_ms": 3819,
+            "jev_ms": 840,
+            "adjudication_ms": 175,
+            "browser_ms": 680,
+            "requests": 5,
+            "input_tokens": 6831,
+            "output_tokens": 665,
+            "model": "jev-1.14.0",
+            "steps": 4,
+            "actions_executed": 2,
+            "decision_confidence": 0.61,
+            "min_decision_confidence": 0.23,
+            "step_confidences": [
+              0.62,
+              0.23,
+              0.61
+            ],
+            "stale_steps": 0,
+            "low_confidence_steps": 1,
+            "jev_first_ms": 234,
+            "jev_warm_ms": 203,
+            "browser_per_action_ms": 234.5,
+            "step_jev_ms": [
+              234,
+              197,
+              203,
+              206
+            ],
+            "step_browser_ms": [
+              174,
+              211,
+              295,
+              null
+            ],
+            "action_browser_ms": [
+              174,
+              295
+            ],
+            "launch_ms": 164,
+            "navigation_ms": 1581,
+            "setup_ms": 0,
+            "outcome": "back_on_jquery_ui",
+            "verdict": "pass",
+            "first_seen_at_step": 4,
+            "seen_at_step": 4,
+            "confirmed": true,
+            "assertions_ok": 1,
+            "assertions_total": 1,
+            "evidence_line": "JQuery UI"
+          },
+          {
+            "out_dir": "/Users/skuser/Studio/jev-browser-test/runs/ab/hover-menu-16f9176/exp-hover-menu-plain/a02",
+            "exit_code": 0,
+            "wall_ms": 4218,
+            "status": "passed",
+            "pass": true,
+            "error": null,
+            "duration_ms": 4085,
+            "jev_ms": 784,
+            "adjudication_ms": 210,
+            "browser_ms": 692,
+            "requests": 5,
+            "input_tokens": 6831,
+            "output_tokens": 665,
+            "model": "jev-1.14.0",
+            "steps": 4,
+            "actions_executed": 2,
+            "decision_confidence": 0.5,
+            "min_decision_confidence": 0.2,
+            "step_confidences": [
+              0.5,
+              0.2,
+              0.63
+            ],
+            "stale_steps": 0,
+            "low_confidence_steps": 1,
+            "jev_first_ms": 208,
+            "jev_warm_ms": 192,
+            "browser_per_action_ms": 239,
+            "step_jev_ms": [
+              208,
+              192,
+              213,
+              171
+            ],
+            "step_browser_ms": [
+              163,
+              214,
+              315,
+              null
+            ],
+            "action_browser_ms": [
+              163,
+              315
+            ],
+            "launch_ms": 150,
+            "navigation_ms": 1884,
+            "setup_ms": 0,
+            "outcome": "back_on_jquery_ui",
+            "verdict": "pass",
+            "first_seen_at_step": 4,
+            "seen_at_step": 4,
+            "confirmed": true,
+            "assertions_ok": 1,
+            "assertions_total": 1,
+            "evidence_line": "JQuery UI"
+          },
+          {
+            "out_dir": "/Users/skuser/Studio/jev-browser-test/runs/ab/hover-menu-16f9176/exp-hover-menu-plain/a03",
+            "exit_code": 0,
+            "wall_ms": 4128,
+            "status": "passed",
+            "pass": true,
+            "error": null,
+            "duration_ms": 3998,
+            "jev_ms": 910,
+            "adjudication_ms": 181,
+            "browser_ms": 701,
+            "requests": 5,
+            "input_tokens": 6831,
+            "output_tokens": 665,
+            "model": "jev-1.14.0",
+            "steps": 4,
+            "actions_executed": 2,
+            "decision_confidence": 0.51,
+            "min_decision_confidence": 0.23,
+            "step_confidences": [
+              0.51,
+              0.23,
+              0.64
+            ],
+            "stale_steps": 0,
+            "low_confidence_steps": 1,
+            "jev_first_ms": 232,
+            "jev_warm_ms": 233,
+            "browser_per_action_ms": 238,
+            "step_jev_ms": [
+              232,
+              233,
+              197,
+              248
+            ],
+            "step_browser_ms": [
+              171,
+              225,
+              305,
+              null
+            ],
+            "action_browser_ms": [
+              171,
+              305
+            ],
+            "launch_ms": 150,
+            "navigation_ms": 1660,
+            "setup_ms": 0,
+            "outcome": "back_on_jquery_ui",
+            "verdict": "pass",
+            "first_seen_at_step": 4,
+            "seen_at_step": 4,
+            "confirmed": true,
+            "assertions_ok": 1,
+            "assertions_total": 1,
+            "evidence_line": null
+          },
+          {
+            "out_dir": "/Users/skuser/Studio/jev-browser-test/runs/ab/hover-menu-16f9176/exp-hover-menu-plain/a04",
+            "exit_code": 1,
+            "wall_ms": 4483,
+            "status": "low_confidence",
+            "pass": false,
+            "error": null,
+            "duration_ms": 4356,
+            "jev_ms": 803,
+            "adjudication_ms": null,
+            "browser_ms": 1443,
+            "requests": 4,
+            "input_tokens": 5781,
+            "output_tokens": 502,
+            "model": "jev-1.14.0",
+            "steps": 3,
+            "actions_executed": 0,
+            "decision_confidence": 0.47,
+            "min_decision_confidence": 0.44,
+            "step_confidences": [
+              0.44,
+              0.47,
+              0.47
+            ],
+            "stale_steps": 0,
+            "low_confidence_steps": 3,
+            "jev_first_ms": 227,
+            "jev_warm_ms": 288,
+            "browser_per_action_ms": null,
+            "step_jev_ms": [
+              227,
+              180,
+              396
+            ],
+            "step_browser_ms": [
+              522,
+              921,
+              null
+            ],
+            "action_browser_ms": [],
+            "launch_ms": 150,
+            "navigation_ms": 1606,
+            "setup_ms": 0,
+            "outcome": "undetermined",
+            "verdict": null,
+            "first_seen_at_step": null,
+            "seen_at_step": null,
+            "confirmed": false,
+            "assertions_ok": 0,
+            "assertions_total": 0,
+            "evidence_line": null
+          },
+          {
+            "out_dir": "/Users/skuser/Studio/jev-browser-test/runs/ab/hover-menu-16f9176/exp-hover-menu-plain/a05",
+            "exit_code": 0,
+            "wall_ms": 3964,
+            "status": "passed",
+            "pass": true,
+            "error": null,
+            "duration_ms": 3829,
+            "jev_ms": 803,
+            "adjudication_ms": 192,
+            "browser_ms": 678,
+            "requests": 5,
+            "input_tokens": 6831,
+            "output_tokens": 665,
+            "model": "jev-1.14.0",
+            "steps": 4,
+            "actions_executed": 2,
+            "decision_confidence": 0.6,
+            "min_decision_confidence": 0.2,
+            "step_confidences": [
+              0.6,
+              0.2,
+              0.64
+            ],
+            "stale_steps": 0,
+            "low_confidence_steps": 1,
+            "jev_first_ms": 164,
+            "jev_warm_ms": 185,
+            "browser_per_action_ms": 227.5,
+            "step_jev_ms": [
+              164,
+              270,
+              185,
+              184
+            ],
+            "step_browser_ms": [
+              165,
+              223,
+              290,
+              null
+            ],
+            "action_browser_ms": [
+              165,
+              290
+            ],
+            "launch_ms": 152,
+            "navigation_ms": 1618,
+            "setup_ms": 0,
+            "outcome": "back_on_jquery_ui",
+            "verdict": "pass",
+            "first_seen_at_step": 4,
+            "seen_at_step": 4,
+            "confirmed": true,
+            "assertions_ok": 1,
+            "assertions_total": 1,
+            "evidence_line": null
+          }
+        ],
+        "b": [
+          {
+            "out_dir": "/Users/skuser/Studio/jev-browser-test/runs/ab/hover-menu-16f9176/exp-hover-menu-plain/b01",
+            "exit_code": 0,
+            "wall_ms": 3901,
+            "status": "passed",
+            "pass": true,
+            "error": null,
+            "duration_ms": 3764,
+            "jev_ms": 558,
+            "adjudication_ms": 214,
+            "browser_ms": 845,
+            "requests": 4,
+            "input_tokens": 6242,
+            "output_tokens": 737,
+            "model": "jev-1.14.0",
+            "steps": 3,
+            "actions_executed": 2,
+            "decision_confidence": 0.65,
+            "min_decision_confidence": 0.6,
+            "step_confidences": [
+              0.7,
+              0.6
+            ],
+            "stale_steps": 0,
+            "low_confidence_steps": 0,
+            "jev_first_ms": 194,
+            "jev_warm_ms": 182,
+            "browser_per_action_ms": 422.5,
+            "step_jev_ms": [
+              194,
+              186,
+              178
+            ],
+            "step_browser_ms": [
+              536,
+              309,
+              null
+            ],
+            "action_browser_ms": [
+              536,
+              309
+            ],
+            "launch_ms": 137,
+            "navigation_ms": 1676,
+            "setup_ms": 0,
+            "outcome": "back_on_jquery_ui",
+            "verdict": "pass",
+            "first_seen_at_step": 3,
+            "seen_at_step": 3,
+            "confirmed": true,
+            "assertions_ok": 1,
+            "assertions_total": 1,
+            "evidence_line": "JQuery UI"
+          },
+          {
+            "out_dir": "/Users/skuser/Studio/jev-browser-test/runs/ab/hover-menu-16f9176/exp-hover-menu-plain/b02",
+            "exit_code": 0,
+            "wall_ms": 7244,
+            "status": "passed",
+            "pass": true,
+            "error": null,
+            "duration_ms": 7113,
+            "jev_ms": 612,
+            "adjudication_ms": 177,
+            "browser_ms": 825,
+            "requests": 4,
+            "input_tokens": 6242,
+            "output_tokens": 737,
+            "model": "jev-1.14.0",
+            "steps": 3,
+            "actions_executed": 2,
+            "decision_confidence": 0.705,
+            "min_decision_confidence": 0.59,
+            "step_confidences": [
+              0.82,
+              0.59
+            ],
+            "stale_steps": 0,
+            "low_confidence_steps": 0,
+            "jev_first_ms": 239,
+            "jev_warm_ms": 186.5,
+            "browser_per_action_ms": 412.5,
+            "step_jev_ms": [
+              239,
+              194,
+              179
+            ],
+            "step_browser_ms": [
+              521,
+              304,
+              null
+            ],
+            "action_browser_ms": [
+              521,
+              304
+            ],
+            "launch_ms": 145,
+            "navigation_ms": 5042,
+            "setup_ms": 0,
+            "outcome": "back_on_jquery_ui",
+            "verdict": "pass",
+            "first_seen_at_step": 3,
+            "seen_at_step": 3,
+            "confirmed": true,
+            "assertions_ok": 1,
+            "assertions_total": 1,
+            "evidence_line": "JQuery UI"
+          },
+          {
+            "out_dir": "/Users/skuser/Studio/jev-browser-test/runs/ab/hover-menu-16f9176/exp-hover-menu-plain/b03",
+            "exit_code": 0,
+            "wall_ms": 3768,
+            "status": "passed",
+            "pass": true,
+            "error": null,
+            "duration_ms": 3621,
+            "jev_ms": 606,
+            "adjudication_ms": 171,
+            "browser_ms": 849,
+            "requests": 4,
+            "input_tokens": 6242,
+            "output_tokens": 737,
+            "model": "jev-1.14.0",
+            "steps": 3,
+            "actions_executed": 2,
+            "decision_confidence": 0.695,
+            "min_decision_confidence": 0.69,
+            "step_confidences": [
+              0.7,
+              0.69
+            ],
+            "stale_steps": 0,
+            "low_confidence_steps": 0,
+            "jev_first_ms": 242,
+            "jev_warm_ms": 182,
+            "browser_per_action_ms": 424.5,
+            "step_jev_ms": [
+              242,
+              179,
+              185
+            ],
+            "step_browser_ms": [
+              539,
+              310,
+              null
+            ],
+            "action_browser_ms": [
+              539,
+              310
+            ],
+            "launch_ms": 135,
+            "navigation_ms": 1539,
+            "setup_ms": 0,
+            "outcome": "back_on_jquery_ui",
+            "verdict": "pass",
+            "first_seen_at_step": 3,
+            "seen_at_step": 3,
+            "confirmed": true,
+            "assertions_ok": 1,
+            "assertions_total": 1,
+            "evidence_line": "JQuery UI"
+          },
+          {
+            "out_dir": "/Users/skuser/Studio/jev-browser-test/runs/ab/hover-menu-16f9176/exp-hover-menu-plain/b04",
+            "exit_code": 0,
+            "wall_ms": 3873,
+            "status": "passed",
+            "pass": true,
+            "error": null,
+            "duration_ms": 3752,
+            "jev_ms": 630,
+            "adjudication_ms": 234,
+            "browser_ms": 860,
+            "requests": 4,
+            "input_tokens": 6242,
+            "output_tokens": 737,
+            "model": "jev-1.14.0",
+            "steps": 3,
+            "actions_executed": 2,
+            "decision_confidence": 0.7,
+            "min_decision_confidence": 0.7,
+            "step_confidences": [
+              0.7,
+              0.7
+            ],
+            "stale_steps": 0,
+            "low_confidence_steps": 0,
+            "jev_first_ms": 207,
+            "jev_warm_ms": 211.5,
+            "browser_per_action_ms": 430,
+            "step_jev_ms": [
+              207,
+              218,
+              205
+            ],
+            "step_browser_ms": [
+              534,
+              326,
+              null
+            ],
+            "action_browser_ms": [
+              534,
+              326
+            ],
+            "launch_ms": 135,
+            "navigation_ms": 1599,
+            "setup_ms": 0,
+            "outcome": "back_on_jquery_ui",
+            "verdict": "pass",
+            "first_seen_at_step": 3,
+            "seen_at_step": 3,
+            "confirmed": true,
+            "assertions_ok": 1,
+            "assertions_total": 1,
+            "evidence_line": "JQuery UI"
+          },
+          {
+            "out_dir": "/Users/skuser/Studio/jev-browser-test/runs/ab/hover-menu-16f9176/exp-hover-menu-plain/b05",
+            "exit_code": 0,
+            "wall_ms": 3808,
+            "status": "passed",
+            "pass": true,
+            "error": null,
+            "duration_ms": 3674,
+            "jev_ms": 607,
+            "adjudication_ms": 193,
+            "browser_ms": 855,
+            "requests": 4,
+            "input_tokens": 6242,
+            "output_tokens": 737,
+            "model": "jev-1.14.0",
+            "steps": 3,
+            "actions_executed": 2,
+            "decision_confidence": 0.68,
+            "min_decision_confidence": 0.6,
+            "step_confidences": [
+              0.76,
+              0.6
+            ],
+            "stale_steps": 0,
+            "low_confidence_steps": 0,
+            "jev_first_ms": 213,
+            "jev_warm_ms": 197,
+            "browser_per_action_ms": 427.5,
+            "step_jev_ms": [
+              213,
+              201,
+              193
+            ],
+            "step_browser_ms": [
+              539,
+              316,
+              null
+            ],
+            "action_browser_ms": [
+              539,
+              316
+            ],
+            "launch_ms": 141,
+            "navigation_ms": 1551,
+            "setup_ms": 0,
+            "outcome": "back_on_jquery_ui",
+            "verdict": "pass",
+            "first_seen_at_step": 3,
+            "seen_at_step": 3,
+            "confirmed": true,
+            "assertions_ok": 1,
+            "assertions_total": 1,
+            "evidence_line": "JQuery UI"
+          }
+        ]
+      }
+    }
+  },
+  "summary": {
+    "moved_all": 0,
+    "moved_some": 1,
+    "confidence_fell": 0,
+    "not_compared": 0
+  }
+}

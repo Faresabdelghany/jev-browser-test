@@ -1,0 +1,80 @@
+{
+  "spec_id": "exp-frames-stripe-card",
+  "outcome": "undetermined",
+  "verdict": null,
+  "note": null,
+  "probability": null,
+  "confidence": null,
+  "seen_at_step": null,
+  "first_seen_at_step": null,
+  "confirmed": false,
+  "confirmed_by": null,
+  "path_confidence": 0.51,
+  "reason": {
+    "status": "budget_exhausted",
+    "blocked_reason": "nothing",
+    "stuck_reason": null,
+    "suggested_verdict": "test_issue"
+  },
+  "evidence": {
+    "line": null,
+    "present": null,
+    "screenshot": "steps/final.png",
+    "checks": {}
+  },
+  "assertions": [],
+  "outcomes_seen_earlier": [],
+  "announcements": [
+    {
+      "step": 3,
+      "text": "Verify",
+      "kind": "live"
+    },
+    {
+      "step": 3,
+      "text": "EN",
+      "kind": "live"
+    }
+  ],
+  "story": [
+    "1 SCROLL_DOWN",
+    "2 TYPE_TEXT [0] textbox \"Credit or debit card number\" in \"frame: Secure card payment input frame\" <- card_number",
+    "3 TYPE_TEXT [11] textbox \"Credit or debit card expiration date\" in \"frame: Secure card payment input frame\" <- card_expiry",
+    "4 TYPE_TEXT [12] textbox \"Credit or debit card CVC/CVV\" in \"frame: Secure card payment input frame\" <- card_cvc",
+    "13 CLICK [8] button \"Pay €31.96\"",
+    "17 TYPE_TEXT [1] textbox \"Name\" <- name",
+    "19 TYPE_TEXT [2] textbox \"Email\" <- email",
+    "20 TYPE_TEXT [3] textbox \"Address\" <- address",
+    "21 TYPE_TEXT [4] textbox \"City\" <- city",
+    "22 TYPE_TEXT [5] textbox \"ZIP\" <- zip"
+  ],
+  "run_stamp": null,
+  "status": "budget_exhausted",
+  "duration_ms": 27725,
+  "usage": {
+    "jev_requests": 26,
+    "input_tokens": 126509,
+    "output_tokens": 14788,
+    "model": "jev-1.14.0",
+    "reconnects": 0
+  },
+  "trace": "runs/probe/stripe-1/trace.json",
+  "diagnostics": {
+    "counts": {
+      "page_errors": 0,
+      "console_errors": 0,
+      "failed_requests": 0,
+      "http_errors": 1,
+      "server_errors": 1
+    },
+    "server_errors": [
+      {
+        "status": 500,
+        "method": "POST",
+        "url": "https://stripe-payments-demo.appspot.com/payment_intents",
+        "resource": "fetch",
+        "step": 3
+      }
+    ]
+  }
+}
