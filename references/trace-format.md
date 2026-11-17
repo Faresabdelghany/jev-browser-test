@@ -37,7 +37,13 @@ evidence, the file Claude reads first. The trace is the *evidence* behind it; th
                    "server_errors": [ { "status": 500, "method": "POST", "url": ".../api/save", "resource": "fetch", "step": 4 } ] },   //   (4xx responses and console errors are in trace.diagnostics)
   "teardown": { "ok": true, "steps": 3, "ran": 3 },             // only for a spec with `teardown`; on a failure ok false and "failed": { "n", "action", "error" }. Never changes the result
   "expected": { "expect": { "outcome": "bad_credentials" }, "actual": { "outcome": "bad_credentials" },   // only when the spec declares `expect`:
-                "matched": true, "mismatches": {} }                                                      // did the run end in the declared result?
+                "matched": true, "mismatches": {} },                                                     // did the run end in the declared result?
+  "replay": { "path": ".jev/paths/shop-checkout.json", "used": true,      // only with replay on (spec `replay`, --replay). used: a saved path was read
+              "steps_in_path": 8, "steps_replayed": 8, "steps_by_jev": 0,  //   saved steps, how many ran without a request, executed actions Jev chose
+              "handed_back": null,                                         //   or { "at_step": 4, "path_step": 4, "reason": "the page's fields and buttons differ ..." }
+              "waited_ms": 12, "verified_by": "jev",                       //   time spent waiting for saved steps' pages; how the ending was decided ("jev" | "assertions")
+              "saved": false, "save_note": "the saved path was replayed to its end and stands" }   // also "not_used" (why no path was read) and,
+                                                                           //   for a red after saved steps, "note": run it once more with --no-replay
 }
 ```
 
@@ -107,6 +113,8 @@ per run that has a trace.
       "environment_failures": [],             // runs that wrote no trace, or ended before their first observation (phase navigation / setup): [{ "run": 2, "exit_code": 2, "error": "..." }]
       "reason": null,                         // set (and verdict "undetermined") when every run was an environment failure
       "medians": { "wall_ms": 6100, "duration_ms": 6000, "jev_ms": 2000, "browser_ms": 1270, "requests": 6, "input_tokens": 8900, "decision_confidence": 0.96, "steps": 5 },
+      "replay": null,                         // with --replay: { "full": runs that walked their path to its end, "handed_back", "rerun_without": red after saved
+                                              //   steps and run again without the path (each such run has "replay_attempt": the first run, and "replay_disagreed"), "disagreed" }
       "passes": 5
     }
   },
@@ -241,6 +249,13 @@ environment failure (or a spec file is missing / two files share an id).
       "no_effect": true,                                             // this step's executed CLICK/TYPE_TEXT/SELECT/PRESS_ENTER changed nothing (page_changed false): flag NO-EFFECT
       "after_no_effect": true,                                       // this observation is the page the previous action failed to change (a key-mode picture)
       "adjudication_merged": true,                                   // the confirming step: the evidence questions rode in this request (state.lines added)
+      "at_ms": 2392,                                                 // when this page was observed, in ms from the start of the run
+      "replayed": true, "replay_waited_ms": 0,                       // with replay: this action came from the saved path, no request (operation / target / type_value carry
+                                                                     //   "replayed": true and no confidence; the summary shows `saved path`); how long the step waited for its page
+      "replay_waited_for": "button \"Save\" is not on the page",     // with replay_waited_ms > 0: what the page lacked on the last look before the step applied
+      "replay_handback": "the page's fields and buttons differ ...", // the step where the saved path stopped applying and Jev took over, and why (flag REPLAY-ENDED)
+      "replay_verify": true,                                         // the look that decides a replayed run's ending: checks, outcome and evidence line, no operation
+                                                                     //   (flag REPLAY-VERIFY); "replay_final_mismatch": why the page is not the one the recorded run ended on
       "assertions": [ ... ],                                         // on the confirming step: the assert block's results
       "low_confidence": false, "decision_confidence": 0.94, "repeat_count": 1,
       //   an undecided step (low_confidence true) is not executed: "low_streak" counts consecutive undecided steps on one page signature (the run ends

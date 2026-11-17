@@ -109,6 +109,7 @@ each one exercises and the result to expect. Run them all with:
 
 ```bash
 python scripts/run_suite.py specs/examples/*.json --repeat 3 --workers 2   # the hrm-* specs on one worker
+python scripts/run_suite.py specs/examples/*.json --replay                 # again, walking the paths the passes saved
 ```
 
 Keep specs for a private application under `specs/local/` (git-ignored).
@@ -117,7 +118,9 @@ Keep specs for a private application under `specs/local/` (git-ignored).
 
 The demo login (three actions) takes about 5 s a run, of which 2 s is the site's own page load: 5 Jev requests of
 ~0.3 s and ~6k input tokens. Rerunning a finished spec costs Claude a few thousand tokens, against tens of thousands for
-driving the same flow step by step with a snapshot tool. Every number, and how it was measured, is in
+driving the same flow step by step with a snapshot tool. A rerun with `--replay` walks the path the last passing run
+saved and asks Jev once, about the ending: the shop checkout goes from 10 requests and 5.2 s to 1 request and 3.5 s,
+and the 22 examples from 190 requests to 53 (the rest are specs that do not end in a pass). Every number, and how it was measured, is in
 [`docs/superpowers/measurements/README.md`](https://github.com/Faresabdelghany/jev-browser-test/blob/dev-docs/docs/superpowers/measurements/README.md) on the `dev-docs` branch.
 
 ## Layout
@@ -125,7 +128,8 @@ driving the same flow step by step with a snapshot tool. Every number, and how i
 ```
 SKILL.md          the instructions Claude loads
 scripts/          scaffold, run_test, run_suite, report, summarize_trace, spec, bench, ab, junit, selftest
-                  (with selftest_capabilities), unit_tests; observe / policy / rules / jev_client are the runner's parts
+                  (with selftest_capabilities), unit_tests; observe / policy / rules / replay / jev_client are the
+                  runner's parts
 references/       spec-format, trace-format, verdict-rubric, suites, troubleshooting, runner-design
 specs/            two smoke specs; examples/ (public sites), compare/ (the Jev vs Playwright-CLI comparison)
 ```

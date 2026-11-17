@@ -3,6 +3,60 @@
 Notable changes to the jev-browser-test skill. Versions follow [semantic versioning](https://semver.org); the version
 is the one in `.claude-plugin/plugin.json`, and merging a new one to `main` tags and releases it.
 
+## [0.8.0] - 2026-11-17
+
+The first of six steps to make reruns fast without making them less correct: **replay**. Off by default; measured
+against the live Jev API (`jev-1.14.0`) on the twenty-two examples (the numbers and every run are on the `dev-docs`
+branch, `docs/superpowers/measurements/README.md`, section "0.8.0").
+
+### Added
+- **Replay: a passing run saves its path, and the next run walks it without asking Jev.** `run_test.py --replay`
+  (spec: `"replay": true`; `run_suite.py --replay`). A run that ends `passed` writes `.jev/paths/<id>.json`: per
+  action the operation, how to find the target again (role, name, text, context, link target, test ids and stable
+  `id` / `name`, never its number in the table), the *key* of the value typed, and a fingerprint of the page (the
+  URL's shape, the title, the word-named fields and buttons that are not rows of a table). The next run executes
+  those steps with no request, each only while the page matches its fingerprint and exactly one element answers the
+  target's description; the page gets the time the recorded run took to arrive. On any mismatch Jev takes the run
+  from that step, and a pass writes the path again. `references/spec-format.md`, "Replay".
+- **The ending is never the replay's word.** After the last saved step one request asks Jev which declared outcome
+  the page shows (checks and evidence line in the same request, no operation), and the assertions run as in any
+  run. `--replay-verify assert` (`replay.verify`) lets a spec with assertions pass on them alone, with no request:
+  as strong as the assertions are, so it is opt-in within the opt-in.
+- **A red after saved steps is run again without the path** by `run_suite.py --replay`, and that second run is the
+  result (`replay_attempt`, `suite.replay`): a saved path is never the reason for a red. A single run says the same
+  in `result.replay.note`.
+- `result.replay` (steps replayed, where Jev took over and why, how the ending was decided, whether the path was
+  saved), `REPLAY-ENDED` / `REPLAY-VERIFY` and `saved path` in the summary, `at_ms` on every step.
+  `"replay": "never"` keeps a spec out of `--replay`; `--replay-record` writes a fresh path; `--replay-dir`.
+- A path holds no typed value: strings are written with the run's data values, run stamp and dates as tokens
+  (`{{data:first_name}}`, `{{run_stamp}}`) and filled in from the run that replays. A path is dropped when the spec
+  file changes in any way, when the device, viewport, frames, shadow DOM, extra operations or files differ, or when
+  the path format does. `.jev/` writes its own `.gitignore`.
+
+### Measured
+Interleaved A/B (`ab.py --b-arg=--replay`, 3 runs an arm, one run at a time per host), all 22 examples, paths
+recorded beforehand, commit `8d9c8c1`:
+
+| | without replay | with replay |
+|---|---:|---:|
+| Verdicts | | the same in every run of 19 specs; the 3 that moved are the two pages that are random by design (both arms) and one Jev-driven run on the shared demo (no path existed yet) |
+| Jev requests, sum of the specs' medians | 190 | 53 (1 on each of the 16 specs that end in a pass and have a path) |
+| Input tokens | 674,879 | 171,590 |
+| Wall-clock, sum of medians | 184.6 s | 150.8 s |
+| `shop-checkout` | 5.2 s, 10 requests | 3.5 s, 1 request (3.1 s and none with `verify: "assert"`) |
+| `web-form-submit` | 4.9 s, 9 requests | 2.6 s, 1 request |
+| `hrm-leave-assign` | 27.9 s, 23 requests | 21.4 s, 1 request |
+| The 22 as two suites on one worker | 198 s (0.7.0 release check) | 158 s, 44 requests; 143 s and 24 requests with `verify: "assert"` |
+
+What replay does not shorten is what the suite mostly spends: browser launches, page loads, logins in `setup` and
+the pages' own loaders (the two loader specs take 8 s with or without it). The five specs that do not end in a
+pass (two documented bugs, two expected-red, and whichever random page loses the toss) save no path and cost what
+they cost. Recording costs nothing measurable (a first run with replay on: 84.7 s against 83.9 s for the 17 public
+specs).
+
+Replay stays off unless asked for: it is for reruns, and a first run or a run under investigation should be Jev's
+from the first step.
+
 ## [0.7.0] - 2026-11-17
 
 Three follow-ups from the first live day (0.5.1, 0.6.0), each measured against the live Jev API (`jev-1.14.0`; the

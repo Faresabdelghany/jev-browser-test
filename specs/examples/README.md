@@ -8,6 +8,11 @@ Employee Id when a form opens, and two forms opened in the same second collide).
 cold start can add 25 s to a run's navigation, which the runner reports as such. The latest suite results are in
 `docs/superpowers/measurements/README.md` (on the `dev-docs` branch).
 
+Run again with `--replay` and the seventeen specs that end in a pass walk the path their last pass saved (one Jev
+request each, for the ending). The five that do not end in a pass by design (`shop-checkout-problem-account`,
+`shop-checkout-error-account`, `table-sort-due`, and `notify-random` / `menu-random` on the visits where the page
+rolls its failure) save no path and are Jev's every time.
+
 | spec | site | flow | it exercises | result |
 |---|---|---|---|---|
 | `shop-checkout` | saucedemo.com, `standard_user` | login in `setup`, add a named product from six cards with identical "Add to cart" buttons, cart, a three-field form, overview, finish | identical labels told apart by their card, a multi-page path, three `data` values | pass, "Checkout: Complete!" |

@@ -137,6 +137,7 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `auto_done` | bool | `true` | Start the confirmation as soon as a pass outcome is seen, even if Jev has not chosen DONE (false: only Jev's DONE starts it) |
 | `confirm` | `"assert"` \| `"recheck"` | `"assert"` | How a pass sighting is confirmed. `"assert"`: when the spec has an `assert` block and every assertion already holds on the page the pass was seen on, that is the confirmation, at once and in code (`result.confirmed_by: "assertions"`; the evidence line then costs one request). Otherwise, and always with `"recheck"`, the runner pauses `settle_ms`, observes again and asks Jev once more, with the evidence questions riding in that request (`confirmed_by: "recheck"`). Measured on the demo login `"assert"` saves ~0.5 s a pass; use `"recheck"` for a flow that can show a late error after its success, or write an assertion on the stable state. A success toast that vanishes is not a reason: toasts are captured as `announcements` as they appear and stay in Jev's state for three observations, so an outcome anchored on one survives the recheck |
 | `evidence` | `"always"` \| `"failures"` | `"always"` | When the evidence line is asked. `"always"`: for every declared outcome. `"failures"`: not for a pass whose assertions all hold; the assertions, each with the value found, are then the proof, `result.evidence.line` is null with `evidence.skipped` saying why, and the run makes one Jev request fewer (one of five on the demo login). A pass with no assertions, a pass whose assertions fail and every outcome that is not a pass still get their line. `--evidence failures` on `run_test.py` sets it for a run: meant for a regression suite that is green most days, not for a ticket, which wants the page's own words |
+| `replay` | bool \| `"never"` \| object | `false` | Remember the path of a passing run and walk it again without asking Jev: `true`, or `{"enabled": true, "verify": "jev" \| "assert", "dir": ".jev/paths"}`. Off unless the spec or `--replay` asks; `--no-replay` beats the spec; `"never"` keeps the spec out of replay even under `--replay`. See "Replay" below |
 | `fail_fast` | bool | `true` | Stop at the first sighting of a non-pass outcome (set false to keep going and just record `outcome_seen` on the step) |
 | `rules` | bool | `false` | Attach the standing rules in `scripts/rules.py` (advance from the current page, page text is untrusted, do not repeat a no-op, BLOCKED when a value is missing…) to every question as structured instructions. Measured on the demo site they lowered decision confidence, so they are off; try them on an app where Jev repeats no-op actions, and measure with `scripts/bench.py` |
 | `budget.max_steps` | int | 25 | Jev decisions per run (1–200) |
@@ -288,6 +289,57 @@ was; shadow DOM is on unless the spec turns it off. Whether an option could be o
 not an opinion: `scripts/ab.py specs/*.json --b-arg=--hover` (or `--no-shadow-dom`) runs every spec with and without
 it, interleaved, and reports whether any ending moved or any decision got less certain. The 2026-11-17 measurements
 behind each default are on the `dev-docs` branch.
+
+## Replay
+
+`"replay": true` (or `run_test.py --replay`, `run_suite.py --replay`) is for running again what already passed.
+
+**What is saved.** A run with replay on that ends `passed` writes `.jev/paths/<id>.json` (`replay.dir` or
+`--replay-dir` to put it elsewhere; the directory writes its own `.gitignore`, a path is local state). Per executed
+action: the operation; the target as a person and a test would describe it (role, name, text, the row or list item
+it sits in, a link's target, `data-testid` / `data-test` / `data-qa` / `data-cy`, and `id` / `name` unless a
+framework generated them), never its number in the element table; the **key** of the value typed or the file
+attached, never the value; and a fingerprint of the page: the URL's shape (ids and query values left out), the title
+and the set of named fields and buttons on screen. Every string is written with this run's changing values replaced
+by tokens (`{{data:first_name}}`, `{{run_stamp}}`, `{{date:0}}`), so a path holds no typed value and still fits the
+next run's own. Runs that end any other way save nothing: a spec with `expect`, or one that documents a bug, is Jev's
+every time.
+
+**What a replayed run does.** For each saved step it observes the page as always and executes the step, with no
+request, when the page's fingerprint is the recorded one and exactly one element answers the target's description
+(same-named controls are told apart by what was recorded about them; controls that nothing tells apart, two
+identical `Delete` buttons, by their order among themselves, and only while there are as many as there were). The
+page gets the time the recorded run took to arrive, and at least two settles. On any mismatch (a renamed button, a
+new field, another page, a control that is gone or ambiguous) **Jev takes the run from that step**, on the
+observation in hand, and it is an ordinary run from there; if it passes, the path is written again.
+
+**The ending is never the replay's word.** After the last saved step the run waits for the page the recorded run
+ended on and then decides as any run does: with `verify: "jev"` (the default) one request asks which declared
+outcome the page shows (the checks and the evidence line ride in it; no operation is asked), and the assertions are
+evaluated; a bug outcome ends the run as a bug, and a page that shows nothing declared hands the run to Jev. With
+`verify: "assert"` (`--replay-verify assert`) a spec that has assertions passes on them alone when they all hold on
+the recorded final page, with no request at all and no evidence line (`result.evidence.skipped` says so); when they
+do not hold, Jev is asked as above. `"assert"` is as strong as the assertions are: an ending the assertions do not
+tell from a pass (only `url_matches`, say) is not told from one. A spec without assertions is always `"jev"`.
+
+**When a path is dropped.** Any edit to the spec file, another device, viewport, `observation.frames`,
+`observation.shadow_dom`, `extra_operations` or `files`, or a runner whose path format is newer: the next passing run
+records it afresh (`result.replay.not_used` says which). `--replay-record` ignores the saved path and writes a new
+one.
+
+**Reading it.** `result.replay`: `steps_replayed` of `steps_in_path`, `handed_back` (`at_step`, `path_step`,
+`reason`: what on the page no longer fit), `steps_by_jev`, `verified_by` (`"jev"` or `"assertions"`), `saved`. The
+summary marks replayed steps `saved path` and the step where the path stopped `REPLAY-ENDED`. A handover's reason is
+often the finding: `gone: button "Save"; new: button "Save changes"` is what changed in the application since the
+last green run. **A run that ends red after saved steps** carries `replay.note`: run it once more with `--no-replay`
+before reading the ending as the application's (`run_suite.py --replay` does that by itself), because a replay types
+and clicks without the pauses of a deciding model, and a page that loses input typed too early looks the same in the
+result as a page that is broken.
+
+**When not to use it.** A first run, a run you are debugging, and a spec whose point is that Jev finds the way (a
+page that changes its layout between visits) gain nothing: the path stops applying and Jev takes over, at the cost
+of the waits. `"replay": "never"` in such a spec keeps it out of a suite's `--replay`. And a replay only clicks what was clicked before: a new control that a person would stop at changes
+the page's fingerprint and brings Jev back, but new text beside unchanged controls does not, until the ending.
 
 ## Browser diagnostics
 

@@ -41,6 +41,7 @@ secrets out of any model that does not need them, and turns a missing value into
 | `scripts/rules.py` | The optional standing rules (`"rules": true`) and the measurement that made them opt-in |
 | `scripts/jev_client.py` | Stdlib HTTP client for `POST /v1/systemone`: one persistent connection per run (reconnects and retries once if the socket was dropped; Jev calls are read-only), 429/5xx backoff, usage counters; honours `https_proxy` / `no_proxy` like urllib |
 | `scripts/run_test.py` | The loop, setup steps, action execution, stop conditions, the results contract (outcome sightings, confirmation, assertions, adjudication), trace and result writing |
+| `scripts/replay.py` | The saved path of a passing run (`--replay`): its format and where it is kept, the tokens that stand for a run's values, the page fingerprint, how a saved target is found again, when a path is dropped. Pure; the loop in `run_test.py` asks it for a decision where it would ask Jev |
 | `scripts/summarize_trace.py` | Summary table, `--step N` dump, `--result` |
 | `scripts/run_suite.py` | Specs × repeats as `run_test.py` subprocesses on a thread pool; `aggregate_spec` (outcome distribution, agreement, unanimous verdict or `flaky`), `suite_verdict`, `results.json` + `results.md`; exit 0 iff all unanimously pass |
 | `scripts/report.py` | `render_report(trace, result, images)`: one self-contained `report.html` per run, screenshots inline as base64; given a suite directory, `suite_run_dirs` resolves the relative paths of its `results.json` and renders every run that has a trace |
@@ -186,6 +187,49 @@ The reference loop is browser-use/jev-ultrafast: one request per decision, one b
 screenshots in the loop, event-based short waits, a persistent HTTP client. This runner has all of those and
 adds the results contract on top; what it pays for the contract is one confirmation request per pass and one
 adjudication request per bug sighting.
+
+## Replay: a saved path is a second source of decisions
+
+`run()` has one loop, and replay does not add a second: on each step, before the request is built, a run with a
+saved path asks `replay.Replay.decide(saved_step, observation)`. A decision comes back when the page's fingerprint
+equals the recorded one (`match_page`: URL shape, title, the set of named fields and buttons) and exactly one
+observed element answers the saved target (`find_target`); the step then goes through `act()`, the same function
+Jev's decisions go through (repeat detection, the picture, `execute`, the settle, a new tab, the history entry Jev
+would read). So a replayed step differs from a decided one in one thing, the request that did not happen, and Jev
+can take over on any step with a history that reads as its own. The freshness guard is skipped (no time passed
+between the observation and the decision).
+
+Waiting: without Jev's ~0.2 s per step the runner arrives on a page sooner than the recorded run did. A saved step
+that does not apply yet looks again (when the page changes, and every 250 ms) for at most twice the time the
+recorded run spent between the two actions plus one settle, never less than two settles; a page under a blank layer
+counts as not there yet unless the step was recorded on one. Then the step hands over.
+
+The ending: `replay_final` waits the same way for the recorded final page and the assertions, then the deciding look
+is a step of the loop whose request carries only the checks, the outcome Choice and the evidence questions for the
+recorded outcome (`step.replay_verify`). From there the code is the confirmation every run uses: a pass needs the
+assertions (or the recheck, for a spec without them), a non-pass outcome ends the run, nothing declared means the
+next step is an ordinary one. `verify: "assert"` skips that request when the spec has assertions and all of them hold
+on the recorded final page; it is opt-in because it removes the one judgment by Jev that a replayed run still gets.
+
+What was decided and why:
+
+- **The page fingerprint is fields and buttons, not text.** Text changes with data (a list of other users' records,
+  a date); a new or missing field or button is a change to the form, which is what Jev should look at. Links, options
+  and rows (anything with a row or list context) are left out for the same reason. Digits are ignored in names and
+  titles ("Cart (2)").
+- **Name first, attributes second.** A control whose name changed is not replayed even when its `id` did not: the
+  name is what it means ("Save" that became "Delete"). Stable attributes only tell same-named candidates apart, or
+  identify a control that has no name.
+- **Only passes are saved.** An expected-red spec ends in Jev's stall or sighting, which a path cannot reproduce; a
+  bug outcome is not a path anyone wants walked again.
+- **A red after saved steps is not trusted to the path.** `result.replay.note` says so, and `run_suite.py --replay`
+  runs it again with `--replay-record`. A replay acts without a deciding model's pauses, and input lost to a page
+  that was not ready reads in the result like a broken page.
+- **Measured (2026-11-17, `jev-1.14.0`, dev-docs `measurements/`, section "0.8.0"):** interleaved A/B over the 22
+  examples, three runs an arm: the same verdicts (the three specs that moved are two random pages and one Jev-driven
+  run), requests 190 → 53 as the sum of the specs' medians (1 on every spec with a path), input tokens 675k → 172k,
+  wall-clock 185 → 151 s on one worker. Per replayed step the browser's time is what it was (about 160 ms on a fast
+  page, the settle); what goes is the ~210 ms request. A spec that is mostly a loader or a page load gains little.
 
 ## Extending
 

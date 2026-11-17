@@ -165,6 +165,17 @@ rerun that passes tells you nothing about why the first one failed. A suite (bel
 3–5 repeats. Never fire dozens of runs at a page to answer one question, and use at most 2 workers against a
 shared demo host: its load timeouts are then your flakiness, not the page's.
 
+**Running a spec again that already passed: `--replay`.** A run with `--replay` (or `"replay": true` in the spec)
+that passes saves the path it took to `.jev/paths/<id>.json`: per action the operation, how to find the control again
+(role, name, context, stable attributes) and the *key* of the value typed, never the value. The next `--replay` run
+executes those steps without asking Jev, each only while the page still matches the one it was recorded on and the
+control is found unambiguously; where one no longer applies, Jev takes the run from that step and a pass rewrites the
+path. The ending is never the replay's word: Jev is asked once which declared outcome the final page shows and the
+assertions run, as in any run (`result.replay` says how many steps were replayed, where Jev took over and why). Use
+it for reruns and regression suites, not for the first run of a spec or a run you are debugging: a red after saved
+steps says so (`result.replay.note`), and the next thing to do is the same run with `--no-replay`. Editing the spec
+drops its path. `references/spec-format.md` ("Replay") has the rules.
+
 ### 3. Read the result, then the trace
 
 ```bash
@@ -262,6 +273,11 @@ Launch it with the Bash tool's `run_in_background` and do nothing until the comp
 for a spec that is `undetermined` or `flaky`. `--junit runs/junit.xml` adds a JUnit report for a CI dashboard. `references/suites.md` says how to read agreement and flakiness, which
 kind of flaky it is (environment or an app that varies by design), and how to get a `report.html` for a human.
 
+A suite you run again and again takes `--replay`: every spec walks the path its last passing run saved and asks Jev
+only about the ending (one request instead of five to twenty-five), and a run that ends red after saved steps is run
+once more without the path by the suite itself, so a red in `results.md` is always a run in which Jev chose every
+step.
+
 ## What makes a run fast (and what does not)
 
 The runner already makes one request per decision and waits on events, not on timers, and the ~0.3 s per request is
@@ -272,6 +288,8 @@ and the waiting:
 - Give the spec assertions: a pass then confirms itself in code, saving a pause, an observation and a request.
 - Name the visible end state in the goal and the outcomes; a vague goal buys WAITs and wandering steps.
 - Use `wait_for {selector|url}` instead of `wait {ms}` in `setup`.
+- Rerun with `--replay` (above): the requests of a rerun fall to one, and the steps to the browser's own time. It
+  does not shorten the page's loading, a login in `setup` or a loader the flow waits for.
 - Do not add repeats to be sure: one run is evidence, three to five measure stability, more is load on the host.
 - A regression suite that is green most days can run with `--run-arg=--evidence=failures`: a pass whose assertions
   hold is then not asked for its evidence line (one request fewer per pass; the assertions' `actual` values are the
@@ -291,7 +309,7 @@ keys or two same-named elements wants keys named like the app's labels, or a `no
   `report.html`), `spec.py` (validation), `summarize_trace.py`, `selftest.py` (offline check, with
   `selftest_capabilities.py`), `unit_tests.py`, `bench.py` (N repeats, medians), `ab.py` (the specs with and without
   an option, or on two versions of the runner, interleaved), `junit.py`, and the pieces
-  `observe.py`, `policy.py`, `rules.py`, `jev_client.py` (read
+  `observe.py`, `policy.py`, `rules.py`, `replay.py`, `jev_client.py` (read
   `references/runner-design.md` before changing them).
 - `references/spec-format.md` (every field), `troubleshooting.md` (symptom → fix), `suites.md` (agreement, flakiness,
   reports), `trace-format.md`, `verdict-rubric.md`, `runner-design.md`.
