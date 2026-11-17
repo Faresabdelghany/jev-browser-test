@@ -35,13 +35,13 @@ from observe import (
     fingerprint, loading_indicators, mask_secrets, mask_text, observe, signature,
 )
 from policy import (
-    ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, announcement_lines, build_adjudication, build_questions, build_reason_questions,
+    ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, SUGGESTED_VERDICTS, announcement_lines, build_adjudication, build_questions, build_reason_questions,
     build_state, defer_action, deferred_outcomes, evidence_line_keys, is_field, quoted_pick, read_checks, read_choice,
     read_outcome, recent_announcements, resolve_target, seen_outcomes, suggested_verdict, validate_choice,
 )
 from spec import (DIAGNOSTIC_ASSERTIONS, HEADED_ENV, UNDETERMINED, effective_outcomes, load_dotenv, load_spec, match_expect, resolve_headless,
                   spec_warnings, utf8_stdio, validate)
-from summarize_trace import is_action_step, summarize
+from summarize_trace import STALLED_STATUSES, is_action_step, summarize, unobserved_controls
 
 
 class BrowserUnavailable(RuntimeError):
@@ -1060,6 +1060,19 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
             "stuck_reason": stuck,
             "suggested_verdict": suggested_verdict(status, typed),
         }
+        # A stalled run on a page that keeps controls where the spec did not let the observer look (an unlisted
+        # <iframe>, shadow DOM turned off, a file field without `files`): the summary's hints, in the result too. And
+        # when the typed reason that decided the suggestion is `control_not_on_page`, the suggestion is test_issue,
+        # not bug: "not on this page" is what a control inside an unobserved frame looks like to Jev. Live, the
+        # Polymer shop with shadow DOM off: low_confidence, control_not_on_page, suggested bug, beside a hint that
+        # named the option. Any other reason (a dead control, a refusal) keeps its suggestion: most pages have an
+        # <iframe> somewhere.
+        hints = unobserved_controls(spec, terminal) if status in STALLED_STATUSES else []
+        if hints:
+            result["reason"]["hints"] = hints
+            if next((r for r in typed if r and SUGGESTED_VERDICTS.get(r)), None) == "control_not_on_page":
+                result["reason"]["suggested_verdict"] = "test_issue"
+                result["reason"]["suggestion_from"] = "hints"
         if status == "assert_failed":
             result["reason"]["outcome_seen"] = (final.get("outcome") or {}).get("name")
             result["reason"]["failed_assertions"] = [a for a in result["assertions"] if not a["ok"]]

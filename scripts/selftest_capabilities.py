@@ -28,9 +28,16 @@ and for the three interactions Jev drives itself since 0.5.0, each off until the
      the operation is never offered
   M. `evidence: "failures"`: a pass whose assertions hold costs one request fewer and says why it has no line; a bug,
      a pass without assertions and a pass whose assertions fail still get theirs
+
+and for the spec language:
+
+  N. `${DATE...}`: a spec file with a date placeholder is loaded for a given day, the date it names is what Jev is
+     offered and types, the assertion written with the same placeholder reads it back, and the trace says what each
+     placeholder became; RUN_DATE in the environment moves the day
 """
 from __future__ import annotations
 
+import datetime
 import http.server
 import json
 import os
@@ -60,12 +67,13 @@ class ScriptedJev:
     answer is DONE. The outcome Choice is answered by `outcome_rules`: {outcome name: substring of the page text}."""
 
     def __init__(self, moves: list[tuple], outcome_rules: dict[str, str] | None = None, undecided_while: str | None = None,
-                 undecided_ms: int = 0):
+                 undecided_ms: int = 0, blocked_reason: str | None = None):
         self.moves = [list(m) for m in moves]
         self.played: set[int] = set()
         self.outcome_rules = outcome_rules or {}
         self.undecided_while = undecided_while  # text on the page while which every decision is an undecided WAIT
         self.undecided_ms = undecided_ms  # how long an undecided answer takes: the page may move meanwhile
+        self.blocked_reason = blocked_reason  # the answer to blocked_reason when a run stalls (default: the first one offered, `nothing`)
         self.requests = 0
         self.seen_states: list[dict] = []
 
@@ -108,7 +116,8 @@ class ScriptedJev:
             answers["outcome"] = self._choice(seen, crit)
         for reason in ("stuck_reason", "blocked_reason"):
             if reason in questions:
-                answers[reason] = self._choice(next(iter(questions[reason]["criteria"])), questions[reason]["criteria"])
+                pick = self.blocked_reason if reason == "blocked_reason" and self.blocked_reason else next(iter(questions[reason]["criteria"]))
+                answers[reason] = self._choice(pick, questions[reason]["criteria"])
         if "operation" not in questions:
             return {"answers": answers, "usage": usage, "model": "scripted-jev", "latency_ms": 1}
         ops = questions["operation"]["criteria"]
@@ -299,6 +308,44 @@ SHADOW_APP_PAGE = """<!doctype html><html><head><title>Shadow app</title></head>
   });
 </script></body></html>"""
 
+# Captions drawn from another tree, the two shapes met live (0.6.0). The Polymer shop: a link around a custom element
+# that renders the product's title and price in its own shadow root (<a><shop-card></a>), and a link around an icon
+# button that names itself. MDN: a component whose shadow root holds <button><slot></slot></button>, the caption being
+# the host's own text. And the control whose content is all in its own tree (a link around an image), which is named
+# as it always was. The second button's caption is an element shown through the slot: the button is not covered by it.
+SHADOW_NAMES_PAGE = """<!doctype html><html><head><title>Shadow names</title></head><body>
+<h1>Outerwear</h1>
+<a href="#cart"><icon-button aria-label="Shopping cart: 0 items" role="button" tabindex="0"></icon-button></a>
+<a href="#home"><img alt="Shop logo" width="24" height="24" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="></a>
+<div id="grid">
+  <a href="#tech-shell"><shop-card title="Tech Shell Full-Zip" price="$50.20"></shop-card></a>
+  <a href="#crew-neck"><shop-card title="Crew Neck - Grey" price="$22.15"></shop-card></a>
+</div>
+<slot-button id="copy">Copy</slot-button> <slot-button id="reset"><b>Reset</b> all</slot-button>
+<p id="msg"></p>
+<script>
+  customElements.define('icon-button', class extends HTMLElement {
+    connectedCallback() { this.attachShadow({mode: 'open'}).innerHTML = '<style>:host{display:inline-block;width:24px;height:24px;background:#ccd}</style><span></span>'; }
+  });
+  customElements.define('shop-image', class extends HTMLElement {
+    connectedCallback() { this.attachShadow({mode: 'open'}).innerHTML = '<style>:host{display:block;width:120px;height:80px;background:#dde}</style>'; }
+  });
+  customElements.define('shop-card', class extends HTMLElement {
+    connectedCallback() {
+      this.attachShadow({mode: 'open'}).innerHTML = '<style>:host{display:block;width:200px;margin:8px}</style><shop-image></shop-image>' +
+        '<div class="title">' + this.getAttribute('title') + '</div><span class="price">' + this.getAttribute('price') + '</span>' +
+        '<span style="display:none">internal sku 4711</span>';
+    }
+  });
+  customElements.define('slot-button', class extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({mode: 'open'});
+      root.innerHTML = '<button class="button" type="button" aria-labelledby="label"><span id="label"><slot></slot></span></button>';
+      root.querySelector('button').addEventListener('click', () => { document.getElementById('msg').textContent = this.id === 'copy' ? 'Saved successfully' : 'Reset done'; });
+    }
+  });
+</script></body></html>"""
+
 # Two file fields: one in plain sight with a label, one the page hides behind a styled label (display: none), the
 # usual "Choose photo" button. Submit confirms only when both hold a file.
 UPLOAD_PAGE = """<!doctype html><html><head><title>Upload</title><style>.btn{display:inline-block;padding:6px;border:1px solid #888;cursor:pointer}</style></head><body>
@@ -344,7 +391,8 @@ li.addEventListener('mouseleave', () => { clearTimeout(t); sub.style.display = '
 </script></body>""")
 
 ROUTES = {"/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
-          "/device": DEVICE_PAGE, "/tabs": TABS_PAGE, "/receipt": RECEIPT_PAGE, "/spinner": SPINNER_PAGE, "/shadow": SHADOW_PAGE}
+          "/device": DEVICE_PAGE, "/tabs": TABS_PAGE, "/receipt": RECEIPT_PAGE, "/spinner": SPINNER_PAGE, "/shadow": SHADOW_PAGE,
+          "/shadow-names": SHADOW_NAMES_PAGE}
 
 
 class _Site(http.server.BaseHTTPRequestHandler):
@@ -580,6 +628,18 @@ def run_checks(tmp: str | None = None) -> list[str]:
     trace, out = go("shadow-hint", shadow, ScriptedJev([("undecided",)], SAVED))
     if trace["steps"][-1].get("shadow_hosts") != 1 or "shadow DOM" not in flags_of(trace, out):
         failures.append(f"H: a stalled run on a page with controls in shadow DOM should say so: {trace['steps'][-1].get('shadow_hosts')}")
+    # the same stall when Jev says the control is not on the page (live: the Polymer shop with shadow DOM off): the result
+    # carries the hint and suggests test_issue, not bug; with the page observed in full the same answer keeps bug
+    trace, out = go("shadow-hint-reason", shadow, ScriptedJev([("undecided",)], SAVED, blocked_reason="control_not_on_page"))
+    reason = trace["result"]["reason"]
+    if (reason.get("suggested_verdict"), reason.get("suggestion_from")) != ("test_issue", "hints") or "shadow DOM" not in " ".join(reason.get("hints") or []) \
+            or "from the hint below" not in flags_of(trace, out):
+        failures.append(f"H: control_not_on_page on a page with unobserved shadow DOM should suggest test_issue and carry the hint: {reason}")
+    seen_all = make_spec(base + "/shadow", budget={"max_steps": 3, "max_seconds": 30})
+    trace, out = go("shadow-no-hint", seen_all, ScriptedJev([("undecided",)], SAVED, blocked_reason="control_not_on_page"))
+    reason = trace["result"]["reason"]
+    if reason.get("suggested_verdict") != "bug" or reason.get("hints"):
+        failures.append(f"H: control_not_on_page on a page observed in full keeps the suggestion bug: {reason}")
     scripted = make_spec(base + "/shadow", setup=[{"action": "click", "selector": "#inner-save"}])
     trace, out = go("shadow-setup", scripted, ScriptedJev([], SAVED))
     if trace["status"] != "passed":
@@ -649,6 +709,30 @@ def run_checks(tmp: str | None = None) -> list[str]:
     if trace["status"] == "passed" or any(e.get("name") in ("Nickname", "Save profile") for s in trace["steps"] for e in s["elements"]) \
             or "shadow DOM" not in flags_of(trace, out):
         failures.append(f"J: without observation.shadow_dom the shadow controls are not offered and the stalled run says so: {trace['status']}")
+
+    # J2. captions drawn from another tree (live, 0.6.0: the Polymer shop's product links and MDN's Copy / Reset buttons
+    # read `link ""` and `button ""`, and each product card was in the table three times)
+    named = make_spec(base + "/shadow-names", goal="Copy the list, so that the page says it was saved.",
+                      **{"assert": [{"element_present": {"role": "button", "name": "Copy"}},
+                                    {"element_present": {"role": "link", "name": "Tech Shell Full-Zip $50.20"}}]})
+    trace, out = go("shadow-names", named, ScriptedJev([("click", "Copy")], SAVED))
+    table = [(e["role"], e.get("name")) for e in trace["steps"][0]["elements"]]
+    want = [("link", "Shopping cart: 0 items"), ("link", "Tech Shell Full-Zip $50.20"), ("link", "Crew Neck - Grey $22.15"), ("button", "Copy"),
+            ("button", "Reset all")]
+    if trace["status"] != "passed" or not all(a["ok"] for a in trace["result"]["assertions"]):
+        failures.append(f"J2: a button named through a slot is clicked and asserted by that name: {trace['status']} {trace['result']['assertions']}")
+    if any(w not in table for w in want):
+        failures.append(f"J2: a caption in a nested shadow root, through a slot or on a self-named child names the control: missing "
+                        f"{[w for w in want if w not in table]} in {table}")
+    if ("link", "") not in table or any("logo" in (n or "").lower() or "sku" in (n or "") for _, n in table):
+        failures.append(f"J2: a link whose content is all in its own tree is named as before, and text that is not displayed names nothing: {table}")
+    if len(table) != 7 or any(r == "clickable" for r, _ in table) or trace["steps"][0].get("covered_controls"):
+        failures.append(f"J2: the title and the image inside a card's shadow root are inside the link around the card, not entries of their own, and a button is not covered by the caption slotted into it: {table} covered={trace['steps'][0].get('covered_controls')}")
+    plain = make_spec(base + "/shadow-names", goal=named["goal"], budget={"max_steps": 3, "max_seconds": 30}, observation={"shadow_dom": False})
+    trace, out = go("shadow-names-off", plain, ScriptedJev([("click", "Copy"), ("undecided",)], SAVED))
+    off = [(e["role"], e.get("name")) for e in trace["steps"][0]["elements"]]
+    if any(n for r, n in off if r == "link") or ("button", "Copy") in off:
+        failures.append(f"J2: with shadow DOM off nothing is read across a shadow boundary: {off}")
 
     # K. uploads, driven by Jev ------------------------------------------------------------------------------------------------
     photo = os.path.join(tmp, "photo-sample.png")
@@ -746,6 +830,41 @@ def run_checks(tmp: str | None = None) -> list[str]:
     trace, out = go("evidence-bug", bug, jev)
     if (trace["outcome"], trace["result"]["evidence"]["line"]) != ("said_saved", "Saved successfully"):
         failures.append(f"M: an outcome that is not a pass always gets its line: {trace['outcome']} {trace['result']['evidence']}")
+
+    # N. ${DATE...} -----------------------------------------------------------------------------------------------------------
+    # The spec is a file, loaded the way run_test.py loads it. Tuesday 17 November 2026 + 30 days is a Thursday; on to
+    # Wednesday is 23 December, and the page wants yyyy-dd-mm (live: the OrangeHRM demo's date fields).
+    from spec import load_spec
+    dated_path = os.path.join(tmp, "dated.json")
+    with open(dated_path, "w", encoding="utf-8") as f:
+        json.dump({"id": "dated", "start_url": base + "/app",
+                   "goal": "Type the given date into Name and save, so that the page says it was saved.",
+                   "notes": "The given date is ${DATE+30d+wed:dddd d mmmm yyyy}.",
+                   "data": {"day": "${DATE+30d+wed:yyyy-dd-mm}"},
+                   "outcomes": {"saved": {"when": "The page says 'Saved successfully'", "verdict": "pass"}},
+                   "assert": [{"field_value": {"label": "Name", "equals": "${DATE+30d+wed:yyyy-dd-mm}"}}],
+                   "budget": {"max_steps": 8, "max_seconds": 60}, "browser": {"settle_ms": 300, "quiet_ms": 50, "action_timeout_ms": 3000}}, f)
+    dated = load_spec(dated_path, today=datetime.date(2026, 11, 17))
+    jev = ScriptedJev([("type", "Name", "day"), ("click", "Save")], SAVED)
+    trace, out = go("dates", dated, jev)
+    offered = [v.get("value") for st in jev.seen_states for v in st.get("available_data_values") or [] if v.get("key") == "day"]
+    held = [a for a in trace["result"]["assertions"] if "field_value" in a]
+    if trace["status"] != "passed" or set(offered) != {"2026-23-12"} or not held or not held[0]["ok"] or held[0]["field_value"]["equals"] != "2026-23-12":
+        failures.append(f"N: the date a placeholder names is offered, typed and asserted: {trace['status']} offered={set(offered)} {held}")
+    if trace["spec"].get("run_date") != "2026-11-17" or (trace["spec"].get("dates") or {}).get("${DATE+30d+wed:yyyy-dd-mm}") != "2026-23-12" \
+            or "Wednesday 23 December 2026" not in trace["spec"]["notes"]:
+        failures.append(f"N: the trace's spec says the day it counted from and what each placeholder became: {trace['spec'].get('run_date')} {trace['spec'].get('dates')}")
+    old_run_date = os.environ.get("RUN_DATE")
+    os.environ["RUN_DATE"] = "2026-12-17"  # the day after the literal date this replaced (2026-16-12) would have gone red
+    try:
+        later = load_spec(dated_path)
+    finally:
+        if old_run_date is None:
+            del os.environ["RUN_DATE"]
+        else:
+            os.environ["RUN_DATE"] = old_run_date
+    if (later["run_date"], later["data"]["day"]) != ("2026-12-17", "2027-20-01"):
+        failures.append(f"N: RUN_DATE in the environment is the day the dates count from: {later['run_date']} {later['data']['day']}")
     return failures
 
 

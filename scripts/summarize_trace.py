@@ -154,7 +154,8 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
         if result.get("reason"):
             r = result["reason"]
             typed = ", ".join(f"{k}={v}" for k, v in (("blocked_reason", r.get("blocked_reason")), ("stuck_reason", r.get("stuck_reason"))) if v)
-            head += f"  ({r.get('status')}" + (f"; {typed}" if typed else "") + f"; suggested verdict: {r.get('suggested_verdict') or 'judge yourself'})"
+            head += (f"  ({r.get('status')}" + (f"; {typed}" if typed else "") + f"; suggested verdict: {r.get('suggested_verdict') or 'judge yourself'}"
+                     + (", from the hint below" if r.get("suggestion_from") == "hints" else "") + ")")
         elif result.get("seen_at_step"):
             head += f"  seen at step {result['seen_at_step']}" + (f" (confirmed by {result.get('confirmed_by') or 'recheck'})" if result.get("confirmed") else "")
         lines.append(head)
@@ -244,6 +245,28 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
 STALLED_STATUSES = ("stuck", "blocked", "low_confidence", "budget_exhausted")
 
 
+def unobserved_controls(spec: dict, last: dict) -> list[str]:
+    """Where the last page may keep controls the observer did not offer, one sentence each naming the spec option that
+    opens it: an <iframe> the spec does not list, shadow DOM the spec turned off, a file field without `files`. Empty
+    when the page has none of them. The summary prints these under the step table of a stalled run, and result.json
+    carries them as `reason.hints` (run_test.build_result), where they also turn a `control_not_on_page` suggestion
+    from bug into test_issue: the control may be exactly where the spec did not let the runner look."""
+    listed = ((spec or {}).get("observation") or {}).get("frames") or []
+    hints = []
+    if last.get("iframes", 0) > len([f for f in last.get("frames") or [] if f.get("elements")]):
+        hints.append(f"the last page shows {last['iframes']} <iframe>(s)" + (f", {len(listed)} listed in observation.frames" if listed else "")
+                     + ". Controls inside a frame are offered only when the spec lists the frame's selector in observation.frames "
+                       "(or script them in setup with \"frame\").")
+    if last.get("shadow_hosts"):
+        hints.append(f"{last['shadow_hosts']} element(s) on the last page keep controls inside shadow DOM, which the observer "
+                     "does not offer because the spec turns it off (\"observation\": {\"shadow_dom\": false} or --no-shadow-dom). A scripted setup "
+                     "step reaches them too: Playwright selectors go into open shadow roots.")
+    if not (spec or {}).get("files") and any(e.get("role") == "file" for e in last.get("elements") or []):
+        hints.append("the last page has a file field and the spec declares no `files`. Give the files Jev may attach "
+                     "(\"files\": {\"cv\": \"fixtures/cv.pdf\"}) and UPLOAD_FILE is offered, or script the upload in setup.")
+    return hints
+
+
 def _hidden_controls_hint(trace: dict) -> list[str]:
     """A run that could not make progress on a page with an <iframe> the spec does not list, or with controls inside
     shadow DOM, may have been looking for a control the observer never offered: say where to look. Silent for runs
@@ -251,22 +274,7 @@ def _hidden_controls_hint(trace: dict) -> list[str]:
     steps = trace.get("steps") or []
     if trace.get("status") not in STALLED_STATUSES or not steps:
         return []
-    last = steps[-1]
-    listed = ((trace.get("spec") or {}).get("observation") or {}).get("frames") or []
-    hints = []
-    if last.get("iframes", 0) > len([f for f in last.get("frames") or [] if f.get("elements")]):
-        hints.append(f"  hint: the last page shows {last['iframes']} <iframe>(s)" + (f", {len(listed)} listed in observation.frames" if listed else "")
-                     + ". Controls inside a frame are offered only when the spec lists the frame's selector in observation.frames "
-                       "(or script them in setup with \"frame\").")
-    if last.get("shadow_hosts"):
-        hints.append(f"  hint: {last['shadow_hosts']} element(s) on the last page keep controls inside shadow DOM, which the observer "
-                     "does not offer because the spec turns it off (\"observation\": {\"shadow_dom\": false} or --no-shadow-dom). A scripted setup "
-                     "step reaches them too: Playwright selectors go into open shadow roots.")
-    spec = trace.get("spec") or {}
-    if not spec.get("files") and any(e.get("role") == "file" for e in last.get("elements") or []):
-        hints.append("  hint: the last page has a file field and the spec declares no `files`. Give the files Jev may attach "
-                     "(\"files\": {\"cv\": \"fixtures/cv.pdf\"}) and UPLOAD_FILE is offered, or script the upload in setup.")
-    return hints
+    return ["  hint: " + h for h in unobserved_controls(trace.get("spec") or {}, steps[-1])]
 
 
 def _screenshot_hint(trace: dict) -> str:

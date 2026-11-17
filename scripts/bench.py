@@ -91,8 +91,10 @@ def measure_trace(trace: dict) -> dict:
     }
 
 
-def run_once(spec_path: str, out_dir: str, python: str, run_args: list[str]) -> dict:
-    cmd = [python, RUN_TEST, spec_path, "--out", out_dir, *run_args]
+def run_once(spec_path: str, out_dir: str, python: str, run_args: list[str], runner: str | None = None) -> dict:
+    """One run_test.py subprocess and what its trace and result say. `runner`: another checkout's run_test.py (ab.py
+    --a-runner), default this one's."""
+    cmd = [python, runner or RUN_TEST, spec_path, "--out", out_dir, *run_args]
     t0 = time.perf_counter()
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     wall_ms = int((time.perf_counter() - t0) * 1000)

@@ -1069,6 +1069,36 @@ class OutcomePolicyTests(unittest.TestCase):
         pending = {"n": 5, "final_look": True, "pending_outcome": "ok", "executed": {"action": "STOP"}}
         r = build_result(trace("budget_exhausted", pending), spec, outcomes, dict(final), "out")
         self.assertEqual((r["outcome"], r["reason"]["pending_outcome"], r["reason"]["suggested_verdict"]), ("undetermined", "ok", "test_issue"))
+        # A stalled run whose page keeps controls where the spec did not let the observer look: the hints are in the
+        # result, and `control_not_on_page` then suggests test_issue (live: the Polymer shop with shadow DOM off said bug)
+        unseen = {"n": 3, "blocked_reason": {"choice": "control_not_on_page"}, "shadow_hosts": 4, "executed": {"action": "STOP"}}
+        r = build_result(trace("low_confidence", unseen), spec, outcomes, dict(final), "out")
+        self.assertEqual((r["reason"]["suggested_verdict"], r["reason"]["suggestion_from"]), ("test_issue", "hints"))
+        self.assertEqual(len(r["reason"]["hints"]), 1)
+        self.assertIn("shadow DOM", r["reason"]["hints"][0])
+        for step in ({**unseen, "shadow_hosts": 0, "iframes": 1},                                        # an <iframe> the spec does not list
+                     {**unseen, "shadow_hosts": 0, "elements": [{"idx": 0, "role": "file", "name": "CV"}]}):  # a file field, no `files`
+            r = build_result(trace("stuck", step), spec, outcomes, dict(final), "out")
+            self.assertEqual((r["reason"]["suggested_verdict"], len(r["reason"]["hints"])), ("test_issue", 1), step)
+        # the same page seen in full: the control really is not there, and the suggestion stays bug
+        r = build_result(trace("low_confidence", {**unseen, "shadow_hosts": 0}), spec, outcomes, dict(final), "out")
+        self.assertEqual(r["reason"]["suggested_verdict"], "bug")
+        self.assertNotIn("hints", r["reason"])
+        self.assertNotIn("suggestion_from", r["reason"])
+        listed = {**unseen, "shadow_hosts": 0, "iframes": 1, "frames": [{"selector": "#pay", "elements": 3}]}
+        r = build_result(trace("blocked", listed), {"id": "s", "observation": {"frames": ["#pay"]}}, outcomes, dict(final), "out")
+        self.assertEqual((r["reason"]["suggested_verdict"], "hints" in r["reason"]), ("bug", False))
+        # a dead control or a refusal on a page that happens to have an <iframe> keeps its suggestion: the hint is there to read
+        dead = {"n": 4, "stuck_reason": {"choice": "control_had_no_effect"}, "blocked_reason": {"choice": "other"}, "iframes": 1,
+                "executed": {"action": "STOP"}}
+        r = build_result(trace("stuck", dead), spec, outcomes, dict(final), "out")
+        self.assertEqual((r["reason"]["suggested_verdict"], len(r["reason"]["hints"])), ("bug", 1))
+        self.assertNotIn("suggestion_from", r["reason"])
+        r = build_result(trace("blocked", {**blocked_step, "iframes": 2}), spec, outcomes, dict(final), "out")
+        self.assertEqual(r["reason"]["suggested_verdict"], "bug")  # site_refused_or_error
+        # a status that is not a stall says nothing about unobserved controls
+        r = build_result(trace("done_unverified", unseen), spec, outcomes, dict(final), "out")
+        self.assertNotIn("hints", r["reason"])
         # with fail_fast false a bug outcome seen on the confirming step is reported beside the pass
         steps = [{"n": 1, "outcome_seen": "err", "executed": {"action": "WAIT", "reason": "confirming outcome ok"}},
                  {"n": 2, "outcome_seen": "err", "executed": {"action": "AUTO_DONE", "confirmed": True}}]
@@ -1848,6 +1878,193 @@ class RunStampTests(unittest.TestCase):
         self.assertEqual(redacted_spec(spec)["run_stamp"], "abc12345")
 
 
+class DatePlaceholderTests(unittest.TestCase):
+    """`${DATE...}`: a date counted from the day of the run, written the way the application wants it. A literal date
+    in a spec rots: live, a leave assigned for 2026-14-10 was listed as Taken, not Scheduled, once that day had passed,
+    and the spec ended `no_records` on every run from then on."""
+
+    TUE = __import__("datetime").date(2026, 11, 17)  # a Tuesday
+
+    def test_terms_shift_the_day_left_to_right(self) -> None:
+        from datetime import date
+        from spec import shift_date
+        for terms, want in (("", date(2026, 11, 17)), ("+30d", date(2026, 12, 17)), ("-7d", date(2026, 11, 10)), ("+0d", date(2026, 11, 17)),
+                            ("+30d+wed", date(2026, 12, 23)),   # Thursday 17 December, on to the next Wednesday
+                            ("+wed", date(2026, 11, 18)), ("-wed", date(2026, 11, 11)),
+                            ("+tue", date(2026, 11, 17)), ("-tue", date(2026, 11, 17)),   # already that day: it stays
+                            ("+mon", date(2026, 11, 23)), ("-mon", date(2026, 11, 16)), ("+sun", date(2026, 11, 22)), ("-sun", date(2026, 11, 15)),
+                            ("+workday", date(2026, 11, 17)), ("-workday", date(2026, 11, 17)),   # a working day stays
+                            ("+4d+workday", date(2026, 11, 23)), ("+5d+workday", date(2026, 11, 23)),   # Saturday, Sunday -> Monday
+                            ("+4d-workday", date(2026, 11, 20)), ("+5d-workday", date(2026, 11, 20)),   # Saturday, Sunday -> Friday
+                            ("+45d", date(2027, 1, 1)), ("+wed+7d", date(2026, 11, 25)), ("+1d-1d", date(2026, 11, 17))):
+            self.assertEqual(shift_date(self.TUE, terms), want, terms)
+        self.assertEqual(shift_date(date(2028, 2, 28), "+1d"), date(2028, 2, 29))  # a leap year is the calendar's business
+        for bad in ("+30x", "+", "+30d+", "30d", "+wed+2w", "+Wed", "+30D", "+1.5d", "+workdays", "+weekday"):
+            with self.assertRaises(ValueError, msg=bad):
+                shift_date(self.TUE, bad)
+        with self.assertRaisesRegex(ValueError, "leaves the calendar"):
+            shift_date(date(9999, 12, 1), "+99999d")
+
+    # the OrangeHRM demo's own list (its Leave > Configure > Holidays, read through its API on 2026-11-17): fixed days, every year
+    DEMO = {"workweek": ["mon", "tue", "wed", "thu", "fri"],
+            "holidays": ["01-01", "03-16", "04-20", "05-18", "06-21", "06-22", "06-24", "07-01", "07-04", "07-09", "07-13", "11-11", "11-12",
+                         "12-25", "12-26", "12-28"]}
+
+    def test_workday_reads_the_specs_calendar(self) -> None:
+        from datetime import date, timedelta
+        from spec import is_workday, shift_date
+        self.assertTrue(is_workday(date(2026, 12, 17)))                     # a Thursday, no calendar: Monday to Friday
+        self.assertFalse(is_workday(date(2026, 12, 19)))                    # a Saturday
+        self.assertFalse(is_workday(date(2026, 11, 11), self.DEMO))         # Remembrance Day, a Wednesday (live: 'No Working Days Selected')
+        self.assertTrue(is_workday(date(2026, 11, 11)))                     # ... which only the calendar knows
+        # Friday 25 December 2026: Christmas, Boxing Day (a Saturday), Sunday, then the Monday the demo also lists
+        self.assertEqual(shift_date(date(2026, 12, 25), "+workday", self.DEMO), date(2026, 12, 29))
+        self.assertEqual(shift_date(date(2026, 12, 28), "-workday", self.DEMO), date(2026, 12, 24))
+        self.assertEqual(shift_date(date(2026, 11, 25), "+30d+workday", self.DEMO), date(2026, 12, 29))
+        self.assertEqual(shift_date(date(2026, 12, 25), "+workday"), date(2026, 12, 25))   # without the calendar a Friday is a Friday
+        # a holiday named with its year holds in that year only
+        one_year = {"holidays": ["2026-12-24"]}
+        self.assertEqual(shift_date(date(2026, 12, 24), "+workday", one_year), date(2026, 12, 25))
+        self.assertEqual(shift_date(date(2027, 12, 24), "+workday", one_year), date(2027, 12, 24))
+        # a Sunday-to-Thursday work week: Friday and Saturday move on to Sunday
+        gulf = {"workweek": ["sun", "mon", "tue", "wed", "thu"]}
+        self.assertEqual(shift_date(date(2026, 11, 20), "+workday", gulf), date(2026, 11, 22))
+        self.assertEqual(shift_date(date(2026, 11, 21), "-workday", gulf), date(2026, 11, 19))
+        # whatever the day of the run, for four years: 30 days ahead and on to a working day never lands on a day the demo refuses
+        day = date(2026, 11, 17)
+        for _ in range(4 * 366):
+            target = shift_date(day, "+30d+workday", self.DEMO)
+            self.assertTrue(is_workday(target, self.DEMO), (day, target))
+            self.assertTrue(30 <= (target - day).days <= 36, (day, target))
+            day += timedelta(days=1)
+        with self.assertRaisesRegex(ValueError, "finds no working day"):
+            shift_date(date(2026, 11, 17), "+workday", {"workweek": ["mon"], "holidays": [f"{m:02d}-{d:02d}" for m in range(1, 13) for d in range(1, 32)]})
+
+    def test_a_calendar_that_cannot_be_read_is_a_spec_problem(self) -> None:
+        from spec import calendar_problems, validate
+        self.assertEqual(calendar_problems(self.DEMO), [])
+        self.assertEqual(calendar_problems({}), [])
+        self.assertEqual(calendar_problems({"holidays": ["02-29", "2028-02-29"]}), [])
+        for bad, word in (({"workweek": []}, "workweek"), ({"workweek": ["monday"]}, "workweek"), ({"workweek": "mon"}, "workweek"),
+                          ({"holidays": ["25/12"]}, "'25/12'"), ({"holidays": ["13-01"]}, "'13-01'"), ({"holidays": ["2027-02-29"]}, "'2027-02-29'"),
+                          ({"holidays": [1225]}, "1225"), ({"holidays": "12-25"}, "holidays"), ({"weekend": ["sat"]}, "'weekend'"), (["12-25"], "object")):
+            problems = calendar_problems(bad)
+            self.assertEqual(len(problems), 1, (bad, problems))
+            self.assertIn(word, problems[0], bad)
+        spec = _merge(DEFAULTS, {"id": "t", "start_url": "http://x/", "goal": "g", "calendar": {"holidays": ["25/12"]},
+                                 "outcomes": {"ok": {"when": "The page says done", "verdict": "pass"}}})
+        self.assertTrue(any("'25/12'" in e for e in validate(spec)))
+        self.assertEqual(DEFAULTS["calendar"], {"workweek": ["mon", "tue", "wed", "thu", "fri"], "holidays": []})
+
+    def test_formats_spell_the_date_the_way_the_app_wants_it(self) -> None:
+        from datetime import date
+        from spec import format_date
+        day = date(2026, 12, 9)  # a Wednesday with a one-digit day
+        for fmt, want in (("yyyy-mm-dd", "2026-12-09"), ("yyyy-dd-mm", "2026-09-12"), ("dd/mm/yyyy", "09/12/2026"), ("d/m/yy", "9/12/26"),
+                          ("d mmmm yyyy", "9 December 2026"), ("dddd d mmmm yyyy", "Wednesday 9 December 2026"), ("ddd, mmm d", "Wed, Dec 9"),
+                          ("mm.dd.yyyy", "12.09.2026"), ("yyyymmdd", "20261209")):
+            self.assertEqual(format_date(day, fmt), want, fmt)
+        self.assertEqual(format_date(day), "2026-12-09")
+        self.assertEqual(format_date(date(2026, 3, 5), "m/d/yyyy mmm ddd"), "3/5/2026 Mar Thu")
+
+    def test_substitution_reaches_every_string_and_leaves_environment_names_alone(self) -> None:
+        from spec import substitute_dates
+        problems, found = [], {}
+        spec = {"goal": "Assign leave on ${DATE+30d+wed:d mmmm yyyy}", "data": {"day": "${DATE+30d+wed:yyyy-dd-mm}", "today": "${DATE}"},
+                "setup": [{"action": "fill", "selector": "#from", "value": "${DATE-1d:dd/mm/yyyy}"}], "budget": {"max_steps": 9},
+                "notes": "${DATE_FROM} and ${DATEX} are environment variables, ${RUN_STAMP} is the stamp"}
+        got = substitute_dates(spec, self.TUE, problems, found)
+        self.assertEqual(got["goal"], "Assign leave on 23 December 2026")
+        self.assertEqual(got["data"], {"day": "2026-23-12", "today": "2026-11-17"})
+        self.assertEqual(got["setup"][0]["value"], "16/11/2026")
+        self.assertEqual(got["notes"], spec["notes"])
+        self.assertEqual(got["budget"], {"max_steps": 9})
+        self.assertEqual(problems, [])
+        self.assertEqual(found, {"${DATE+30d+wed:d mmmm yyyy}": "23 December 2026", "${DATE+30d+wed:yyyy-dd-mm}": "2026-23-12",
+                                 "${DATE}": "2026-11-17", "${DATE-1d:dd/mm/yyyy}": "16/11/2026"})
+
+    def test_a_placeholder_that_cannot_be_read_is_a_spec_problem_not_text_for_the_page(self) -> None:
+        from spec import substitute_dates
+        for bad in ("${DATE+30x}", "${DATE+30d+}", "${DATE:}", "${DATE:hh}", "${DATE 30d}", "${DATE+30d", "${DATE+wed+2w:yyyy}", "${DATE+30D}"):
+            problems: list[str] = []
+            self.assertEqual(substitute_dates({"data": {"day": bad}}, self.TUE, problems)["data"]["day"], bad, bad)  # left as written
+            self.assertEqual(len(problems), 1, (bad, problems))
+            self.assertTrue(problems[0].startswith(bad.split(" ")[0]), (bad, problems))
+
+    def _write(self, spec: dict) -> str:
+        path = os.path.join(tempfile.mkdtemp(prefix="jev-date-"), "dated.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(spec, f)
+        return path
+
+    DATED = {
+        "id": "dated", "start_url": "http://x/", "goal": "Assign leave on the given date so that the list shows it",
+        "notes": "Dates are typed as yyyy-dd-mm; the given date is ${DATE+30d+wed:dddd d mmmm yyyy}.",
+        "data": {"leave_date": "${DATE+30d+wed:yyyy-dd-mm}"},
+        "outcomes": {"listed": {"when": "The table shows a row dated ${DATE+30d+wed:yyyy-dd-mm}", "verdict": "pass"}},
+        "assert": [{"text_contains": "${DATE+30d+wed:yyyy-dd-mm}"}],
+    }
+
+    def test_load_spec_counts_from_the_day_given_then_run_date_then_today(self) -> None:
+        from datetime import date, timedelta
+        from spec import format_date, load_spec, shift_date
+        path = self._write(self.DATED)
+        spec = load_spec(path, today=self.TUE)
+        self.assertEqual(spec["data"]["leave_date"], "2026-23-12")
+        self.assertEqual(spec["notes"], "Dates are typed as yyyy-dd-mm; the given date is Wednesday 23 December 2026.")
+        self.assertEqual(spec["outcomes"]["listed"]["when"], "The table shows a row dated 2026-23-12")
+        self.assertEqual(spec["assert"], [{"text_contains": "2026-23-12"}])
+        self.assertEqual(spec["run_date"], "2026-11-17")
+        self.assertEqual(spec["dates"], {"${DATE+30d+wed:dddd d mmmm yyyy}": "Wednesday 23 December 2026", "${DATE+30d+wed:yyyy-dd-mm}": "2026-23-12"})
+        self.assertNotIn("${DATE", json.dumps({k: v for k, v in spec.items() if k != "dates"}))
+        with mock.patch.dict(os.environ, {"RUN_DATE": "2026-12-17"}):   # pinned: the day after the old literal date would have rotted
+            spec = load_spec(path)
+        self.assertEqual((spec["run_date"], spec["data"]["leave_date"]), ("2026-12-17", "2027-20-01"))
+        env = {k: v for k, v in os.environ.items() if k != "RUN_DATE"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            before = date.today()
+            spec = load_spec(path)
+            after = date.today()
+        self.assertIn(spec["data"]["leave_date"], {format_date(shift_date(d, "+30d+wed"), "yyyy-dd-mm") for d in (before, after)})
+        # whatever the day of the run, the date lies 30 to 36 days ahead and is a Wednesday
+        for offset in range(0, 400, 13):
+            day = self.TUE + timedelta(days=offset)
+            target = shift_date(day, "+30d+wed")
+            self.assertEqual(target.weekday(), 2)
+            self.assertTrue(30 <= (target - day).days <= 36, day)
+
+    def test_load_spec_reports_bad_placeholders_and_a_bad_run_date(self) -> None:
+        from spec import load_spec
+        bad = {**self.DATED, "data": {"leave_date": "${DATE+30x:yyyy-dd-mm}"}}
+        with self.assertRaisesRegex(ValueError, r"date placeholder \$\{DATE\+30x:yyyy-dd-mm\}: cannot read '\+30x'"):
+            load_spec(self._write(bad), today=self.TUE)
+        with mock.patch.dict(os.environ, {"RUN_DATE": "17/11/2026"}):
+            with self.assertRaisesRegex(ValueError, "RUN_DATE='17/11/2026' is not a date"):
+                load_spec(self._write(self.DATED))
+        with self.assertRaisesRegex(ValueError, "calendar.holidays: '25/12' is not a day"):
+            load_spec(self._write({**self.DATED, "calendar": {"holidays": ["25/12"]}}), today=self.TUE)
+
+    def test_load_spec_gives_workday_the_specs_calendar(self) -> None:
+        from datetime import date
+        from spec import load_spec
+        spec = {**self.DATED, "notes": "", "assert": [], "outcomes": {"listed": {"when": "The table shows a row", "verdict": "pass"}},
+                "data": {"leave_date": "${DATE+30d+workday:yyyy-dd-mm}"}, "calendar": {"holidays": self.DEMO["holidays"]}}
+        # 12 October 2026 + 30 days is Wednesday 11 November, Remembrance Day; the 12th is on the list too: Friday the 13th
+        self.assertEqual(load_spec(self._write(spec), today=date(2026, 10, 12))["data"]["leave_date"], "2026-13-11")
+        self.assertEqual(load_spec(self._write({**spec, "calendar": {}}), today=date(2026, 10, 12))["data"]["leave_date"], "2026-11-11")
+        loaded = load_spec(self._write(spec), today=self.TUE)
+        self.assertEqual(loaded["data"]["leave_date"], "2026-17-12")     # a Thursday: no move
+        self.assertEqual(loaded["calendar"]["workweek"], ["mon", "tue", "wed", "thu", "fri"])  # the default week beside the given holidays
+
+    def test_a_spec_without_date_placeholders_records_none_and_ignores_run_date(self) -> None:
+        from spec import load_spec
+        plain = {**self.DATED, "notes": "", "data": {"leave_date": "2026-16-12"}, "assert": [],
+                 "outcomes": {"listed": {"when": "The table shows a row", "verdict": "pass"}}}
+        with mock.patch.dict(os.environ, {"RUN_DATE": "not a date", "DATE_FROM": "x"}):
+            spec = load_spec(self._write(plain))
+        self.assertEqual((spec["run_date"], spec["dates"], spec["data"]["leave_date"]), (None, None, "2026-16-12"))
+
+
 class AfterOutcomeTests(unittest.TestCase):
     """`after` on an outcome: it counts only once a named action has been executed ("only after a click on Search"),
     where `requires_action` (any action) and `requires` (checks on the filters) were too weak: live, 'No Records
@@ -2041,6 +2258,19 @@ class ScaffoldTests(unittest.TestCase):
         loaded = load_spec(os.path.join(tmp, "spec.json"))  # the file validates as the runner loads it
         self.assertEqual(loaded["id"], "search-for-the-given-term")
         self.assertIn("OK: spec", text)
+
+    def test_a_date_placeholder_is_kept_for_run_time_and_a_bad_one_is_refused(self) -> None:
+        code, spec, text = self.run_scaffold(
+            "--url", "https://hr.example.com/", "--goal", "Assign leave on the given date, so that the list shows a row for ${DATE+30d+wed:d mmmm yyyy}",
+            "--data", "leave_date=${DATE+30d+wed:yyyy-dd-mm}", "--assert-text", "${DATE+30d+wed:yyyy-dd-mm}")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(spec["data"], {"leave_date": "${DATE+30d+wed:yyyy-dd-mm}"})
+        self.assertEqual(spec["assert"], [{"text_contains": "${DATE+30d+wed:yyyy-dd-mm}"}])
+        self.assertIn("${DATE+30d+wed:d mmmm yyyy}", spec["outcomes"]["goal_reached"]["when"])
+        code, spec, text = self.run_scaffold("--url", "https://hr.example.com/", "--goal", "Assign leave, so that the list shows it",
+                                             "--data", "leave_date=${DATE+30x}")
+        self.assertNotEqual(code, 0)
+        self.assertIn("date placeholder ${DATE+30x}", text)
 
     def test_options_fill_every_part_of_the_contract(self) -> None:
         code, spec, text = self.run_scaffold(
@@ -2633,6 +2863,18 @@ class SummaryFlagTests(unittest.TestCase):
                   "steps": [{"n": 1, "iframes": 2, "frames": [{"selector": "#a", "elements": 3}, {"selector": "#b", "elements": 1}]}]}
         self.assertEqual(_hidden_controls_hint(listed), [])  # every frame on the page is already observed
 
+    def test_the_summary_says_when_the_suggestion_comes_from_the_hint(self) -> None:
+        from summarize_trace import summarize
+        reason = {"status": "low_confidence", "blocked_reason": "control_not_on_page", "stuck_reason": None, "suggested_verdict": "test_issue",
+                  "suggestion_from": "hints", "hints": ["4 element(s) on the last page keep controls inside shadow DOM, ..."]}
+        trace = {"spec_id": "shop", "status": "low_confidence", "outcome": "undetermined", "steps": [{"n": 1, "shadow_hosts": 4}],
+                 "spec": {"observation": {"shadow_dom": False}}, "result": {"reason": reason}}
+        text = summarize(trace)
+        self.assertIn("suggested verdict: test_issue, from the hint below)", text)
+        self.assertIn("  hint: 4 element(s) on the last page keep controls inside shadow DOM", text)
+        plain = {**trace, "result": {"reason": {**reason, "suggested_verdict": "bug", "suggestion_from": None}}}
+        self.assertIn("suggested verdict: bug)", summarize(plain))
+
 
 class JevDrivenTests(unittest.TestCase):
     """HOVER, UPLOAD_FILE and shadow DOM (0.5.0): offered only when the spec asks, and then asked the way the others are."""
@@ -2813,6 +3055,44 @@ class ABTests(unittest.TestCase):
                 text = f.read()
             self.assertIn("| login | ok x2 | undetermined:low_confidence x2 | **yes, every run** | 0.90 | 0.45 | -0.450 ⚠ |", text)
             self.assertIn("Not safe to make the default", text)
+
+    def test_a_runner_puts_another_checkout_in_arm_a(self) -> None:
+        import ab
+        calls: list[tuple[str, list[str], str | None]] = []
+
+        def fake_run_once(spec_path, out_dir, python, run_args, runner=None):
+            calls.append((os.path.basename(out_dir), list(run_args), runner))
+            return self.run_rec("ok", 0, "passed", confs=(0.6,) if runner else (0.9,))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_path, before = os.path.join(tmp, "login.json"), os.path.join(tmp, "before_run_test.py")
+            for path in (spec_path, before):
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump({"id": "login"}, f)
+            out = os.path.join(tmp, "out")
+            with mock.patch.object(ab, "run_once", fake_run_once), mock.patch("builtins.print"):
+                self.assertEqual(ab.main(["ab.py", spec_path, "--a-runner", before, "--repeat", "2", "--out", out]), 0)   # no --b-arg needed
+                self.assertEqual(ab.main(["ab.py", spec_path, "--a-runner", os.path.join(tmp, "nope.py")]), 2)
+            self.assertEqual(calls, [("a01", [], os.path.abspath(before)), ("b01", [], None), ("a02", [], os.path.abspath(before)), ("b02", [], None)])
+            with open(os.path.join(out, "ab.md"), encoding="utf-8") as f:
+                text = f.read()
+            self.assertIn("# A/B: two versions of the runner", text)
+            self.assertIn(f"arm A with the runner at `{before}`, arm B with this checkout's runner", text)
+            self.assertIn("| login | ok x2 | ok x2 | no | 0.60 | 0.90 | +0.300 |", text)
+            self.assertIn("evidence for merging it", text)
+
+    def test_run_once_runs_the_runner_it_is_given(self) -> None:
+        import bench
+        seen: list[list[str]] = []
+
+        class _Proc:
+            returncode, stdout, stderr = 2, "", "no trace"
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(bench.subprocess, "run", lambda cmd, **kw: seen.append(cmd) or _Proc()):
+            bench.run_once("s.json", os.path.join(tmp, "o1"), "py", ["--hover"])
+            bench.run_once("s.json", os.path.join(tmp, "o2"), "py", [], runner="/before/scripts/run_test.py")
+        self.assertEqual(seen[0][:3] + seen[0][-1:], ["py", bench.RUN_TEST, "s.json", "--hover"])
+        self.assertEqual(seen[1][:3], ["py", "/before/scripts/run_test.py", "s.json"])
 
     def test_a_clean_comparison_says_so(self) -> None:
         import ab

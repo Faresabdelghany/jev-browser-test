@@ -92,7 +92,10 @@ explain.
   value the app **keeps** (a username, a last name, a title, an id) gets **`${RUN_STAMP}`** in it
   (`"username": "jev${RUN_STAMP}"`): the runner substitutes a fresh eight-character stamp every run and repeat,
   so nothing collides with what an earlier run created, and `result.run_stamp` says which value it was. Export
-  `RUN_STAMP=<value>` to rerun a spec against, or clean up after, one particular run's data.
+  `RUN_STAMP=<value>` to rerun a spec against, or clean up after, one particular run's data. A **date** the flow
+  types is a placeholder too, never a literal that rots: `${DATE+2d+workday:yyyy-dd-mm}` is two days after the run,
+  moved on to a working day (the spec's `calendar` lists the app's holidays), in the format after the colon
+  (`spec-format.md` has the terms; `spec.py` prints what each becomes today).
 - **outcomes** — the endings you accept back: the acceptance criteria as `pass`, the wrong behaviour you test for
   (or the ticket reports) as `bug`, a CAPTCHA or approval step as `needs_human`. A negative test declares the
   rejection as `pass` and the success as `bug`, with a `note`. Write each `when` as **one visible fact per
@@ -125,7 +128,7 @@ explain.
   `"browser": {"device": "iPhone 13"}` (or `--device`) for a phone layout. `scaffold.py` has a flag for each of
   these (`--frame`, `--file`, `--hover`, `--follow-new-tabs`, `--device`, `--teardown`, `--no-shadow-dom`). A stalled
   run on a page with an unlisted iframe, shadow-DOM controls it was told not to see or an unused file field says so
-  under its step table.
+  under its step table and in `reason.hints`, and suggests `test_issue` when Jev could not find the control.
 - **long pages and type-aheads** — a link far down a long page wants the goal to say where to scroll; a type-ahead
   wants a `suggestion_not_found` bug outcome. `references/spec-format.md` (Writing the goal and data) has both
   recipes: read them before writing a spec for a long form or an autocomplete.
@@ -287,7 +290,7 @@ keys or two same-named elements wants keys named like the app's labels, or a `no
   `trace.json`), `run_suite.py` (specs × repeats → `results.json` + `results.md`), `report.py` (a run →
   `report.html`), `spec.py` (validation), `summarize_trace.py`, `selftest.py` (offline check, with
   `selftest_capabilities.py`), `unit_tests.py`, `bench.py` (N repeats, medians), `ab.py` (the specs with and without
-  an option, interleaved), `junit.py`, and the pieces
+  an option, or on two versions of the runner, interleaved), `junit.py`, and the pieces
   `observe.py`, `policy.py`, `rules.py`, `jev_client.py` (read
   `references/runner-design.md` before changing them).
 - `references/spec-format.md` (every field), `troubleshooting.md` (symptom → fix), `suites.md` (agreement, flakiness,

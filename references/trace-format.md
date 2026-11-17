@@ -28,6 +28,7 @@ evidence, the file Claude reads first. The trace is the *evidence* behind it; th
   "story": [ "1 TYPE_TEXT [0] textbox \"Username\" <- username", "2 TYPE_TEXT [1] textbox \"Password\" <- password", "3 CLICK [2] button \"Login\"" ],
   "announcements": [ { "step": 6, "text": "Successfully Saved", "kind": "live", "tone": "success" } ],   // every toast / live message of the run, with the step whose observation it preceded
   "run_stamp": "tj4x2ka7",                                       // what ${RUN_STAMP} became in this run (the data it created carries it); null when the spec has none
+                                                                 // (dates: trace.spec.run_date is the day ${DATE...} counted from, trace.spec.dates what each placeholder became; null without one)
   "status": "passed", "duration_ms": 6200,
   "usage": { "jev_requests": 5, "input_tokens": 9774, "output_tokens": 1741, "model": "jev-1.13.0", "reconnects": 0 },
   "trace": "runs/smoke-login-badpw/20260922-101500/trace.json",
@@ -47,7 +48,10 @@ an assertion failed (`assert_failed`). Then `reason` is `{ "status", "blocked_re
 `assert_failed`, `pending_outcome` for a `budget_exhausted` whose final look saw a pass for the first time, `assertions_at_last_look`
 with `last_look_step` for a `done_unverified` whose confirmation looks evaluated the assertions (the whole list as
 last evaluated, held or not)
-(not rechecked, so not a pass: give the run one more step), and `error` for `error`; an `error` whose `phase` is
+(not rechecked, so not a pass: give the run one more step), `hints` for a stalled run whose last page keeps controls
+the observer was not asked to look at (an unlisted `<iframe>`, shadow DOM turned off, a file field without `files`: the
+sentences the summary prints as `hint:`; with `control_not_on_page` they turn the suggestion into `test_issue` and
+`suggestion_from` reads `"hints"`), and `error` for `error`; an `error` whose `phase` is
 `navigation` or `setup` never observed the page (the start URL did not load within `browser.navigation_timeout_ms`,
 or a setup step failed): it is not a verdict (suggested `flaky` for navigation, `test_issue` for setup), the runner
 exits 2 and a suite lists it as an environment/setup failure. `blocked_reason` is Jev's answer on the terminal step (asked there, in one follow-up request, and on the
@@ -203,7 +207,7 @@ environment failure (or a spec file is missing / two files share an id).
       "layer_controls": 0,                                           // with covered_controls: how many offered controls belong to the covering layer (a dialog's buttons, an open list's options); 0 is a blank layer, a loading or saving overlay (run_test.blank_layer); flag COVERED:3(layer:2) when > 0
       "loading_indicators": 1,                                       // only on an undecided (low-confidence) step, when > 0: spinners, indeterminate progress bars and 'Loading...' lines that cover nothing, counted when the decision came back: such a page gets the extra looks a blank layer gets, and nothing else (flag LOADING-IND)
       "frames": [ { "selector": "#card-frame", "elements": 2, "label": "Secure card payment", "url": "..." } ],   // with observation.frames: what each listed <iframe> contributed to the table, or "skipped": why not; its elements carry "frame" and a context "frame: <label>"
-      "iframes": 1, "shadow_hosts": 1,                              // only when > 0: visible <iframe>s, and elements whose shadow root holds controls (not offered): what the summary's hint for a stalled run reads
+      "iframes": 1, "shadow_hosts": 1,                              // only when > 0: visible <iframe>s, and elements whose shadow root holds controls (not offered): what the hints of a stalled run read (the summary's `hint:` lines, `result.reason.hints`)
       "diagnostics": { "page_errors": 1, "http_errors": 1, "server_errors": 1 },   // only when the browser reported something since the previous observation (flags JS-ERROR, HTTP-5xx, HTTP-4xx, REQ-FAILED, CONSOLE-ERR)
       "new_tab": { "followed": true, "url": "..." },                // on the step whose action opened a tab; followed only with browser.follow_new_tabs (flags NEW-TAB / NEW-TAB(not followed))
       "loading_options": 1,                                          // only when > 0: autocomplete rows that only say 'Searching....' / 'Loading...': not offered, the suggestions are on their way (run_test.page_loading); flag LOADING:1

@@ -6,6 +6,7 @@ Run `python scripts/spec.py path/to/spec.json` to validate a spec without a brow
 from __future__ import annotations
 
 import copy
+import datetime
 import json
 import os
 import random
@@ -99,8 +100,150 @@ def new_run_stamp(now: float | None = None, rand=None) -> str:
     r = random.SystemRandom() if rand is None else rand
     return digits.rjust(6, "0")[-6:] + "".join(r.choice(_BASE36) for _ in range(2))
 
+# `${DATE}`: the day of the run, and days counted from it, written the way the application wants its dates:
+# `${DATE}`, `${DATE+30d}`, `${DATE-7d}`, `${DATE+30d+wed}`, `${DATE+30d+workday:dd/mm/yyyy}`. After DATE come terms,
+# applied left to right, and an optional `:format`. A spec that types a literal date goes red the day that date has
+# passed (live: a leave assigned for 2026-14-10 was listed as Taken, not Scheduled, once it had; the next literal
+# would have done the same on 17 December). `+workday` reads the spec's `calendar`: the days of the work week and
+# the application's holidays, because "30 days from now" is a Saturday two days in seven and a holiday now and then
+# (live, the same form: 'Failed to Submit: No Working Days Selected' for a Saturday and for Remembrance Day).
+DATE_RE = re.compile(r"\$\{DATE((?:[+-][^{}:+-]*)*)(?::([^{}]*))?\}")
+RUN_DATE_VAR = "RUN_DATE"  # the environment's RUN_DATE=yyyy-mm-dd is the day `${DATE}` counts from (default: today)
+_DATE_LEFTOVER_RE = re.compile(r"\$\{DATE(?![A-Z0-9_])[^}\s\"']*\}?")  # what is still there after substitution: not `${DATE_FROM}`
+_DATE_TERM_RE = re.compile(r"([+-])(?:(\d{1,5})d|(mon|tue|wed|thu|fri|sat|sun|workday))")
+_HOLIDAY_RE = re.compile(r"(?:(\d{4})-)?(\d{2})-(\d{2})")  # "12-25" (every year) or "2026-12-28" (that year only)
+WORKDAY_SEARCH_DAYS = 366  # how far `workday` looks for a working day before it gives up (a calendar with none)
+_DATE_TOKEN_RE = re.compile(r"yyyy|yy|mmmm|mmm|mm|m|dddd|ddd|dd|d")
+DATE_DEFAULT_FORMAT = "yyyy-mm-dd"
+_DAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+# English names written out here: strftime's follow the machine's locale, and a spec means the same on every machine
+_DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+_MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+
+
+def format_date(day: datetime.date, fmt: str = DATE_DEFAULT_FORMAT) -> str:
+    """`day` written with `fmt`: yyyy / yy the year, mm / m the month's number (with and without a leading zero),
+    mmmm / mmm its English name (December / Dec), dd / d the day of the month, dddd / ddd the English weekday
+    (Wednesday / Wed). Every other character is kept as written, so `yyyy-dd-mm`, `dd/mm/yyyy`, `d mmmm yyyy`
+    and `dddd d mmmm yyyy` are all formats."""
+    parts = {"yyyy": f"{day.year:04d}", "yy": f"{day.year % 100:02d}", "mmmm": _MONTH_NAMES[day.month - 1],
+             "mmm": _MONTH_NAMES[day.month - 1][:3], "mm": f"{day.month:02d}", "m": str(day.month),
+             "dddd": _DAY_NAMES[day.weekday()], "ddd": _DAY_NAMES[day.weekday()][:3], "dd": f"{day.day:02d}", "d": str(day.day)}
+    return _DATE_TOKEN_RE.sub(lambda m: parts[m.group(0)], fmt)
+
+
+def calendar_problems(calendar) -> list[str]:
+    """Problems of a spec's `calendar` (empty list means valid): `workweek`, the days people work, as a non-empty list
+    of mon ... sun, and `holidays`, the days the application treats as non-working, each "mm-dd" (every year) or
+    "yyyy-mm-dd" (that year only)."""
+    if not isinstance(calendar, dict):
+        return ["'calendar' must be an object: {\"workweek\": [\"mon\", ..., \"fri\"], \"holidays\": [\"12-25\", \"2026-12-28\"]}"]
+    errors = [f"calendar: unknown key '{k}' (workweek, holidays)" for k in calendar if k not in ("workweek", "holidays")]
+    week = calendar.get("workweek", list(_DAY_KEYS[:5]))
+    if not isinstance(week, list) or not week or any(d not in _DAY_KEYS for d in week):
+        errors.append(f"calendar.workweek must be a non-empty list of {list(_DAY_KEYS)} (the days people work)")
+    holidays = calendar.get("holidays", [])
+    if not isinstance(holidays, list):
+        return errors + ["calendar.holidays must be a list of \"mm-dd\" (every year) or \"yyyy-mm-dd\" (that year only) strings"]
+    for h in holidays:
+        m = _HOLIDAY_RE.fullmatch(h) if isinstance(h, str) else None
+        try:
+            if not m:
+                raise ValueError
+            datetime.date(int(m.group(1) or 2024), int(m.group(2)), int(m.group(3)))  # 2024: a leap year, so "02-29" is a day
+        except ValueError:
+            errors.append(f"calendar.holidays: {h!r} is not a day (write \"12-25\" for every year, \"2026-12-28\" for one)")
+    return errors
+
+
+def is_workday(day: datetime.date, calendar: dict | None = None) -> bool:
+    """Is `day` a working day of the spec's `calendar`: one of its `workweek` days (Monday to Friday when not given)
+    and not one of its `holidays`?"""
+    cal = calendar or {}
+    if _DAY_KEYS[day.weekday()] not in cal.get("workweek", _DAY_KEYS[:5]):
+        return False
+    return f"{day.month:02d}-{day.day:02d}" not in cal.get("holidays", ()) and day.isoformat() not in cal.get("holidays", ())
+
+
+def shift_date(day: datetime.date, terms: str, calendar: dict | None = None) -> datetime.date:
+    """Apply a `${DATE...}` placeholder's terms to `day`, left to right. `+30d` / `-7d`: that many days later /
+    earlier. `+wed` (mon ... sun): on to the next Wednesday, staying on a day that already is one; `-wed`: back to
+    the last one. `+workday`: on to the next working day of `calendar` (is_workday), staying on a day that already is
+    one; `-workday`: back to the last one. Raises ValueError naming the first term it cannot read, a date outside the
+    calendar, or a `calendar` with no working day."""
+    pos = 0
+    for m in _DATE_TERM_RE.finditer(terms):
+        if m.start() != pos:
+            break
+        pos = m.end()
+        sign = 1 if m.group(1) == "+" else -1
+        try:
+            if m.group(2) is not None:
+                day = day + datetime.timedelta(days=sign * int(m.group(2)))
+            elif m.group(3) == "workday":
+                for _ in range(WORKDAY_SEARCH_DAYS):
+                    if is_workday(day, calendar):
+                        break
+                    day = day + datetime.timedelta(days=sign)
+                else:
+                    raise ValueError(f"'{m.group(0)}' finds no working day in {WORKDAY_SEARCH_DAYS} days: check the spec's calendar")
+            else:
+                day = day + datetime.timedelta(days=sign * ((sign * (_DAY_KEYS.index(m.group(3)) - day.weekday())) % 7))
+        except OverflowError:
+            raise ValueError(f"'{m.group(0)}' leaves the calendar") from None
+    if pos != len(terms):
+        raise ValueError(f"cannot read '{terms[pos:]}' (terms are +Nd / -Nd, +mon ... +sun, +workday, and the same with -)")
+    return day
+
+
+def run_date(env=None) -> datetime.date:
+    """The day `${DATE}` counts from: the environment's RUN_DATE (yyyy-mm-dd) when set, else today on this machine's
+    clock. Raises ValueError for a RUN_DATE that is not a date."""
+    pinned = ((os.environ if env is None else env).get(RUN_DATE_VAR) or "").strip()
+    if not pinned:
+        return datetime.date.today()
+    try:
+        return datetime.date.fromisoformat(pinned)
+    except ValueError:
+        raise ValueError(f"{RUN_DATE_VAR}={pinned!r} is not a date (yyyy-mm-dd)") from None
+
+
+def substitute_dates(value, today: datetime.date, problems: list[str], found: dict | None = None, calendar: dict | None = None):
+    """Replace every `${DATE...}` in strings, recursively, with the date it names counted from `today` (`calendar`: the
+    spec's, for `workday`). A placeholder that cannot be read is left as written and named in `problems`; `found`
+    collects placeholder -> date. `${DATE_X}` and every other `${NAME}` are not dates: substitute_env reads those
+    from the environment."""
+    if isinstance(value, str):
+
+        def repl(m):
+            try:
+                if m.group(2) is not None and not _DATE_TOKEN_RE.search(m.group(2)):
+                    raise ValueError(f"the format '{m.group(2)}' names no part of a date (yyyy, mm, dd, mmm, ddd, ...)")
+                text = format_date(shift_date(today, m.group(1), calendar), DATE_DEFAULT_FORMAT if m.group(2) is None else m.group(2))
+            except ValueError as e:
+                problems.append(f"{m.group(0)}: {e}")
+                return m.group(0)
+            if found is not None:
+                found[m.group(0)] = text
+            return text
+
+        out = DATE_RE.sub(repl, value)
+        for left in _DATE_LEFTOVER_RE.findall(out):  # `${DATE 30d}`, `${DATE+30d`: never a date, and not an environment variable
+            if not any(p.startswith(left + ":") for p in problems):
+                problems.append(f"{left}: not a date placeholder (write ${{DATE}}, ${{DATE+30d}}, ${{DATE+30d+wed:dd/mm/yyyy}})")
+        return out
+    if isinstance(value, list):
+        return [substitute_dates(v, today, problems, found, calendar) for v in value]
+    if isinstance(value, dict):
+        return {k: substitute_dates(v, today, problems, found, calendar) for k, v in value.items()}
+    return value
+
+
 DEFAULTS = {
     "notes": "",
+    # What `${DATE...+workday}` calls a working day: the days of the work week, and the days the application under test
+    # treats as holidays ("mm-dd" every year, "yyyy-mm-dd" one year). Read by the date placeholders only.
+    "calendar": {"workweek": ["mon", "tue", "wed", "thu", "fri"], "holidays": []},
     "data": {},
     "secrets": [],
     # Files Jev may attach, by name: {"cv": "fixtures/cv.pdf"} (paths relative to the directory the run starts in,
@@ -309,6 +452,8 @@ def validate(spec: dict) -> list[str]:
     for key in ("id", "start_url", "goal"):
         if not spec.get(key) or not isinstance(spec[key], str):
             errors.append(f"'{key}' is required and must be a non-empty string")
+    if "calendar" in spec:
+        errors.extend(calendar_problems(spec["calendar"]))
     if "id" in spec and isinstance(spec["id"], str) and not re.fullmatch(r"[A-Za-z0-9._-]+", spec["id"]):
         errors.append("'id' may only contain letters, digits, '.', '_' and '-' (it becomes a folder name)")
 
@@ -583,22 +728,38 @@ def utf8_stdio() -> None:
                 pass
 
 
-def load_spec(path: str, run_stamp: str | None = None) -> dict:
-    """Load, apply defaults, substitute ${ENV} and validate. Raises ValueError on problems.
+def load_spec(path: str, run_stamp: str | None = None, today: datetime.date | None = None) -> dict:
+    """Load, apply defaults, substitute ${DATE...} and ${ENV} and validate. Raises ValueError on problems.
 
     `${RUN_STAMP}` anywhere in the spec (data, goal, outcomes, assertions, setup values) becomes one value for this
     run: `run_stamp` when given, else the environment's RUN_STAMP, else a fresh `new_run_stamp()`. The value used is
     recorded as `spec["run_stamp"]` (None when the spec never mentions it), and from there in the trace and the
-    result, so the data a run created can be found in the application afterwards."""
+    result, so the data a run created can be found in the application afterwards.
+
+    `${DATE...}` anywhere in the spec becomes a date counted from the day of the run (substitute_dates): `today` when
+    given, else the environment's RUN_DATE, else this machine's date. `spec["run_date"]` is that day (yyyy-mm-dd) and
+    `spec["dates"]` what each placeholder became; both None when the spec has no date placeholder. `+workday` reads
+    the spec's `calendar` (its work week and the application's holidays)."""
     with open(path, encoding="utf-8") as f:
         raw = json.load(f)
     spec = _merge(DEFAULTS, raw)
     used = RUN_STAMP_TOKEN in json.dumps(raw)
     stamp = run_stamp or os.environ.get(RUN_STAMP_VAR) or new_run_stamp()
+    date_problems: list[str] = []
+    dates: dict = {}
+    if "${DATE" in json.dumps(raw) and not calendar_problems(spec["calendar"]):  # a bad calendar is validate()'s to report
+        try:
+            day = today or run_date()
+            spec = substitute_dates(spec, day, date_problems, dates, spec["calendar"])
+        except ValueError as e:  # a RUN_DATE that is not a date
+            day = None
+            date_problems.append(str(e))
     missing: list[str] = []
     spec = substitute_env(spec, missing, {RUN_STAMP_VAR: stamp})
     spec["run_stamp"] = stamp if used else None
-    errors = validate(spec)
+    spec["run_date"] = day.isoformat() if dates else None
+    spec["dates"] = dates or None
+    errors = validate(spec) + [f"date placeholder {p}" for p in date_problems]
     if missing:
         errors.append("missing environment variables: " + ", ".join(sorted(set(missing))))
     if errors:
@@ -641,6 +802,9 @@ def main(argv: list[str]) -> int:
         print(f"  extra operations: {spec['extra_operations']}  shadow_dom: {spec['observation']['shadow_dom']}")
     if spec.get("run_stamp"):
         print(f"  run stamp: {spec['run_stamp']} (this validation's example; every run makes its own ${{RUN_STAMP}}, export RUN_STAMP to pin one)")
+    if spec.get("dates"):
+        print(f"  dates, counted from {spec['run_date']} (the day of the run; export {RUN_DATE_VAR}=yyyy-mm-dd to pin another): "
+              + ", ".join(f"{k} -> {v}" for k, v in spec["dates"].items()))
     print(f"  budget: {spec['budget']}")
     return 0
 

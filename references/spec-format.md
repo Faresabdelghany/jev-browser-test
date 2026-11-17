@@ -119,8 +119,10 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `goal` | string | required | What a tester would be told to do. One flow, plain language, names the visible outcome |
 | `notes` | string | `""` | Hints Jev sees every step ("dismiss the cookie banner first", "the product grid loads lazily"). Keep them about the page and the flow: a sentence about the test itself ("this spec is expected to be red") is read by Jev as a hint about the page and measurably lowers its confidence in the right decision |
 | `comment` | string | none | Free text for humans (why the spec exists, what it documents). Never sent to Jev, kept in the trace's copy of the spec |
-| `data` | object | `{}` | Every string Jev may type, by name. Jev picks the name, never writes text. Values support `${ENV_VAR}` and `${RUN_STAMP}` |
+| `data` | object | `{}` | Every string Jev may type, by name. Jev picks the name, never writes text. Values support `${ENV_VAR}`, `${RUN_STAMP}` and `${DATE...}` |
 | `${RUN_STAMP}` | placeholder | fresh per run | Anywhere in the spec (`data`, `goal`, `notes`, outcome `when`s, `assert`, `setup` values): one value per run, eight lowercase letters and digits (the epoch second in base 36 plus two random characters), so data the application keeps is unique across runs, repeats and parallel workers without anyone exporting a variable. `RUN_STAMP` in the environment wins over a fresh one (export it to rerun, or clean up after, one run's data). Recorded as `result.run_stamp` and `trace.spec.run_stamp`; `null` when the spec never mentions it |
+| `${DATE...}` | placeholder | the day of the run | Anywhere in the spec, like `${RUN_STAMP}`: a date counted from the day of the run, written the way the application wants it, so a spec that types a date does not go red the day a literal one has passed. `${DATE}` is today as `yyyy-mm-dd`. After `DATE` come **terms**, applied left to right: `+30d` / `-7d` (days later / earlier), `+wed` / `-wed` (`mon` … `sun`: on to the next, or back to the last, such weekday; a day that already is one stays), `+workday` / `-workday` (on to the next, or back to the last, working day of the spec's `calendar`). Then an optional **`:format`**: `yyyy` `yy`, `mm` `m`, `dd` `d`, `mmmm` `mmm` (December, Dec), `dddd` `ddd` (Wednesday, Wed), every other character kept. `${DATE+2d+workday:yyyy-dd-mm}`, `${DATE+1d:dd/mm/yyyy}`, `${DATE+30d+wed:dddd d mmmm yyyy}`. A placeholder that cannot be read is a spec problem (exit 2), never text for the page; `${DATE_FROM}` and other names stay environment variables. `RUN_DATE=yyyy-mm-dd` in the environment is the day they count from (to rerun with an earlier run's dates). `spec.py` prints what each one becomes today; the trace has `spec.run_date` and `spec.dates` |
+| `calendar` | object | Monday to Friday, no holidays | What `+workday` / `-workday` call a working day: `workweek`, the days people work (`["sun", "mon", "tue", "wed", "thu"]`), and `holidays`, the days the application under test treats as non-working, each `"mm-dd"` (every year) or `"yyyy-mm-dd"` (that year only). Copy the application's own list: a leave or booking form refuses a holiday the way it refuses a Sunday. Read by the date placeholders only, never sent to Jev |
 | `secrets` | list | `[]` | Names in `data` whose values must never appear in the trace or in the state sent to Jev. Shown as `<secret>` in `available_data_values`, and masked again in every observation (a secret typed into a plain text field or a contenteditable reads back as `<secret>`, not as the value). Masking replaces **every occurrence**, so a value shorter than 6 characters after `${ENV}` substitution (`1`, `2024`, `admin`) also rewrites unrelated page text Jev decides on; `spec.py` and the runner print a warning on stderr for it (exit code unchanged): use a longer test credential, or leave a non-confidential value out of `secrets` |
 | `files` | object | `{}` | Files Jev may attach, by name: `{"cv": "fixtures/cv.pdf"}` (paths relative to the directory you run from; `${ENV_VAR}` allowed). Declaring any offers the operation `UPLOAD_FILE` wherever the page has a file field, one the page hides behind a button included: Jev picks the field and the name, the runner sets the file, and only the file's name reaches Jev. A missing file is exit 2 |
 | `extra_operations` | list | `[]` | Operations beyond the standing set, offered only when listed. `["HOVER"]`: Jev may move the pointer over a link, button, tab or menu item to open a menu that only shows on hover, then click what it reveals. Off by default because every operation offered is one more choice on every step; `--hover` on `run_test.py` adds it for a run |
@@ -260,7 +262,9 @@ precondition and not the thing under test.
   rest of the page, and Jev types and clicks there; `"observation": {"shadow_dom": false}` turns it off. Measured
   before the default changed: on the 22 example specs it changed nothing (no example page has a shadow root), on the
   Polymer shop it was the difference between a stall and a pass, and on MDN, whose page content sits in web
-  components, a light-DOM flow passed 5/5 with it and 0/5 without. Closed shadow roots stay closed to everyone.
+  components, a light-DOM flow passed 5/5 with it and 0/5 without. Since 0.7.0 a control
+  whose caption is drawn from another tree (a custom element inside a link, a component's `<button><slot></slot></button>`)
+  is named by that caption. Closed shadow roots stay closed to everyone.
   Scripted alternative: selectors pierce open shadow roots (`{"action": "click", "selector": "my-widget button"}`).
 - **File uploads.** `"files": {"cv": "fixtures/cv.pdf"}`: wherever the page has a file field, Jev may choose
   `UPLOAD_FILE`, a field and one of the names. The file is set on the field directly, with no click and no system
@@ -353,6 +357,13 @@ Checks are Noul questions: Jev returns the probability that the statement is tru
   `"when": "The table shows a row for 'Runner${RUN_STAMP}'"`): the runner substitutes one fresh value per run, so a
   spec run three times in a suite creates three distinct records and a search for the name finds exactly one.
   Without it, the second run collides with the first ("Already exists", two records found) and reads as a bug.
+- A **date** the flow types is never a literal: `"leave_date": "${DATE+2d+workday:yyyy-dd-mm}"`, with the same
+  placeholder wherever the goal, the notes or an assertion name the day. Three things decide the terms, and each
+  was a red run on the OrangeHRM demo before it was a rule: the date's side of today (leave on a day that has passed
+  is listed as Taken, not Scheduled), the application's working days (`+workday` with its holidays in `calendar`: a
+  Saturday or a holiday is answered 'No Working Days Selected'), and how far the application looks (a date thirty
+  days ahead fell into the next leave year in December, which its list does not show: take the shortest offset that
+  is safely in the future).
 - **Long pages.** Form controls and buttons below the first screen are offered marked `(below the fold)` and the
   click scrolls to them; links and plain clickables there are not, so on a long page say in the goal where to scroll
   ("scroll down to the bottom of the form").
