@@ -1,0 +1,37 @@
+{
+  "id": "sort-price-low-high-problem-user",
+  "comment": "QA ticket: 'On the Swag Labs demo shop, sorting products by Price (low to high) does not reorder the list for some accounts.' Reproduction with the demo account problem_user (published on the site's login page). Red (bug, list_not_reordered) while the defect exists, green (pass, sorted_by_price) once it is fixed: keep it as the regression test and do not add an `expect`. Control: the same spec with standard_user, specs/sort-price-low-high-standard-user.json. The order itself is checked in code (`assert`): the first card's name and price, and the names in price order (the two $15.99 T-shirts are left out of text_order because their order among themselves is not specified).",
+  "start_url": "https://www.saucedemo.com/",
+  "goal": "On the Products page, choose 'Price (low to high)' in the sort dropdown at the top right of the product list, so that the list is reordered by price and its first product is Sauce Labs Onesie at $7.99.",
+  "notes": "The sort dropdown is the select at the top right of the product list; it starts on 'Name (A to Z)'. Choosing the option once is the whole task: do not open a product, add anything to the cart or open the menu.",
+  "login": [
+    { "action": "fill", "selector": "#user-name", "value": "problem_user" },
+    { "action": "fill", "selector": "#password", "value": "secret_sauce" },
+    { "action": "click", "selector": "#login-button" },
+    { "action": "wait_for", "url": "**/inventory.html" }
+  ],
+  "outcomes": {
+    "sorted_by_price": {
+      "when": "The first product in the list is Sauce Labs Onesie. Its price is $7.99.",
+      "verdict": "pass"
+    },
+    "list_not_reordered": {
+      "when": "The first product in the list is still Sauce Labs Backpack. Its price is $29.99.",
+      "verdict": "bug",
+      "requires_action": true,
+      "after": { "select": "Price (low to high)" },
+      "note": "the ticket's defect: 'Price (low to high)' was chosen and the list kept its original order"
+    },
+    "app_error": {
+      "when": "An error page, a stack trace or 'something went wrong' text is shown",
+      "verdict": "bug"
+    }
+  },
+  "assert": [
+    { "url_matches": "**/inventory.html" },
+    { "text_in": { "selector": ".inventory_list .inventory_item:first-child .inventory_item_name", "equals": "Sauce Labs Onesie" } },
+    { "text_in": { "selector": ".inventory_list .inventory_item:first-child .inventory_item_price", "equals": "$7.99" } },
+    { "text_order": ["Sauce Labs Onesie", "Sauce Labs Bike Light", "Sauce Labs Backpack", "Sauce Labs Fleece Jacket"] }
+  ],
+  "budget": { "max_steps": 8, "max_seconds": 120 }
+}

@@ -1,0 +1,126 @@
+{
+ "skill_name": "jev-browser-test",
+ "iteration": 5,
+ "date": "2026-11-17",
+ "eval": {
+  "id": 6,
+  "name": "rerun-existing-suite"
+ },
+ "graded_by": "the session that built the change, not an independent grader: read the two answers in outputs/ before trusting the marks",
+ "expectations": [
+  "The suite was run again exactly once, as a suite, with the command the skill gives for it (not spec by spec, not with extra repeats)",
+  "The answer says plainly whether anything differs from yesterday",
+  "The answer counts the specs correctly and does not call the expected-red spec a failure",
+  "No trace.json, step screenshot or per-step summary of a green spec was opened",
+  "No spec file was edited and nothing was rerun to 'make sure'",
+  "The answer is short (about ten lines or fewer) and says where the results are"
+ ],
+ "runs": [
+  {
+   "configuration": "before (skill v0.7.0)",
+   "passed": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    false
+   ],
+   "notes": [
+    "run_suite.py specs/*.json --repeat 1 --workers 2, once",
+    "'Nothing is different from yesterday', a table of the eight",
+    "eight rows, the expected-red one named as such",
+    "opened SKILL.md, references/suites.md, yesterday's results.md, yesterday.log, today's results.md; no trace",
+    "nothing edited, one suite run",
+    "a table of eight rows and four more paragraphs: about seventeen lines"
+   ],
+   "timing": {
+    "total_tokens": 73950,
+    "duration_ms": 55576,
+    "total_duration_seconds": 55.6,
+    "tool_uses": 7,
+    "skill": "v0.7.0 (1fa29a9)",
+    "suite_seconds": 17.2,
+    "suite_command": "run_suite.py specs/*.json --repeat 1 --workers 2 --out runs/suite/today"
+   }
+  },
+  {
+   "configuration": "after (skill 0.13.0)",
+   "passed": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "notes": [
+    "rerun.py specs/, once",
+    "'Nothing is different from yesterday: all 8 specs ended in their expected result again'",
+    "eight, all in their expected result; says one spec had no saved path, does not break the eight into seven passes and one expected-red (the summary line it read does not either)",
+    "opened SKILL.md only; says it did not open results.md 'because there was no red spec to look into'",
+    "nothing edited, one suite run",
+    "six lines, names the results file"
+   ],
+   "timing": {
+    "total_tokens": 68189,
+    "duration_ms": 28703,
+    "total_duration_seconds": 28.7,
+    "tool_uses": 4,
+    "skill": "0.13.0 (feat/rerun-command)",
+    "suite_seconds": 7,
+    "suite_requests": 17,
+    "suite_command": "rerun.py specs/"
+   }
+  }
+ ],
+ "summary": {
+  "time_seconds": {
+   "before": 55.6,
+   "after": 28.7
+  },
+  "tokens": {
+   "before": 73950,
+   "after": 68189
+  },
+  "tool_uses": {
+   "before": 7,
+   "after": 4
+  },
+  "suite": {
+   "before": {
+    "seconds": 17.2,
+    "jev_requests": 55,
+    "input_tokens": 117897
+   },
+   "after": {
+    "seconds": 7.1,
+    "jev_requests": 17,
+    "input_tokens": 39010
+   }
+  },
+  "pass_rate": {
+   "before": "5/6",
+   "after": "6/6"
+  }
+ },
+ "new_test": {
+  "eval": {
+   "id": 0,
+   "name": "ticket-sort-bug"
+  },
+  "before": {
+   "skill": "0.6.0 (iteration 4)",
+   "total_tokens": 104316,
+   "total_duration_seconds": 220.1
+  },
+  "after": {
+   "skill": "0.13.0",
+   "total_tokens": 129880,
+   "total_duration_seconds": 177.7,
+   "tool_uses": 20,
+   "browser_runs": 2
+  },
+  "notes": "One run each, two months apart. The after run: verdict BUG with a passing control on standard_user, the regression spec uses a `login` block, evidence line '$ 29.99', two screenshots, 2 browser runs, the key in no output. Its report.md was returned as text and not written (the agent's write tool refused report files); not graded against the ten expectations by an independent grader."
+ }
+}

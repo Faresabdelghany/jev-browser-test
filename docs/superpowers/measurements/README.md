@@ -1296,3 +1296,62 @@ this hour, before and after (the practice site answered "0 products found for 'P
 its search); `notify-random` and `menu-random` once each (random pages); `hrm-leave-assign` once (`low_confidence`
 after 50 s) and `hrm-add-employee` once (`low_confidence`, its first field). No run failed for load on a host: the
 peaks are the limits.
+
+## 0.13.0 (2026-11-17, night): the rerun command, and the six steps together
+
+Step 6: `scripts/rerun.py`, and replay resuming after a handover. Every file is `2026-11-17-final-*`: `f-*` the
+first pass (step 6 before its two replay fixes), `g-*` the second, an hour later, on the final code; each a
+`results.json` / `results.md` and the `summary.md` the command printed.
+
+**Protocol.** `.jev` emptied. `rerun.py specs/examples` on one worker (`w1-first`: every spec is Jev's, paths and
+sessions are saved), twice more (`w1-rerun-1`, `-2`), twice on eight workers (`w8-rerun-*`); then with `--http-cache
+--run-arg=--settle=network` once to fill the cache (`w1-all-warm`), once more on one worker (`w1-all-1`) and twice on
+eight (`w8-all-*`); then the same with `--replay-verify assert` on eight and on one. No option beyond the command's
+defaults in the first group.
+
+| the 22 examples | wall-clock | Jev requests | input tokens | of which specs that walked their path and passed |
+|---|---:|---:|---:|---:|
+| 0.7.0 release check, one worker | 198.2 s | 194 | 676k | |
+| first run through `rerun.py`, one worker | 208.4; 189.0 s | 188; 190 | 642k; 672k | |
+| rerun, one worker | 158.6, 136.2; 147.4, 140.1 s | 76, 46; 46, 46 | 290k, 137k; 149k, 147k | 74k to 84k (178k in the run with a handover at step 1) |
+| rerun, eight workers | 73.0, 71.3; 115.7, 80.7 s | 45, 44; 44, 49 | 138k to 165k | 73k to 82k |
+| every option, one worker | 126.7; 134.3 s | 49; 50 | 162k; 166k | 71k; 75k |
+| every option, eight workers | 83.1, 77.5; 69.3, 78.4 s | 52, 43; 49, 49 | 144k to 184k | 75k to 122k |
+| every option and `verify assert`, one worker | 111.5; 144.0 s | 28; 30 | 65k; 73k | 0; 8k |
+| every option and `verify assert`, eight workers | 62.7; 71.3 s | 30; 26 | 70k; 66k | 5k; 4k |
+
+(first pass; second pass.) The spread is OrangeHRM: its five specs took between 59 and 116 s as a chain, and that
+chain is the whole of an eight-worker suite and half of a one-worker one. `g-w8-rerun-1` (115.7 s) had every
+OrangeHRM step replayed, one request a spec, and two flows at 37 and 41 s where they take 20: their setup alone ran
+9 and 14 s.
+
+Three flows alone, five runs an arm (`final-ab-f-flows`: as 0.7.0 runs them against `--replay --reuse-sessions
+--http-cache --settle=network`; `-defaults`: against `--replay --reuse-sessions`), medians:
+
+| | as before | rerun defaults | every option |
+|---|---:|---:|---:|
+| `login-logout` | 4.6 s, 6 requests, 9,770 tokens | 3.5 s, 1, 2,359 | 2.3 s (page load 1.56 → 0.57 s) |
+| `shop-checkout` | 5.2 s, 10 requests, 24,991 tokens | 2.9 s, 1, 2,101 | 2.0 s (page load 0.64 → 0.37 s, login 0.58 → 0, per action 146 → 103 ms) |
+| `hrm-pim-add-employee-list` | 20.3 s, 18 requests, 101k tokens | 14.7 s, 1, 7,092 | 13.8 s (login 2.4 → 0, per action 320 → 86 ms) |
+
+First runs with every first-run option (`final-ab-combo-first-public`: `--batch-fields --settle=network
+--http-cache`, 17 public specs, 3 an arm): the same verdicts, 110 → 98 requests, 81.5 → 64.3 s; `shop-checkout`
+5.2 → 3.9 s and 10 → 8 requests.
+
+**What the two passes found.**
+- A saved session that had expired made two runs end `blocked`: saucedemo's cookie lasts ten minutes, the probe of
+  the saved session was answered with the login page and an alert, and the alert reached Jev as an announcement on
+  the first step after the fresh login (`f-w1-all-warm`: `shop-checkout-problem-account`,
+  `shop-checkout-error-account`). Fixed in step 4's branch; the second pass has none.
+- A handover at step 1 on OrangeHRM's dashboard (its quick-launch buttons had loaded in one run and not in the
+  recording) made a flow of twelve saved steps Jev's from the start (`f-w1-rerun-1`: 76 requests where the other
+  reruns have 46). Replay now resumes when Jev's own decision is the saved step.
+- `load-wait` handed over at its ending once: the assertions held on the live page, the observation had been taken
+  a moment before the loader ended. The page is now observed again once the assertions hold.
+- `toolshop-search-cart` was red in part of each pass, with and without its path (the practice site answering "0
+  products found" for a product it has): the command ran it again without the path each time and reported the
+  second run, "the same without the saved path".
+
+**The skill eval** (`2026-11-17-skill-eval-iteration-5/`): eval 6, "rerun an existing suite", one agent a
+configuration. 55.6 s and 73,950 tokens with the skill at v0.7.0 (seven tool calls, five files opened) against 28.7 s
+and 68,189 tokens at 0.13.0 (four tool calls, SKILL.md alone). Both answers right.
