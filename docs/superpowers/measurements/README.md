@@ -1236,3 +1236,41 @@ request.
 
 Decision: opt-in. Fewer requests, no stale decisions, 6% less wall-clock on fast pages; none on the slow one, which
 was the target.
+
+## 0.11.0 (2026-11-17, evening): log in once, keep the cache
+
+Step 4: saved sessions for specs that share a `login`, and an HTTP cache that outlives the run
+(`scripts/session.py`). `ab.py --repeat 3`, arm B with `--reuse-sessions` (its own empty session directory, so B1
+logs in and saves, B2 and B3 reuse) or with `--http-cache` (its own empty cache). Files `2026-11-17-step4-*`.
+
+**Sessions** (the medians of arm B are over the runs that reused a session).
+
+| before the first step, ms | page load | login | setup | wall-clock |
+|---|---:|---:|---:|---:|
+| 4 OrangeHRM specs, first version (`s4-sessions-hrm`) | 8,298 → 10,939 | 10,846 → 0 | 17,525 → 16,552 | 117.2 → 101.2 s |
+| 4 OrangeHRM specs, direct `goto` (`s4b-sessions-hrm`) | 8,608 → 9,149 | 11,061 → 0 | 14,038 → 12,799 | 100.1 → 95.6 s |
+| 4 shop specs (`s4-sessions-public`) | 2,374 → 2,886 | 2,296 → 0 | 0 | 18.3 → 17.4 s |
+
+The first version opened the page the login had ended on, the dashboard, which is the heaviest page of the demo
+(2.5 s), only to check the session, and two of the four specs then left it at once for the page their setup names:
+the page-load column grew by 2.6 s. The check now runs on that page when `setup` begins with a `goto` (second row:
++0.5 s). `shop-add-second-item` reused, on its first B run, the session `shop-checkout` had saved a minute earlier:
+the same login on the same site.
+
+**HTTP cache.**
+
+| | page loads | wall-clock, sum of medians |
+|---|---:|---:|
+| 17 public specs (`s4-cache-public`) | 19,016 → 7,701 ms | 82.7 → 69.5 s |
+| ... the-internet, per load | 1,405 to 1,546 → 622 to 657 ms | |
+| ... saucedemo, per load | 612 to 846 → 128 to 162 ms | |
+| 5 OrangeHRM specs (`s4-cache-hrm`) | 10,319 → 4,547 ms | 111.9 → 108.2 s |
+
+Verdicts. Public: the same in every run except `menu-random` and `notify-random`. OrangeHRM: over the three A/Bs
+(54 runs) the flows that finished ended the same; `employee_id_taken` ended three runs, all in arm B
+(`hrm-add-employee` and `hrm-pim-add-employee-list` with the cache, `hrm-pim-add-employee-list` with a session), and
+`low_confidence` on `hrm-add-employee`'s first field one run in each arm. In the day's other A/Bs
+`employee_id_taken` fell in arm A as well (the form-batch ×10, the settle re-measurement). No mechanism connects a
+cookie file or a disk cache to the id the demo pre-fills, but three against none is recorded here as it fell.
+
+Decision: both opt-in for a single run; sessions on in the rerun command of step 6.
