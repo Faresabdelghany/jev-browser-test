@@ -5,7 +5,7 @@ the app. `$SKILL` is the skill directory. Exit 2 is never a verdict: fix it firs
 
 | Symptom | Cause / fix |
 |---|---|
-| The control Jev needs is on screen but never in the element table, and the summary ends with `hint: ... <iframe>` | It is inside an iframe. List the frame's CSS selector in `observation.frames` (its controls then join the table, marked `in "frame: ..."`), or script the step in `setup` with `"frame"` |
+| The control Jev needs is on screen but never in the element table, and the summary ends with `hint: ... <iframe>` (`reason.hints` in `result.json`; suggested `test_issue` when Jev said `control_not_on_page`) | It is inside an iframe. List the frame's CSS selector in `observation.frames` (its controls then join the table, marked `in "frame: ..."`), or script the step in `setup` with `"frame"` |
 | The same, with `hint: ... shadow DOM` | The control is inside a web component and the spec turned shadow DOM off. Remove `"shadow_dom": false` (it is on by default since 0.6.0) and it is observed like the rest of the page; or script the step in `setup`: Playwright selectors reach into open shadow roots (`my-widget button`) |
 | A click opened a new tab and the run stalled on the old page (`NEW-TAB(not followed)`) | Set `browser.follow_new_tabs: true`: the run then carries on in the tab the click opened |
 | The flow needs a file upload | Declare `"files": {"cv": "path/to/cv.pdf"}` and name the upload in the goal: Jev chooses `UPLOAD_FILE`, the field and the file (hidden file fields included). Or script it: `upload {selector, path}` in `setup` |

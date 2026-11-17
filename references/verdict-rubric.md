@@ -17,7 +17,12 @@ buried).
   (a one-line change) and rerun, and say so in the report.
 - **`undetermined` with a suggestion** (`reason.suggested_verdict` set): start from the suggestion and
   confirm it with the rubric below; the typed reason (`reason.blocked_reason`, `reason.stuck_reason`) and
-  `reason.status` tell you where to look in the trace.
+  `reason.status` tell you where to look in the trace. A stalled run whose last page keeps controls where the
+  spec did not let the observer look (an `<iframe>` not in `observation.frames`, shadow DOM turned off, a file
+  field without `files`) carries **`reason.hints`**, one sentence each naming the option. When Jev's reason is
+  `control_not_on_page` the suggestion is then `test_issue` (`reason.suggestion_from: "hints"`), not `bug`: add
+  the option, rerun once, and call it a bug only if the control is not there either. Any other reason keeps its
+  suggestion beside the hint (most pages have an `<iframe>` somewhere: an ad or a video is not the form).
 - **`expected` present** (the spec declares `expect`): the verdict is "as declared" when `expected.matched`
   is true (report the real outcome and say it is the documented behaviour; exit 0, suite verdict `expected`),
   and a **change in behaviour** when it is false: `expected.mismatches` names what differs, and that difference

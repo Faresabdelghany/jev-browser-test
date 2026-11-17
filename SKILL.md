@@ -125,7 +125,7 @@ explain.
   `"browser": {"device": "iPhone 13"}` (or `--device`) for a phone layout. `scaffold.py` has a flag for each of
   these (`--frame`, `--file`, `--hover`, `--follow-new-tabs`, `--device`, `--teardown`, `--no-shadow-dom`). A stalled
   run on a page with an unlisted iframe, shadow-DOM controls it was told not to see or an unused file field says so
-  under its step table.
+  under its step table and in `reason.hints`, and suggests `test_issue` when Jev could not find the control.
 - **long pages and type-aheads** — a link far down a long page wants the goal to say where to scroll; a type-ahead
   wants a `suggestion_not_found` bug outcome. `references/spec-format.md` (Writing the goal and data) has both
   recipes: read them before writing a spec for a long form or an autocomplete.

@@ -1069,6 +1069,36 @@ class OutcomePolicyTests(unittest.TestCase):
         pending = {"n": 5, "final_look": True, "pending_outcome": "ok", "executed": {"action": "STOP"}}
         r = build_result(trace("budget_exhausted", pending), spec, outcomes, dict(final), "out")
         self.assertEqual((r["outcome"], r["reason"]["pending_outcome"], r["reason"]["suggested_verdict"]), ("undetermined", "ok", "test_issue"))
+        # A stalled run whose page keeps controls where the spec did not let the observer look: the hints are in the
+        # result, and `control_not_on_page` then suggests test_issue (live: the Polymer shop with shadow DOM off said bug)
+        unseen = {"n": 3, "blocked_reason": {"choice": "control_not_on_page"}, "shadow_hosts": 4, "executed": {"action": "STOP"}}
+        r = build_result(trace("low_confidence", unseen), spec, outcomes, dict(final), "out")
+        self.assertEqual((r["reason"]["suggested_verdict"], r["reason"]["suggestion_from"]), ("test_issue", "hints"))
+        self.assertEqual(len(r["reason"]["hints"]), 1)
+        self.assertIn("shadow DOM", r["reason"]["hints"][0])
+        for step in ({**unseen, "shadow_hosts": 0, "iframes": 1},                                        # an <iframe> the spec does not list
+                     {**unseen, "shadow_hosts": 0, "elements": [{"idx": 0, "role": "file", "name": "CV"}]}):  # a file field, no `files`
+            r = build_result(trace("stuck", step), spec, outcomes, dict(final), "out")
+            self.assertEqual((r["reason"]["suggested_verdict"], len(r["reason"]["hints"])), ("test_issue", 1), step)
+        # the same page seen in full: the control really is not there, and the suggestion stays bug
+        r = build_result(trace("low_confidence", {**unseen, "shadow_hosts": 0}), spec, outcomes, dict(final), "out")
+        self.assertEqual(r["reason"]["suggested_verdict"], "bug")
+        self.assertNotIn("hints", r["reason"])
+        self.assertNotIn("suggestion_from", r["reason"])
+        listed = {**unseen, "shadow_hosts": 0, "iframes": 1, "frames": [{"selector": "#pay", "elements": 3}]}
+        r = build_result(trace("blocked", listed), {"id": "s", "observation": {"frames": ["#pay"]}}, outcomes, dict(final), "out")
+        self.assertEqual((r["reason"]["suggested_verdict"], "hints" in r["reason"]), ("bug", False))
+        # a dead control or a refusal on a page that happens to have an <iframe> keeps its suggestion: the hint is there to read
+        dead = {"n": 4, "stuck_reason": {"choice": "control_had_no_effect"}, "blocked_reason": {"choice": "other"}, "iframes": 1,
+                "executed": {"action": "STOP"}}
+        r = build_result(trace("stuck", dead), spec, outcomes, dict(final), "out")
+        self.assertEqual((r["reason"]["suggested_verdict"], len(r["reason"]["hints"])), ("bug", 1))
+        self.assertNotIn("suggestion_from", r["reason"])
+        r = build_result(trace("blocked", {**blocked_step, "iframes": 2}), spec, outcomes, dict(final), "out")
+        self.assertEqual(r["reason"]["suggested_verdict"], "bug")  # site_refused_or_error
+        # a status that is not a stall says nothing about unobserved controls
+        r = build_result(trace("done_unverified", unseen), spec, outcomes, dict(final), "out")
+        self.assertNotIn("hints", r["reason"])
         # with fail_fast false a bug outcome seen on the confirming step is reported beside the pass
         steps = [{"n": 1, "outcome_seen": "err", "executed": {"action": "WAIT", "reason": "confirming outcome ok"}},
                  {"n": 2, "outcome_seen": "err", "executed": {"action": "AUTO_DONE", "confirmed": True}}]
@@ -2632,6 +2662,18 @@ class SummaryFlagTests(unittest.TestCase):
         listed = {"status": "stuck", "spec": {"observation": {"frames": ["#a", "#b"]}},
                   "steps": [{"n": 1, "iframes": 2, "frames": [{"selector": "#a", "elements": 3}, {"selector": "#b", "elements": 1}]}]}
         self.assertEqual(_hidden_controls_hint(listed), [])  # every frame on the page is already observed
+
+    def test_the_summary_says_when_the_suggestion_comes_from_the_hint(self) -> None:
+        from summarize_trace import summarize
+        reason = {"status": "low_confidence", "blocked_reason": "control_not_on_page", "stuck_reason": None, "suggested_verdict": "test_issue",
+                  "suggestion_from": "hints", "hints": ["4 element(s) on the last page keep controls inside shadow DOM, ..."]}
+        trace = {"spec_id": "shop", "status": "low_confidence", "outcome": "undetermined", "steps": [{"n": 1, "shadow_hosts": 4}],
+                 "spec": {"observation": {"shadow_dom": False}}, "result": {"reason": reason}}
+        text = summarize(trace)
+        self.assertIn("suggested verdict: test_issue, from the hint below)", text)
+        self.assertIn("  hint: 4 element(s) on the last page keep controls inside shadow DOM", text)
+        plain = {**trace, "result": {"reason": {**reason, "suggested_verdict": "bug", "suggestion_from": None}}}
+        self.assertIn("suggested verdict: bug)", summarize(plain))
 
 
 class JevDrivenTests(unittest.TestCase):

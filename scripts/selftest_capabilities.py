@@ -60,12 +60,13 @@ class ScriptedJev:
     answer is DONE. The outcome Choice is answered by `outcome_rules`: {outcome name: substring of the page text}."""
 
     def __init__(self, moves: list[tuple], outcome_rules: dict[str, str] | None = None, undecided_while: str | None = None,
-                 undecided_ms: int = 0):
+                 undecided_ms: int = 0, blocked_reason: str | None = None):
         self.moves = [list(m) for m in moves]
         self.played: set[int] = set()
         self.outcome_rules = outcome_rules or {}
         self.undecided_while = undecided_while  # text on the page while which every decision is an undecided WAIT
         self.undecided_ms = undecided_ms  # how long an undecided answer takes: the page may move meanwhile
+        self.blocked_reason = blocked_reason  # the answer to blocked_reason when a run stalls (default: the first one offered, `nothing`)
         self.requests = 0
         self.seen_states: list[dict] = []
 
@@ -108,7 +109,8 @@ class ScriptedJev:
             answers["outcome"] = self._choice(seen, crit)
         for reason in ("stuck_reason", "blocked_reason"):
             if reason in questions:
-                answers[reason] = self._choice(next(iter(questions[reason]["criteria"])), questions[reason]["criteria"])
+                pick = self.blocked_reason if reason == "blocked_reason" and self.blocked_reason else next(iter(questions[reason]["criteria"]))
+                answers[reason] = self._choice(pick, questions[reason]["criteria"])
         if "operation" not in questions:
             return {"answers": answers, "usage": usage, "model": "scripted-jev", "latency_ms": 1}
         ops = questions["operation"]["criteria"]
@@ -580,6 +582,18 @@ def run_checks(tmp: str | None = None) -> list[str]:
     trace, out = go("shadow-hint", shadow, ScriptedJev([("undecided",)], SAVED))
     if trace["steps"][-1].get("shadow_hosts") != 1 or "shadow DOM" not in flags_of(trace, out):
         failures.append(f"H: a stalled run on a page with controls in shadow DOM should say so: {trace['steps'][-1].get('shadow_hosts')}")
+    # the same stall when Jev says the control is not on the page (live: the Polymer shop with shadow DOM off): the result
+    # carries the hint and suggests test_issue, not bug; with the page observed in full the same answer keeps bug
+    trace, out = go("shadow-hint-reason", shadow, ScriptedJev([("undecided",)], SAVED, blocked_reason="control_not_on_page"))
+    reason = trace["result"]["reason"]
+    if (reason.get("suggested_verdict"), reason.get("suggestion_from")) != ("test_issue", "hints") or "shadow DOM" not in " ".join(reason.get("hints") or []) \
+            or "from the hint below" not in flags_of(trace, out):
+        failures.append(f"H: control_not_on_page on a page with unobserved shadow DOM should suggest test_issue and carry the hint: {reason}")
+    seen_all = make_spec(base + "/shadow", budget={"max_steps": 3, "max_seconds": 30})
+    trace, out = go("shadow-no-hint", seen_all, ScriptedJev([("undecided",)], SAVED, blocked_reason="control_not_on_page"))
+    reason = trace["result"]["reason"]
+    if reason.get("suggested_verdict") != "bug" or reason.get("hints"):
+        failures.append(f"H: control_not_on_page on a page observed in full keeps the suggestion bug: {reason}")
     scripted = make_spec(base + "/shadow", setup=[{"action": "click", "selector": "#inner-save"}])
     trace, out = go("shadow-setup", scripted, ScriptedJev([], SAVED))
     if trace["status"] != "passed":

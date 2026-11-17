@@ -161,6 +161,8 @@ def render_report(trace: dict, result: dict | None, images: dict[str, bytes], ru
                          + (f", blocked_reason {_e(r['blocked_reason'])}" if r.get("blocked_reason") else "")
                          + (f", stuck_reason {_e(r['stuck_reason'])}" if r.get("stuck_reason") else "")
                          + (f" &rarr; suggested <b>{_e(r['suggested_verdict'])}</b>" if r.get("suggested_verdict") else " &rarr; no suggestion: judge from the trace")
+                         + (" (from the hint)" if r.get("suggestion_from") == "hints" else "")
+                         + "".join(f"<br>hint: {_e(h)}" for h in r.get("hints") or [])
                          + (f"<br>error: <code>{_e(r['error'])}</code>" if r.get("error") else "") + "</li>")
         if result.get("assertions"):
             items = []
