@@ -363,10 +363,12 @@ OBSERVE_JS = "(args) => {\n  const deep = !!args.shadowDom;\n" + JS_HELPERS + r"
   // Pass 1b (only when the spec declares `files`): a file input the page hides behind a styled button (display: none,
   // no box) is still the control an upload goes into, and setting its files needs no click. Offered as a `file`
   // element named by its label, marked hidden, placed where its nearest rendered ancestor is.
-  if (args.fileInputs && !wholeDocument) for (const el of qsa('input[type="file"]')) {
-    if (seen.has(el) || el.disabled) continue;
-    let box = el.parentElement;
-    while (box && box !== document.body && box.getBoundingClientRect().width < 2) box = box.parentElement;
+  // An input nothing owns (no label, no form, no rendered ancestor below <body>: a drag-and-drop library's own input,
+  // appended to the body) is offered only when the page has no other file field: live, 0.5.0, the-internet's /upload
+  // has the form's field and dropzone's orphan, both read `file "file"`, the orphan sorted first (its box is at 0,0),
+  // Jev chose it at 0.99 and Upload submitted an empty form (500).
+  const orphanFiles = [];
+  const offerFile = (el, box, orphan) => {
     const r = (box || el).getBoundingClientRect();
     const lab = el.labels && el.labels.length ? clean(el.labels[0].innerText) : '';
     seen.add(el);
@@ -374,9 +376,20 @@ OBSERVE_JS = "(args) => {\n  const deep = !!args.shadowDom;\n" + JS_HELPERS + r"
       el, role: 'file', tag: 'input', type: 'file',
       name: clean(el.getAttribute('aria-label') || lab || el.getAttribute('title') || el.getAttribute('name') || el.id || 'file').slice(0, 80),
       value: valueOf(el) || undefined, via: 'semantic', hidden: true, disabled: false,
-      context: el.getAttribute('accept') ? ('accepts ' + el.getAttribute('accept')).slice(0, 70) : undefined,
+      context: orphan ? 'not in a form or a label' : (el.getAttribute('accept') ? ('accepts ' + el.getAttribute('accept')).slice(0, 70) : undefined),
       x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)
     });
+  };
+  if (args.fileInputs && !wholeDocument) {
+    for (const el of qsa('input[type="file"]')) {
+      if (seen.has(el) || el.disabled) continue;
+      let box = el.parentElement;
+      while (box && box !== document.body && box.getBoundingClientRect().width < 2) box = box.parentElement;
+      const owned = (el.labels && el.labels.length) || el.form || (box && box !== document.body);
+      if (owned) offerFile(el, box, false); else orphanFiles.push([el, box]);
+    }
+    const hasFileField = candidates.some(c => c.el && c.el.matches && c.el.matches('input[type="file"]'));
+    if (!hasFileField) for (const [el, box] of orphanFiles) offerFile(el, box, true);
   }
 
   // Pass 2: a <label> whose checkbox/radio is parked offscreen (clip/left:-9999px) is the only thing

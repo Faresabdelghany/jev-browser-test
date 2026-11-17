@@ -309,6 +309,16 @@ UPLOAD_PAGE = """<!doctype html><html><head><title>Upload</title><style>.btn{dis
     document.getElementById('msg').textContent = ok ? 'Saved successfully' : 'Both files are required'; });
 </script></body></html>"""
 
+# the-internet's /upload: the form's own field, and a drag-and-drop library's hidden input appended to the body.
+DROPZONE_PAGE = """<!doctype html><html><head><title>Upload</title></head><body>
+<form id="f" onsubmit="event.preventDefault(); document.getElementById('msg').textContent = document.getElementById('file-upload').files.length ? 'Saved successfully' : 'Internal Server Error'">
+<input id="file-upload" type="file" name="file"> <input type="submit" value="Upload"></form>
+<div id="drop" style="width:300px;height:120px;border:2px dashed #888">drop files here</div><p id="msg"></p>
+<script>const i = document.createElement('input'); i.type = 'file'; i.className = 'dz-hidden-input';
+i.style.cssText = 'visibility:hidden;position:absolute;top:0;left:0;height:0;width:0'; document.body.appendChild(i);</script>
+</body></html>"""
+DROPZONE_ONLY_PAGE = DROPZONE_PAGE.replace('<input id="file-upload" type="file" name="file"> ', '')
+
 # A navigation bar whose submenu exists only while the pointer is over its parent item (CSS :hover, no script).
 HOVER_PAGE = """<!doctype html><html><head><title>Hover menu</title><style>
   nav ul{list-style:none;margin:0;padding:0} nav > ul > li{display:inline-block;position:relative;padding:8px}
@@ -327,7 +337,7 @@ li.addEventListener('mouseenter', () => { t = setTimeout(() => { sub.style.displ
 li.addEventListener('mouseleave', () => { clearTimeout(t); sub.style.display = 'none'; });
 </script></body>""")
 
-ROUTES = {"/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
+ROUTES = {"/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
           "/device": DEVICE_PAGE, "/tabs": TABS_PAGE, "/receipt": RECEIPT_PAGE, "/spinner": SPINNER_PAGE, "/shadow": SHADOW_PAGE}
 
 
@@ -654,6 +664,16 @@ def run_checks(tmp: str | None = None) -> list[str]:
     story = trace["result"]["story"]
     if len(story) < 2 or not story[0].endswith("<- file resume") or not story[1].endswith("<- file photo"):
         failures.append(f"K: the story should name the file attached at each upload: {story}")
+    dz = make_spec(base + "/dropzone", goal="Attach the resume and click Upload, so that the page says it was saved.", files={"resume": upload})
+    trace, out = go("upload-dropzone", dz, ScriptedJev([("upload", "file", "resume"), ("click", "Upload")], SAVED))
+    files_seen = [e for e in trace["steps"][0]["elements"] if e["role"] == "file"]
+    if trace["status"] != "passed" or len(files_seen) != 1 or files_seen[0].get("hidden"):
+        failures.append(f"K: beside the form's own file field a library's orphan input is not offered: {trace['status']} {files_seen}")
+    only = make_spec(base + "/dropzone-only", goal=dz["goal"], files={"resume": upload}, budget={"max_steps": 2, "max_seconds": 30})
+    trace, out = go("upload-dropzone-only", only, ScriptedJev([("undecided",)], SAVED))
+    files_seen = [e for e in trace["steps"][0]["elements"] if e["role"] == "file"]
+    if len(files_seen) != 1 or files_seen[0].get("context") != "not in a form or a label":
+        failures.append(f"K: when the orphan is the page's only file input it is offered, and says what it is: {files_seen}")
     plain = make_spec(base + "/upload", goal=apply["goal"], budget={"max_steps": 2, "max_seconds": 30})
     trace, out = go("upload-off", plain, ScriptedJev([("undecided",)], SAVED))
     first = trace["steps"][0]
