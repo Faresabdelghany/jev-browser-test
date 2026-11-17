@@ -3773,6 +3773,113 @@ class SessionTests(unittest.TestCase):
         self.assertEqual((load_spec(os.path.join(examples, "hrm-login.json"))["login"], load_spec(os.path.join(examples, "login-logout.json"))["login"]), ([], []))
 
 
+class PerHostTests(unittest.TestCase):
+    """run_suite: how many runs a host sees at once, and which job a free worker takes."""
+
+    def write(self, tmp: str, name: str, url: str, **more) -> str:
+        path = os.path.join(tmp, f"{name}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"id": name, "start_url": url, "goal": "g", **more}, f)
+        return path
+
+    def test_a_hosts_limit_is_the_command_lines_lowered_by_its_specs(self) -> None:
+        from run_suite import DEFAULT_PER_HOST, host_limits, spec_host
+        with tempfile.TemporaryDirectory() as tmp:
+            a1 = self.write(tmp, "a1", "https://shop.example/")
+            a2 = self.write(tmp, "a2", "https://shop.example/cart", host_limit=8)  # a spec cannot ask for more than --per-host
+            h1 = self.write(tmp, "h1", "https://demo.hr.example/login", host_limit=1)
+            h2 = self.write(tmp, "h2", "https://demo.hr.example/login")
+            env = self.write(tmp, "env", "${JEV_UNIT_BASE_URL}/start")
+            hosts, limits = host_limits([a1, a2, h1, h2, env])
+            self.assertEqual((hosts[a1], hosts[h2]), ("shop.example", "demo.hr.example"))
+            self.assertEqual((limits["shop.example"], limits["demo.hr.example"]), (DEFAULT_PER_HOST, 1))
+            self.assertEqual(host_limits([a1, a2, h1], per_host=6)[1], {"shop.example": 6, "demo.hr.example": 1})
+            # the command line names a host: that is the limit, whatever the specs say
+            forced = host_limits([a1, h1], per_host=2, overrides=[("*.hr.example", 3), ("shop.example", 5)])[1]
+            self.assertEqual(forced, {"shop.example": 5, "demo.hr.example": 3})
+            with mock.patch.dict(os.environ, {"JEV_UNIT_BASE_URL": "https://staging.example"}):
+                self.assertEqual(spec_host(env), ("staging.example", None))
+            self.assertEqual(spec_host(os.path.join(tmp, "missing.json")), (os.path.join(tmp, "missing.json"), None))
+
+    def test_the_pool_never_exceeds_a_hosts_limit(self) -> None:
+        import threading
+        import time as _time
+        from run_suite import run_pool
+        jobs = [("slow", i) for i in range(3)] + [("shared", i) for i in range(6)] + [("solo", 0)]
+        limits = {"slow": 1, "shared": 2, "solo": 2}
+        now: dict = {}
+        seen_max: dict = {}
+        order: list = []
+        lock = threading.Lock()
+
+        def work(job):
+            with lock:
+                now[job[0]] = now.get(job[0], 0) + 1
+                seen_max[job[0]] = max(seen_max.get(job[0], 0), now[job[0]])
+                order.append(job)
+            _time.sleep(0.03)
+            with lock:
+                now[job[0]] -= 1
+            return job
+
+        results, peaks = run_pool(jobs, 6, lambda job: job[0], limits, work)
+        self.assertEqual(results, jobs)  # every job ran, and the results come back in the jobs' order
+        self.assertEqual(seen_max, {"slow": 1, "shared": 2, "solo": 1})
+        self.assertEqual(peaks, seen_max)
+        # the host with the most work per slot goes first: three jobs on one slot, against six on two
+        self.assertEqual(order[0][0], "slow")
+        one_at_a_time, peaks = run_pool(jobs, 1, lambda job: job[0], limits, lambda job: job)
+        self.assertEqual((one_at_a_time, max(peaks.values())), (jobs, 1))
+        self.assertEqual(run_pool([], 4, lambda job: job, {}, lambda job: job), ([], {}))
+
+    def test_a_job_that_raises_frees_its_slot(self) -> None:
+        from run_suite import run_pool
+        ran: list = []
+
+        def work(job):
+            if job == "bad":
+                raise RuntimeError("boom")
+            ran.append(job)
+            return job
+        results, _ = run_pool(["bad", "next"], 1, lambda job: "h", {"h": 1}, work)
+        self.assertEqual((results, ran), ([None, "next"], ["next"]))
+
+    def test_the_suite_reports_each_hosts_limit_and_peak(self) -> None:
+        from run_suite import _hosts_note, main as suite_main, run_suite
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = os.path.join(tmp, "fake_runner.py")
+            with open(runner, "w", encoding="utf-8") as f:
+                f.write(FAKE_RUNNER)
+            specs = [self.write(tmp, "always-pass", "https://shop.example/"), self.write(tmp, "flaky", "https://demo.hr.example/", host_limit=1)]
+            report = run_suite(specs, repeat=3, workers=4, out_root=os.path.join(tmp, "o1"), run_args=[], runner=runner, per_host=2)
+            self.assertEqual(report["hosts"]["demo.hr.example"], {"limit": 1, "peak": 1, "specs": 1})
+            self.assertEqual((report["hosts"]["shop.example"]["limit"], report["hosts"]["shop.example"]["peak"] <= 2), (2, True))
+            with open(os.path.join(tmp, "o1", "results.md"), encoding="utf-8") as f:
+                self.assertIn("4 worker(s) over 2 host(s), at most 2 at once on any (demo.hr.example: 1)", f.read())
+            self.assertEqual(_hosts_note({"workers": 1, "hosts": report["hosts"]}), "")
+            # a caller that names only `workers` gets the pool it always got
+            plain = run_suite(specs[:1], repeat=2, workers=3, out_root=os.path.join(tmp, "o2"), run_args=[], runner=runner)
+            self.assertEqual(plain["hosts"]["shop.example"]["limit"], 3)
+            for bad in (["--host-limit", "shop.example"], ["--host-limit", "shop.example=0"], ["--per-host", "0"]):
+                self.assertEqual(suite_main(["run_suite.py", specs[0], "--runner", runner, "--out", os.path.join(tmp, "o3"), *bad]), 2)
+            code = suite_main(["run_suite.py", *specs, "--runner", runner, "--out", os.path.join(tmp, "o4"), "--workers", "5", "--per-host", "3",
+                               "--host-limit", "*.hr.example=2"])
+            with open(os.path.join(tmp, "o4", "results.json"), encoding="utf-8") as f:
+                hosts = json.load(f)["hosts"]
+            self.assertEqual((code, hosts["shop.example"]["limit"], hosts["demo.hr.example"]["limit"]), (0, 3, 2))
+
+    def test_host_limit_is_validated_and_the_shared_demo_declares_one(self) -> None:
+        from spec import load_spec, validate
+        base = _merge(DEFAULTS, {"id": "s", "start_url": "https://x.example/", "goal": "Open the page, so that it shows.",
+                                 "outcomes": {"ok": {"when": "The page shows its heading", "verdict": "pass"}}})
+        self.assertEqual(validate({**base, "host_limit": 1}), [])
+        self.assertTrue(any("host_limit" in e for e in validate({**base, "host_limit": 0})))
+        self.assertIsNone(DEFAULTS["host_limit"])
+        examples = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "specs", "examples")
+        limited = sorted(f[:-5] for f in os.listdir(examples) if f.endswith(".json") and load_spec(os.path.join(examples, f))["host_limit"] == 1)
+        self.assertEqual(limited, ["hrm-add-employee", "hrm-admin-add-user", "hrm-leave-assign", "hrm-login", "hrm-pim-add-employee-list"])
+
+
 class _FixedRand:
     def __init__(self, chars: str) -> None:
         self.chars = list(chars)
