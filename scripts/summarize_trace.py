@@ -98,6 +98,10 @@ def _flags(step: dict, nxt: dict | None = None) -> str:
         f.append(f"ASSERT-PENDING:{len(step['assertions_pending'])}")  # a pass in sight whose assertions do not hold yet on this busy page
     if step.get("final_look"):
         f.append("FINAL-LOOK")
+    if step.get("batched"):
+        f.append("BATCHED")  # typed without a request of its own: Jev assigned the value in the request that typed the form's first field
+    if step.get("batch_stopped"):
+        f.append("BATCH-ENDED")  # the page reacted to what was typed (step.batch_stopped says how); Jev decides again from here
     if step.get("replay_handback"):
         f.append("REPLAY-ENDED")  # the saved path stopped applying here (step.replay_handback says why); Jev decides from this step on
     if step.get("replay_verify"):

@@ -35,6 +35,12 @@ and for the spec language:
      offered and types, the assertion written with the same placeholder reads it back, and the trace says what each
      placeholder became; RUN_DATE in the environment moves the day
 
+and for one request per form (`batch_fields`, off until the spec or --batch-fields asks):
+
+  P. form batch: the request that types a form's first field assigns the others their values, and they are typed with
+     no further request; a field that appears, a message and a list of suggestions each end the batch and hand the
+     next decision back to Jev; without the option the per-field questions are never asked
+
 and for the saved path (`replay`, off until the spec or --replay asks):
 
   O. replay: a passing run saves its path without the value it typed; the same pages replay every step with one
@@ -75,13 +81,14 @@ class ScriptedJev:
     answer is DONE. The outcome Choice is answered by `outcome_rules`: {outcome name: substring of the page text}."""
 
     def __init__(self, moves: list[tuple], outcome_rules: dict[str, str] | None = None, undecided_while: str | None = None,
-                 undecided_ms: int = 0, blocked_reason: str | None = None):
+                 undecided_ms: int = 0, blocked_reason: str | None = None, fills: dict[str, str] | None = None):
         self.moves = [list(m) for m in moves]
         self.played: set[int] = set()
         self.outcome_rules = outcome_rules or {}
         self.undecided_while = undecided_while  # text on the page while which every decision is an undecided WAIT
         self.undecided_ms = undecided_ms  # how long an undecided answer takes: the page may move meanwhile
         self.blocked_reason = blocked_reason  # the answer to blocked_reason when a run stalls (default: the first one offered, `nothing`)
+        self.fills = fills or {}  # a form batch's per-field questions: {substring of the field's question: data key}; others are left empty
         self.requests = 0
         self.seen_states: list[dict] = []
 
@@ -123,6 +130,10 @@ class ScriptedJev:
             crit = questions["outcome"]["criteria"]
             seen = next((n for n, needle in self.outcome_rules.items() if n in crit and needle in text), "none_yet")
             answers["outcome"] = self._choice(seen, crit)
+        for key, q in questions.items():
+            if key.startswith("fill_"):
+                pick = next((v for needle, v in self.fills.items() if needle.lower() in str(q["instructions"]).lower()), "leave_empty")
+                answers[key] = self._choice(pick, q["criteria"], 0.95)
         for reason in ("stuck_reason", "blocked_reason"):
             if reason in questions:
                 pick = self.blocked_reason if reason == "blocked_reason" and self.blocked_reason else next(iter(questions[reason]["criteria"]))
@@ -151,6 +162,8 @@ class ScriptedJev:
                 break
             if kind == "type" and "TYPE_TEXT" in ops and self._find(types, move[1]):
                 self.played.add(i)
+                if self.fills and (types[self._find(types, move[1])] or {}).get("current_value"):
+                    continue  # the field is filled already (a form batch typed it): this move is done
                 answers["operation"] = self._choice("TYPE_TEXT", ops)
                 answers["type_target"] = self._choice(self._find(types, move[1]), types, 0.95)
                 answers["type_value"] = self._choice(move[2], questions["type_value"]["criteria"], 0.95)
@@ -435,7 +448,31 @@ function wire() {{ const b = document.getElementById('save'); if (b) b.onclick =
 </body></html>"""
 
 
-ROUTES = {"/replay-form": REPLAY_FORM_PAGE, "/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
+# A sign-up form of three fields. ?react= makes the page answer the typing of the last name: `field` reveals a fourth
+# field, `message` a line of text, `list` a list of suggestions.
+BATCH_FORM_PAGE = """<!doctype html><html><head><title>Sign up</title></head><body>
+<h1>Sign up</h1>
+<label>First name <input id="first"></label>
+<label>Last name <input id="last"></label>
+<span id="extra"></span>
+<label>Email <input id="email"></label>
+<button id="save" type="button">Save</button>
+<p id="msg"></p>
+<script>
+const $ = id => document.getElementById(id);
+const react = new URLSearchParams(location.search).get('react');
+$('last').addEventListener('input', () => {
+  if ($('extra').firstChild) return;
+  if (react === 'field') $('extra').innerHTML = '<label>Middle name <input id="middle"></label>';
+  if (react === 'message') $('extra').innerHTML = '<em>Looks good</em>';
+  if (react === 'list') $('extra').innerHTML = '<ul role="listbox"><li role="option">Lovelace</li><li role="option">Lovell</li></ul>';
+});
+$('save').onclick = () => { $('msg').textContent = ($('first').value && $('last').value && $('email').value)
+  ? 'Saved successfully' : 'Error: every field is required'; };
+</script>
+</body></html>"""
+
+ROUTES = {"/batch-form": BATCH_FORM_PAGE, "/replay-form": REPLAY_FORM_PAGE, "/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
           "/device": DEVICE_PAGE, "/tabs": TABS_PAGE, "/receipt": RECEIPT_PAGE, "/spinner": SPINNER_PAGE, "/shadow": SHADOW_PAGE,
           "/shadow-names": SHADOW_NAMES_PAGE}
 
@@ -913,6 +950,52 @@ def run_checks(tmp: str | None = None) -> list[str]:
             os.environ["RUN_DATE"] = old_run_date
     if (later["run_date"], later["data"]["day"]) != ("2026-12-17", "2027-20-01"):
         failures.append(f"N: RUN_DATE in the environment is the day the dates count from: {later['run_date']} {later['data']['day']}")
+    # P. one request per form ------------------------------------------------------------------------------------------------------
+    form_moves = [("type", "First name", "first"), ("type", "Last name", "last"), ("type", "Email", "email"), ("click", "Save")]
+    form_fills = {"First name": "first", "Last name": "last", "Email": "email"}
+
+    def form_spec(query: str = "", **over) -> dict:
+        return make_spec(base + "/batch-form" + query, **{
+            "id": "form-batch", "goal": "Fill in the first name, the last name and the email and save, so that the page says it was saved.",
+            "data": {"first": "Ada", "last": "Lovelace", "email": "ada@example.org"}, "assert": [{"text_contains": "Saved successfully"}],
+            "batch_fields": True, **over})
+
+    def typed(trace: dict) -> list[str]:
+        return [("batched " if st.get("batched") else "asked ") + st["type_value"]["choice"] for st in trace["steps"]
+                if (st.get("executed") or {}).get("action") == "TYPE_TEXT"]
+
+    plain = ScriptedJev(form_moves, SAVED)
+    trace, out = go("batch-off", form_spec(batch_fields=False), plain)
+    if trace["status"] != "passed" or any(k.startswith("fill_") for q in plain.seen_questions for k in q) or "batch" in trace["result"]:
+        failures.append("P: without batch_fields no per-field question is asked and the result has no batch account")
+    jev = ScriptedJev(form_moves, SAVED, fills=form_fills)
+    trace, out = go("batch-on", form_spec(), jev)
+    account = trace["result"].get("batch") or {}
+    if (trace["status"], typed(trace), account.get("fields_typed"), account.get("stopped")) != \
+            ("passed", ["asked first", "batched last", "batched email"], 2, []):
+        failures.append(f"P: one request types the first field and assigns the other two: {trace['status']} {typed(trace)} {account}")
+    if jev.requests != plain.requests - 2:
+        failures.append(f"P: two requests fewer than field by field: {jev.requests} against {plain.requests}")
+    first = next(st for st in trace["steps"] if st.get("batch_planned"))
+    if [p["value_key"] for p in first["batch_planned"]] != ["last", "email"] or set(first.get("fill") or {}) != {"0", "1", "2"}:
+        failures.append(f"P: the step that typed the first field records the plan and every per-field answer: {first.get('batch_planned')} {first.get('fill')}")
+    if "BATCHED" not in flags_of(trace, out):
+        failures.append("P: batched steps are flagged in the summary")
+    for react, needle in (("field", 'new: textbox "Middle name"'), ("message", "the page's text changed"), ("list", "a list of suggestions opened")):
+        jev = ScriptedJev(form_moves, SAVED, fills=form_fills)
+        trace, out = go(f"batch-{react}", form_spec(f"?react={react}"), jev)
+        account = trace["result"].get("batch") or {}
+        stopped = (account.get("stopped") or [{}])[0]
+        if (trace["status"], typed(trace), account.get("fields_typed")) != ("passed", ["asked first", "batched last", "asked email"], 1):
+            failures.append(f"P ({react}): the batch ends when the page reacts and Jev decides the rest: {trace['status']} {typed(trace)} {account}")
+        if needle not in (stopped.get("reason") or "") or stopped.get("fields_left") != 1 or "BATCH-ENDED" not in flags_of(trace, out):
+            failures.append(f"P ({react}): the reason says how the page reacted: {stopped}")
+    # an assignment Jev is not sure of is not typed: thresholds.batch_confidence
+    jev = ScriptedJev(form_moves, SAVED, fills=form_fills)
+    trace, out = go("batch-unsure", form_spec(thresholds={"batch_confidence": 0.99}), jev)
+    if (trace["status"], typed(trace)) != ("passed", ["asked first", "asked last", "asked email"]):
+        failures.append(f"P: below batch_confidence every field is asked for: {trace['status']} {typed(trace)}")
+
     # O. replay -----------------------------------------------------------------------------------------------------------------
     paths = os.path.join(tmp, "paths")
     replay_rules = {"saved": "Saved successfully", "save_error": "could not save"}
