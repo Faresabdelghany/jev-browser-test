@@ -2,8 +2,9 @@
 
 Every step produces a *fresh* table (indices are not stable across steps). Each
 included element is tagged with `data-jev-idx="<n>"` so the runner can act on it
-with a plain Playwright locator. The main frame is observed, and the <iframe>s the spec lists
-(`observation.frames`, see add_frames); controls inside shadow DOM are counted, not offered.
+with a plain Playwright locator. The main frame is observed, open shadow roots included (`observation.shadow_dom`,
+`deep` in the scripts; without it their controls are counted, not offered), and the <iframe>s the spec lists
+(`observation.frames`, see add_frames).
 
 The observation also records a *fingerprint* (url, title, text head, one identity/meaning
 tuple per tagged node). Right before acting, `fingerprint()` re-reads the same tuples and
@@ -37,8 +38,9 @@ JS_HELPERS = r"""
     for (const root of shadowRoots()) for (const el of root.querySelectorAll(sel)) out.push(el);
     return out;
   };
-  // Is `a` the node `b` or one of its ancestors, stepping from a shadow root up to its host?
-  const holds = (a, b) => { for (let n = b; n; n = n.parentNode || n.host) if (n === a) return true; return false; };
+  // Is `a` the node `b` or one of its ancestors in the tree as rendered: stepping from a slotted node to its slot (a
+  // component's <button><slot></slot></button> holds the host's child shown in it) and from a shadow root up to its host?
+  const holds = (a, b) => { for (let n = b; n; n = n.assignedSlot || n.parentNode || n.host) if (n === a) return true; return false; };
   // The element painted at a point. document.elementFromPoint stops at the outermost shadow host; with `deep` the
   // point is asked again inside each shadow root on the way down, so a button inside a component is found as itself.
   const topAt = (x, y) => {
@@ -65,6 +67,44 @@ JS_HELPERS = r"""
       }
       return null;
     };
+  };
+  // The parent in the tree as it is rendered: the <slot> a host's light child is shown in, else the parent element, else
+  // the host of the shadow root the node sits at the top of. On a page without shadow roots this is parentElement.
+  const up = el => el.assignedSlot || el.parentElement || (el.parentNode && el.parentNode.host) || null;
+  // The caption of a control whose label is drawn from another tree, which innerText does not read: a custom element
+  // inside it that renders its text in its own shadow root (a product card inside a link: <a><shop-list-item></a>), or
+  // a <slot> that shows the host's light children (a component's <button><slot></slot></button>: the caption is the
+  // host's text). Walks the tree as rendered, leaving out what is not displayed, and returns '' unless the walk crossed
+  // into a shadow root or a slot, so a control whose content is all in its own tree is named as it always was. A
+  // descendant that names itself (aria-label, an image's alt) contributes that name when the walk found no text
+  // (a link around an icon button). Live: the Polymer shop's product links and MDN's Copy / Reset / Log in buttons
+  // read `link ""` and `button ""`.
+  const composedText = (el, max) => {
+    let out = '', labels = '', crossed = false, budget = 300;
+    const add = t => { t = clean(t); if (t) out += (out ? ' ' : '') + t; };
+    const visit = node => {
+      if (out.length >= max || budget-- <= 0) return;
+      if (node.nodeType === 3) { add(node.textContent); return; }
+      if (node.nodeType !== 1) return;
+      const tag = node.tagName.toLowerCase();
+      if (tag === 'script' || tag === 'style' || tag === 'template' || tag === 'noscript') return;
+      if (tag === 'slot') {  // the nodes shown in the slot (its own children only when nothing is assigned)
+        const shown = node.assignedNodes({ flatten: true });
+        if (shown.some(n => n.parentNode !== node)) crossed = true;
+        for (const n of shown) visit(n);
+        return;
+      }
+      if (node !== el) {
+        const cs = getComputedStyle(node);
+        if (cs.display === 'none' || cs.visibility === 'hidden') return;
+        const own = node.getAttribute('aria-label') || (tag === 'img' ? node.getAttribute('alt') : '');
+        if (own && labels.length < max) labels += (labels ? ' ' : '') + clean(own);
+      }
+      if (node.shadowRoot) crossed = true;
+      for (const n of (node.shadowRoot || node).childNodes) visit(n);
+    };
+    visit(el);
+    return crossed ? (out || labels).slice(0, max) : '';
   };
   // FNV-1a over UTF-16 code units, as 8 hex chars: small, deterministic, good enough to spot a changed row/form.
   const strHash = s => {
@@ -303,7 +343,8 @@ OBSERVE_JS = "(args) => {\n  const deep = !!args.shadowDom;\n" + JS_HELPERS + r"
     // A field's content is its value, never its caption: text is read only from non-editable elements, so a
     // typed value cannot become a field's label, and a textarea's initial markup is not a second value.
     const editable = formControl || el.isContentEditable;
-    const text = editable ? '' : clean(el.innerText || el.textContent).slice(0, 80);
+    let text = editable ? '' : clean(el.innerText || el.textContent).slice(0, 80);
+    if (deep && !editable && !text) text = composedText(el, 80);  // a caption rendered in a nested shadow root or through a slot
     if (role === 'option' && LOADING_OPTION.test(text.slice(0, 40))) { loadingOptions++; seen.add(el); return false; }
     let labelText = '';
     if (el.labels && el.labels.length) labelText = clean(el.labels[0].innerText);
@@ -410,6 +451,7 @@ OBSERVE_JS = "(args) => {\n  const deep = !!args.shadowDom;\n" + JS_HELPERS + r"
   // attribute -- the only visible hint is `cursor: pointer`. Because `cursor` is inherited, keep the
   // OUTERMOST element of each pointer chain, and skip anything nested inside a pass-1 control.
   let shadowHosts = 0;  // without `deep`: elements whose open shadow root holds controls that are not in the table (a hint for the reader)
+  const within1 = p => { for (let n = p; n; n = up(n)) if (n.matches(SEL)) return true; return false; };  // closest(SEL), across shadow roots
   if (document.body && !wholeDocument) {
     let scanned = 0;
     const everything = deep
@@ -428,9 +470,12 @@ OBSERVE_JS = "(args) => {\n  const deep = !!args.shadowDom;\n" + JS_HELPERS + r"
       const r = el.getBoundingClientRect();
       if (r.width < 2 || r.height < 2 || r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) continue;
       if (getComputedStyle(el).cursor !== 'pointer') continue;
-      const p = el.parentElement;
+      // With `deep` the chain and the enclosing control are followed out of a shadow root too: the title and the image
+      // inside a product card's shadow root are inside the link around the card (live, the Polymer shop: each card
+      // reached Jev as an unnamed link, an unnamed image and a named title, three entries for one click).
+      const p = deep ? up(el) : el.parentElement;
       if (p && p !== document.body && getComputedStyle(p).cursor === 'pointer') continue;  // not outermost
-      if (p && p.closest(SEL)) continue;                // inside a real control (span inside button)
+      if (p && (deep ? within1(p) : p.closest(SEL))) continue;  // inside a real control (span inside button)
       // A pointer wrapper around exactly one offered control with no text of its own (OrangeHRM's topbar tabs: an <li>
       // with cursor:pointer around an <a> of the same caption) is that control twice; a click on the control bubbles
       // to the wrapper anyway. Live, every tab reached Jev as `clickable` and as `link` and split its choice 0.57 / 0.25.

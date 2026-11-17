@@ -249,13 +249,22 @@ shadow root; MDN, whose content sits in web components, 0/5 without and 5/5 with
 0.53 vs 0.56; about 12 ms more per observation on a page with 121 shadow hosts). HOVER and uploads stay opt-in. With none of them set the
 `operation` Choice, the target questions, the state and the observation are what they were (the observation was
 compared field by field against the previous release's on 80 page states of the self-test's fixtures: identical).
-`scripts/ab.py` is how "could it be the default" gets answered: both arms over the same specs, interleaved.
+`scripts/ab.py` is how "could it be the default" gets answered: both arms over the same specs, interleaved; with
+`--a-runner <another checkout's run_test.py>` the arms are two versions of the runner, for a change to the observer.
 
 - **Shadow DOM** (`observation.shadow_dom`, `deep` in the scripts). `JS_HELPERS` gets five root-aware helpers:
   `shadowRoots()` (found once per script run), `qsa()` (the document and every open root), `topAt()` (the hit test,
   asked again inside each shadow root on the way down: `document.elementFromPoint` stops at the outermost host, and
-  without this a control would read as covered by its own component), `holds()` (ancestry across a root's host) and
-  `textWalk()` (a host's shadow tree is read where the host stands). `OBSERVE_JS`, `FINGERPRINT_JS` and `LINES_JS`
+  without this a control would read as covered by its own component), `holds()` (ancestry across a root's host, and
+  from a slotted node to its slot: a button is not covered by the caption slotted into it) and
+  `textWalk()` (a host's shadow tree is read where the host stands). Since 0.7.0 two more follow the tree as it is
+  rendered: `composedText()` names a control whose caption is drawn from another tree, which `innerText` does not
+  read (a custom element inside a link that renders its text in its own shadow root; a component's
+  `<button><slot></slot></button>`, whose caption is the host's text), and returns nothing unless the walk crossed a
+  shadow root or a slot, so a control whose content is all in its own tree is named as it always was (the 22 example
+  pages: identical observations before and after); `up()` is the rendered parent, with which the pointer-cursor pass
+  finds the enclosing control across a shadow boundary (a card's title and image inside a link around the card are
+  the link, not two more entries). `OBSERVE_JS`, `FINGERPRINT_JS` and `LINES_JS`
   declare `deep` before the helpers; with it false every one of those is the document-only call it replaced. The
   observation marks its fingerprint `deep`, so every re-read (`fingerprint(page, frames, deep)`: the freshness guard,
   every WAIT) looks in the same places. The settle watches each open root for mutations, `check_assertions` reads

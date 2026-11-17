@@ -308,6 +308,44 @@ SHADOW_APP_PAGE = """<!doctype html><html><head><title>Shadow app</title></head>
   });
 </script></body></html>"""
 
+# Captions drawn from another tree, the two shapes met live (0.6.0). The Polymer shop: a link around a custom element
+# that renders the product's title and price in its own shadow root (<a><shop-card></a>), and a link around an icon
+# button that names itself. MDN: a component whose shadow root holds <button><slot></slot></button>, the caption being
+# the host's own text. And the control whose content is all in its own tree (a link around an image), which is named
+# as it always was. The second button's caption is an element shown through the slot: the button is not covered by it.
+SHADOW_NAMES_PAGE = """<!doctype html><html><head><title>Shadow names</title></head><body>
+<h1>Outerwear</h1>
+<a href="#cart"><icon-button aria-label="Shopping cart: 0 items" role="button" tabindex="0"></icon-button></a>
+<a href="#home"><img alt="Shop logo" width="24" height="24" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="></a>
+<div id="grid">
+  <a href="#tech-shell"><shop-card title="Tech Shell Full-Zip" price="$50.20"></shop-card></a>
+  <a href="#crew-neck"><shop-card title="Crew Neck - Grey" price="$22.15"></shop-card></a>
+</div>
+<slot-button id="copy">Copy</slot-button> <slot-button id="reset"><b>Reset</b> all</slot-button>
+<p id="msg"></p>
+<script>
+  customElements.define('icon-button', class extends HTMLElement {
+    connectedCallback() { this.attachShadow({mode: 'open'}).innerHTML = '<style>:host{display:inline-block;width:24px;height:24px;background:#ccd}</style><span></span>'; }
+  });
+  customElements.define('shop-image', class extends HTMLElement {
+    connectedCallback() { this.attachShadow({mode: 'open'}).innerHTML = '<style>:host{display:block;width:120px;height:80px;background:#dde}</style>'; }
+  });
+  customElements.define('shop-card', class extends HTMLElement {
+    connectedCallback() {
+      this.attachShadow({mode: 'open'}).innerHTML = '<style>:host{display:block;width:200px;margin:8px}</style><shop-image></shop-image>' +
+        '<div class="title">' + this.getAttribute('title') + '</div><span class="price">' + this.getAttribute('price') + '</span>' +
+        '<span style="display:none">internal sku 4711</span>';
+    }
+  });
+  customElements.define('slot-button', class extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({mode: 'open'});
+      root.innerHTML = '<button class="button" type="button" aria-labelledby="label"><span id="label"><slot></slot></span></button>';
+      root.querySelector('button').addEventListener('click', () => { document.getElementById('msg').textContent = this.id === 'copy' ? 'Saved successfully' : 'Reset done'; });
+    }
+  });
+</script></body></html>"""
+
 # Two file fields: one in plain sight with a label, one the page hides behind a styled label (display: none), the
 # usual "Choose photo" button. Submit confirms only when both hold a file.
 UPLOAD_PAGE = """<!doctype html><html><head><title>Upload</title><style>.btn{display:inline-block;padding:6px;border:1px solid #888;cursor:pointer}</style></head><body>
@@ -353,7 +391,8 @@ li.addEventListener('mouseleave', () => { clearTimeout(t); sub.style.display = '
 </script></body>""")
 
 ROUTES = {"/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
-          "/device": DEVICE_PAGE, "/tabs": TABS_PAGE, "/receipt": RECEIPT_PAGE, "/spinner": SPINNER_PAGE, "/shadow": SHADOW_PAGE}
+          "/device": DEVICE_PAGE, "/tabs": TABS_PAGE, "/receipt": RECEIPT_PAGE, "/spinner": SPINNER_PAGE, "/shadow": SHADOW_PAGE,
+          "/shadow-names": SHADOW_NAMES_PAGE}
 
 
 class _Site(http.server.BaseHTTPRequestHandler):
@@ -670,6 +709,30 @@ def run_checks(tmp: str | None = None) -> list[str]:
     if trace["status"] == "passed" or any(e.get("name") in ("Nickname", "Save profile") for s in trace["steps"] for e in s["elements"]) \
             or "shadow DOM" not in flags_of(trace, out):
         failures.append(f"J: without observation.shadow_dom the shadow controls are not offered and the stalled run says so: {trace['status']}")
+
+    # J2. captions drawn from another tree (live, 0.6.0: the Polymer shop's product links and MDN's Copy / Reset buttons
+    # read `link ""` and `button ""`, and each product card was in the table three times)
+    named = make_spec(base + "/shadow-names", goal="Copy the list, so that the page says it was saved.",
+                      **{"assert": [{"element_present": {"role": "button", "name": "Copy"}},
+                                    {"element_present": {"role": "link", "name": "Tech Shell Full-Zip $50.20"}}]})
+    trace, out = go("shadow-names", named, ScriptedJev([("click", "Copy")], SAVED))
+    table = [(e["role"], e.get("name")) for e in trace["steps"][0]["elements"]]
+    want = [("link", "Shopping cart: 0 items"), ("link", "Tech Shell Full-Zip $50.20"), ("link", "Crew Neck - Grey $22.15"), ("button", "Copy"),
+            ("button", "Reset all")]
+    if trace["status"] != "passed" or not all(a["ok"] for a in trace["result"]["assertions"]):
+        failures.append(f"J2: a button named through a slot is clicked and asserted by that name: {trace['status']} {trace['result']['assertions']}")
+    if any(w not in table for w in want):
+        failures.append(f"J2: a caption in a nested shadow root, through a slot or on a self-named child names the control: missing "
+                        f"{[w for w in want if w not in table]} in {table}")
+    if ("link", "") not in table or any("logo" in (n or "").lower() or "sku" in (n or "") for _, n in table):
+        failures.append(f"J2: a link whose content is all in its own tree is named as before, and text that is not displayed names nothing: {table}")
+    if len(table) != 7 or any(r == "clickable" for r, _ in table) or trace["steps"][0].get("covered_controls"):
+        failures.append(f"J2: the title and the image inside a card's shadow root are inside the link around the card, not entries of their own, and a button is not covered by the caption slotted into it: {table} covered={trace['steps'][0].get('covered_controls')}")
+    plain = make_spec(base + "/shadow-names", goal=named["goal"], budget={"max_steps": 3, "max_seconds": 30}, observation={"shadow_dom": False})
+    trace, out = go("shadow-names-off", plain, ScriptedJev([("click", "Copy"), ("undecided",)], SAVED))
+    off = [(e["role"], e.get("name")) for e in trace["steps"][0]["elements"]]
+    if any(n for r, n in off if r == "link") or ("button", "Copy") in off:
+        failures.append(f"J2: with shadow DOM off nothing is read across a shadow boundary: {off}")
 
     # K. uploads, driven by Jev ------------------------------------------------------------------------------------------------
     photo = os.path.join(tmp, "photo-sample.png")
