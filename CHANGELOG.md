@@ -22,6 +22,11 @@ UPLOAD_FILE found.
 - **HOVER waits for a menu that opens after a delay.** jQuery UI opens a submenu 300 ms after the pointer arrives;
   the settle went quiet at ~110 ms, every hover was flagged `NO-EFFECT` and Jev was told it changed nothing. A hover
   now waits up to 800 ms for the page to change (`executed.reveal`). Live after: HOVER, CLICK, pass, 5/5.
+- **An undecided streak does not end the run on a page that moved while Jev decided.** Live, 0.6.0 suite:
+  `dynamic-controls`' loader ended in the ~0.3 s between the third undecided observation and the loading-indicator
+  check; the check found nothing, the limit fell from five looks to three, and the run ended `low_confidence` on a
+  finished page. Before stopping, the runner now re-reads the page; if it changed, the count starts again
+  (`step.moved_while_deciding`). Selftest G2.
 - **Uploads: a drag-and-drop library's orphan file input is not offered beside a real file field.** On
   the-internet's /upload both inputs read `file "file"`, the orphan sorted first and Jev chose it (an empty form,
   500). A boxless file input with no label, no form and no rendered owner is now offered only when the page has no

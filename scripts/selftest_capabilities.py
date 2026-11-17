@@ -59,11 +59,13 @@ class ScriptedJev:
     A move is played once (`once=True`, the default for click and type) and then skipped. When nothing applies the
     answer is DONE. The outcome Choice is answered by `outcome_rules`: {outcome name: substring of the page text}."""
 
-    def __init__(self, moves: list[tuple], outcome_rules: dict[str, str] | None = None, undecided_while: str | None = None):
+    def __init__(self, moves: list[tuple], outcome_rules: dict[str, str] | None = None, undecided_while: str | None = None,
+                 undecided_ms: int = 0):
         self.moves = [list(m) for m in moves]
         self.played: set[int] = set()
         self.outcome_rules = outcome_rules or {}
         self.undecided_while = undecided_while  # text on the page while which every decision is an undecided WAIT
+        self.undecided_ms = undecided_ms  # how long an undecided answer takes: the page may move meanwhile
         self.requests = 0
         self.seen_states: list[dict] = []
 
@@ -116,6 +118,9 @@ class ScriptedJev:
         uploads = questions.get("upload_target", {}).get("criteria", {})
         if self.undecided_while and self.undecided_while in text:
             answers["operation"] = self._choice("WAIT", ops, conf=0.3)
+            if self.undecided_ms:
+                import time
+                time.sleep(self.undecided_ms / 1000)
             return {"answers": answers, "usage": usage, "model": "scripted-jev", "latency_ms": 1}
         for i, move in enumerate(self.moves):
             kind = move[0]
@@ -256,6 +261,7 @@ RECEIPT_PAGE = """<!doctype html><html><head><title>Receipt</title></head><body>
 SPINNER_PAGE = """<!doctype html><html><head><title>Spinner</title></head><body>
 <h1>Report</h1><button id="unrelated" type="button">Help</button>
 <div class="report-spinner" id="spin" style="width:24px;height:24px;border:3px solid #999;border-radius:50%"></div>
+<script>if (new URLSearchParams(location.search).get('plain')) document.getElementById('spin').className = '';</script>
 <p id="msg">Crunching the numbers</p>
 <script>
   const ms = Number(new URLSearchParams(location.search).get('ms') || 2500);
@@ -558,6 +564,16 @@ def run_checks(tmp: str | None = None) -> list[str]:
     trace, out = go("no-spinner", plain, ScriptedJev([("undecided",)], SAVED))
     if trace["status"] != "low_confidence" or len(trace["steps"]) != 3 or any(s.get("loading_indicators") for s in trace["steps"]):
         failures.append(f"G: a page with no indicator keeps the three-look limit: {trace['status']} {len(trace['steps'])} steps")
+
+    # G2. the page moves while Jev decides the last undecided look (live: dynamic-controls' loader ended between the
+    # observation and the indicator check): no indicator here, so three looks; each answer takes 2 s and the text
+    # changes at 6.2 s, inside the third answer (looks at ~0.2, ~2.6, ~5.2 s). Without the check the run ends
+    # low_confidence on a page that has finished; with it the count starts again and the next look sees the result.
+    moving = make_spec(base + "/spinner?ms=6200&plain=1", goal=spin["goal"], budget={"max_steps": 8, "max_seconds": 60})
+    trace, out = go("moved-while-deciding", moving, ScriptedJev([], SAVED, undecided_while="Crunching the numbers", undecided_ms=2000))
+    if trace["status"] != "passed" or not any(s.get("moved_while_deciding") for s in trace["steps"]):
+        failures.append(f"G2: a page that moved while the last undecided look was decided restarts the count: {trace['status']} "
+                        f"{[(s['n'], s.get('low_streak'), s.get('moved_while_deciding')) for s in trace['steps']]}")
 
     # H. shadow DOM --------------------------------------------------------------------------------------------------------
     shadow = make_spec(base + "/shadow", budget={"max_steps": 3, "max_seconds": 30}, observation={"shadow_dom": False})

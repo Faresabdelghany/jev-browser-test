@@ -434,6 +434,19 @@ def can_recheck(busy: bool, rechecks: int, waited_ms: int = 0, navigation_timeou
     return rechecks < recheck_limit(busy) or (busy and waited_ms < navigation_timeout_ms)
 
 
+def moved_since(page, before: dict | None) -> bool:
+    """Has the page changed since the observation `before` is the fingerprint of (the whole-page comparison a WAIT uses)?
+    Asked once, before an undecided streak ends the run: live, 0.5.1, dynamic-controls' loader ended in the ~0.3 s
+    between the third undecided observation and the loading-indicator check, the check found nothing, the limit fell
+    from five looks to three, and the run ended low_confidence on a page that had just finished."""
+    if not before:
+        return False
+    try:
+        return compare_fingerprint(before, fingerprint(page, before.get("frames"), before.get("deep")), "DONE") is not None
+    except Exception:  # noqa: BLE001 - the document navigated meanwhile: that is a change
+        return True
+
+
 def low_confidence_limit(th: dict, blank: bool) -> int:
     """How many consecutive undecided (low-confidence) decisions on one page end the run `low_confidence`: the spec's
     max_low_confidence_steps on a settled page, BUSY_EXTRA_LOOKS more while the page says it is loading (`blank`: a
@@ -1686,9 +1699,14 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                         if found:
                             step["loading_indicators"] = found
                     if low_streak >= low_confidence_limit(th, page_loading(obs) or loading_indicated(step)):
-                        ask_reason(step, state)
-                        finish(page, step, "low_confidence", dict(STOP))
-                        break
+                        if not moved_since(page, obs.get("fingerprint")):
+                            ask_reason(step, state)
+                            finish(page, step, "low_confidence", dict(STOP))
+                            break
+                        # the page moved while Jev was deciding (a loader that ended after the observation, before the
+                        # indicator check): the looks were about a page that is gone, so the count starts again
+                        step["moved_while_deciding"] = True
+                        low_streak, last_low_sig = 0, None
                     park(step, f"low confidence; {operation} not executed",
                          wait_entry(n, "WAIT", "undecided between the offered options; nothing was executed"), sig,
                          wait_ms=spec["browser"]["settle_ms"] * min(2 ** (low_streak - 1), WAIT_BACKOFF_MAX),
