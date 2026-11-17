@@ -1274,3 +1274,25 @@ Verdicts. Public: the same in every run except `menu-random` and `notify-random`
 cookie file or a disk cache to the id the demo pre-fills, but three against none is recorded here as it fell.
 
 Decision: both opt-in for a single run; sessions on in the rerun command of step 6.
+
+## 0.12.0 (2026-11-17, evening): parallel runs with a limit per host
+
+Step 5: `run_suite.py --per-host`, `--host-limit`, a spec's `host_limit`, and the scheduler (`run_pool`). The 22
+examples once each, nothing else on; files `2026-11-17-step5-*`.
+
+| | wall-clock | per-host peak |
+|---|---:|---|
+| 0.7.0 at its safe setting: 17 public on `--workers 2` (`before-public`), then 5 OrangeHRM on `--workers 1` (`before-hrm`) | 38.9 + 96.5 = 135.4 s | 2; 1 |
+| one suite, `--workers 8` (`after-1`, `after-2`) | 105.4 s; 121.9 s | the-internet 2, saucedemo 2, OrangeHRM 1, the four single-spec hosts 1 |
+| one suite, `--workers 4` (`after-w4`) | 121.0 s | the same |
+| the 17 public specs alone, `--workers 6` (`try-public`) | 23.7 s | 2, 2, 1, 1, 1, 1 |
+
+The suite is as long as OrangeHRM's queue: its five specs took 96.5 s alone and 105.4, 121.9 and 121.0 s with the
+others beside them (the first 25 s of each suite), in an hour in which single flows there ran between 17 and 50 s.
+Eight workers against four changes nothing once every other host has finished, which they have after 25 s.
+
+Not green: `shop-checkout-problem-account` (the documented bug, every run); `toolshop-search-cart` in every suite of
+this hour, before and after (the practice site answered "0 products found for 'Pliers'", or left the run blocked on
+its search); `notify-random` and `menu-random` once each (random pages); `hrm-leave-assign` once (`low_confidence`
+after 50 s) and `hrm-add-employee` once (`low_confidence`, its first field). No run failed for load on a host: the
+peaks are the limits.

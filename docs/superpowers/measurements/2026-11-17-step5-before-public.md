@@ -1,0 +1,127 @@
+# Suite 0.7.0: 17 public, 2 workers 2026-11-17T17:54:29+02:00
+
+**NOT ALL PASS** · 17 spec(s) × 1 repeat(s), 2 worker(s), 38.9 s wall-clock · commit `1fa29a9`
+
+| spec | verdict | agreement | outcomes | median wall | Jev ms | requests | tokens in | confidence |
+|---|---|---:|---|---:|---:|---:|---:|---:|
+| `add-remove-elements` | **PASS** | 100% | one_delete_left 1/1 | 4423 ms | 800 | 5 | 5862 | 0.93 |
+| `dynamic-controls` | **PASS** | 100% | both_done 1/1 | 9982 ms | 1953 | 11 | 17471 | 0.88 |
+| `forgot-password` | **PASS** | 100% | email_sent 1/1 | 3388 ms | 571 | 4 | 4427 | 0.995 |
+| `load-wait` | **PASS** | 100% | loaded 1/1 | 7907 ms | 1108 | 7 | 8147 | 0.99 |
+| `login-logout` | **PASS** | 100% | logged_out 1/1 | 4702 ms | 1089 | 6 | 9770 | 0.99 |
+| `menu-random` | **PASS** | 100% | all_entries 1/1 | 2493 ms | 211 | 2 | 2238 | None |
+| `modal-close` | **PASS** | 100% | modal_closed 1/1 | 3245 ms | 570 | 4 | 4033 | 0.7 |
+| `notify-random` | **PASS** | 100% | action_successful 1/1 | 3137 ms | 396 | 3 | 3218 | 0.92 |
+| `shop-add-second-item` | **PASS** | 100% | bike_light_in_cart 1/1 | 3031 ms | 591 | 4 | 10869 | 0.885 |
+| `shop-checkout-error-account` | **EXPECTED (declared result in 1/1)** | 100% | undetermined 1/1 | 5035 ms | 1996 | 10 | 26266 | 0.92 |
+| `shop-checkout-problem-account` | **BUG** | 100% | form_error 1/1 | 4620 ms | 1628 | 9 | 23457 | 0.93 |
+| `shop-checkout` | **PASS** | 100% | order_complete 1/1 | 5016 ms | 1793 | 10 | 24991 | 0.995 |
+| `table-sort-due` | **EXPECTED (declared result in 1/1)** | 100% | undetermined 1/1 | 4344 ms | 857 | 4 | 10122 | 0.3 |
+| `todo-add-filter` | **PASS** | 100% | active_filtered 1/1 | 3802 ms | 1478 | 8 | 15169 | 0.88 |
+| `toolshop-search-cart` | **UNDETERMINED (suggested: none 1)** | 100% | undetermined 1/1 | 4030 ms | 1290 | 6 | 23554 | 0.65 |
+| `web-form-submit` | **PASS** | 100% | form_submitted 1/1 | 4753 ms | 1561 | 9 | 23844 | 0.96 |
+| `wiki-search` | **PASS** | 100% | article_shown 1/1 | 3922 ms | 783 | 4 | 33491 | 0.795 |
+
+## `add-remove-elements`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | one_delete_left | pass | passed | 4423 ms | 0 | Delete | `add-remove-elements/01/result.json` |
+
+## `dynamic-controls`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | both_done | pass | passed | 9982 ms | 0 | Add | `dynamic-controls/01/result.json` |
+
+## `forgot-password`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | email_sent | pass | passed | 3388 ms | 0 | Your e-mail's been sent! | `forgot-password/01/result.json` |
+
+## `load-wait`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | loaded | pass | passed | 7907 ms | 0 | Hello World! | `load-wait/01/result.json` |
+
+## `login-logout`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | logged_out | pass | passed | 4702 ms | 0 | Login Page | `login-logout/01/result.json` |
+
+## `menu-random`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | all_entries | pass | passed | 2493 ms | 0 |  | `menu-random/01/result.json` |
+
+## `modal-close`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | modal_closed | pass | passed | 3245 ms | 0 |  | `modal-close/01/result.json` |
+
+## `notify-random`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | action_successful | pass | passed | 3137 ms | 0 | Action successful | `notify-random/01/result.json` |
+
+## `shop-add-second-item`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | bike_light_in_cart | pass | passed | 3031 ms | 0 | Sauce Labs Bike Light | `shop-add-second-item/01/result.json` |
+
+## `shop-checkout-error-account`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | undetermined (expected) | - | blocked | 5035 ms | 0 |  | `shop-checkout-error-account/01/result.json` |
+
+## `shop-checkout-problem-account`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | form_error | bug | outcome | 4620 ms | 1 | Error: Last Name is required | `shop-checkout-problem-account/01/result.json` |
+
+## `shop-checkout`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | order_complete | pass | passed | 5016 ms | 0 | Checkout: Complete! | `shop-checkout/01/result.json` |
+
+## `table-sort-due`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | undetermined (expected) | - | low_confidence | 4344 ms | 0 |  | `table-sort-due/01/result.json` |
+
+## `todo-add-filter`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | active_filtered | pass | passed | 3802 ms | 0 | 1 item left | `todo-add-filter/01/result.json` |
+
+## `toolshop-search-cart`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | undetermined | - | blocked | 4030 ms | 1 |  | `toolshop-search-cart/01/result.json` |
+
+## `web-form-submit`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | form_submitted | pass | passed | 4753 ms | 0 | Form submitted | `web-form-submit/01/result.json` |
+
+## `wiki-search`
+
+| # | outcome | verdict | status | wall | exit | evidence | result |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | article_shown | pass | passed | 3922 ms | 0 | Playwright (software) | `wiki-search/01/result.json` |
+
+Open a trace only for: `toolshop-search-cart` (undetermined)

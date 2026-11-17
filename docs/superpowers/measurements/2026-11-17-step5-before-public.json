@@ -1,0 +1,1605 @@
+{
+  "label": "0.7.0: 17 public, 2 workers",
+  "timestamp": "2026-11-17T17:54:29+02:00",
+  "git_commit": "1fa29a9",
+  "repeat": 1,
+  "workers": 2,
+  "run_args": [],
+  "elapsed_ms": 38930,
+  "out_dir": "runs/suite/s5-before-public",
+  "specs": {
+    "add-remove-elements": {
+      "spec": "../../../../jev-v070/specs/examples/add-remove-elements.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "add-remove-elements/01",
+          "exit_code": 0,
+          "wall_ms": 4423,
+          "outcome": "one_delete_left",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "add-remove-elements/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 4270,
+          "jev_ms": 800,
+          "adjudication_ms": 223,
+          "browser_ms": 429,
+          "requests": 5,
+          "input_tokens": 5862,
+          "output_tokens": 798,
+          "model": "jev-1.14.0",
+          "steps": 4,
+          "actions_executed": 3,
+          "decision_confidence": 0.93,
+          "min_decision_confidence": 0.84,
+          "step_confidences": [
+            0.97,
+            0.93,
+            0.84
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 193,
+          "jev_warm_ms": 181,
+          "browser_per_action_ms": 137,
+          "step_jev_ms": [
+            193,
+            179,
+            247,
+            181
+          ],
+          "step_browser_ms": [
+            162,
+            130,
+            137,
+            null
+          ],
+          "action_browser_ms": [
+            162,
+            130,
+            137
+          ],
+          "launch_ms": 501,
+          "navigation_ms": 1622,
+          "setup_ms": 0,
+          "result": "add-remove-elements/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Delete",
+          "first_seen_at_step": 4
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "one_delete_left": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 4423,
+        "duration_ms": 4270,
+        "jev_ms": 800,
+        "browser_ms": 429,
+        "requests": 5,
+        "input_tokens": 5862,
+        "decision_confidence": 0.93,
+        "steps": 4
+      },
+      "passes": 1,
+      "environment_failures": [],
+      "reason": null
+    },
+    "dynamic-controls": {
+      "spec": "../../../../jev-v070/specs/examples/dynamic-controls.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "dynamic-controls/01",
+          "exit_code": 0,
+          "wall_ms": 9982,
+          "outcome": "both_done",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "dynamic-controls/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 9829,
+          "jev_ms": 1953,
+          "adjudication_ms": 189,
+          "browser_ms": 4943,
+          "requests": 11,
+          "input_tokens": 17471,
+          "output_tokens": 2108,
+          "model": "jev-1.14.0",
+          "steps": 10,
+          "actions_executed": 7,
+          "decision_confidence": 0.88,
+          "min_decision_confidence": 0.33,
+          "step_confidences": [
+            0.99,
+            0.76,
+            0.56,
+            0.43,
+            0.33,
+            0.88,
+            0.97,
+            0.95,
+            0.88
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 2,
+          "jev_first_ms": 187,
+          "jev_warm_ms": 189,
+          "browser_per_action_ms": 528,
+          "step_jev_ms": [
+            187,
+            233,
+            189,
+            191,
+            195,
+            206,
+            189,
+            185,
+            189,
+            189
+          ],
+          "step_browser_ms": [
+            195,
+            526,
+            913,
+            514,
+            223,
+            136,
+            528,
+            920,
+            988,
+            null
+          ],
+          "action_browser_ms": [
+            195,
+            526,
+            913,
+            136,
+            528,
+            920,
+            988
+          ],
+          "launch_ms": 502,
+          "navigation_ms": 1522,
+          "setup_ms": 0,
+          "result": "dynamic-controls/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Add",
+          "first_seen_at_step": 10
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "both_done": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 9982,
+        "duration_ms": 9829,
+        "jev_ms": 1953,
+        "browser_ms": 4943,
+        "requests": 11,
+        "input_tokens": 17471,
+        "decision_confidence": 0.88,
+        "steps": 10
+      },
+      "passes": 1,
+      "environment_failures": [],
+      "reason": null
+    },
+    "forgot-password": {
+      "spec": "../../../../jev-v070/specs/examples/forgot-password.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "forgot-password/01",
+          "exit_code": 0,
+          "wall_ms": 3388,
+          "outcome": "email_sent",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "forgot-password/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 3259,
+          "jev_ms": 571,
+          "adjudication_ms": 186,
+          "browser_ms": 639,
+          "requests": 4,
+          "input_tokens": 4427,
+          "output_tokens": 600,
+          "model": "jev-1.14.0",
+          "steps": 3,
+          "actions_executed": 2,
+          "decision_confidence": 0.995,
+          "min_decision_confidence": 0.99,
+          "step_confidences": [
+            1.0,
+            0.99
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 206,
+          "jev_warm_ms": 182.5,
+          "browser_per_action_ms": 319.5,
+          "step_jev_ms": [
+            206,
+            182,
+            183
+          ],
+          "step_browser_ms": [
+            166,
+            473,
+            null
+          ],
+          "action_browser_ms": [
+            166,
+            473
+          ],
+          "launch_ms": 139,
+          "navigation_ms": 1397,
+          "setup_ms": 0,
+          "result": "forgot-password/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Your e-mail's been sent!",
+          "first_seen_at_step": 3
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "email_sent": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 3388,
+        "duration_ms": 3259,
+        "jev_ms": 571,
+        "browser_ms": 639,
+        "requests": 4,
+        "input_tokens": 4427,
+        "decision_confidence": 0.995,
+        "steps": 3
+      },
+      "passes": 1,
+      "environment_failures": [],
+      "reason": null
+    },
+    "load-wait": {
+      "spec": "../../../../jev-v070/specs/examples/load-wait.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "load-wait/01",
+          "exit_code": 0,
+          "wall_ms": 7907,
+          "outcome": "loaded",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "load-wait/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 7772,
+          "jev_ms": 1108,
+          "adjudication_ms": 222,
+          "browser_ms": 4490,
+          "requests": 7,
+          "input_tokens": 8147,
+          "output_tokens": 1212,
+          "model": "jev-1.14.0",
+          "steps": 6,
+          "actions_executed": 5,
+          "decision_confidence": 0.99,
+          "min_decision_confidence": 0.99,
+          "step_confidences": [
+            1.0,
+            0.99,
+            1.0,
+            0.99,
+            0.99
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 183,
+          "jev_warm_ms": 184,
+          "browser_per_action_ms": 907,
+          "step_jev_ms": [
+            183,
+            178,
+            178,
+            195,
+            184,
+            190
+          ],
+          "step_browser_ms": [
+            164,
+            518,
+            907,
+            1717,
+            1184,
+            null
+          ],
+          "action_browser_ms": [
+            164,
+            518,
+            907,
+            1717,
+            1184
+          ],
+          "launch_ms": 151,
+          "navigation_ms": 1435,
+          "setup_ms": 0,
+          "result": "load-wait/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Hello World!",
+          "first_seen_at_step": 6
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "loaded": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 7907,
+        "duration_ms": 7772,
+        "jev_ms": 1108,
+        "browser_ms": 4490,
+        "requests": 7,
+        "input_tokens": 8147,
+        "decision_confidence": 0.99,
+        "steps": 6
+      },
+      "passes": 1,
+      "environment_failures": [],
+      "reason": null
+    },
+    "login-logout": {
+      "spec": "../../../../jev-v070/specs/examples/login-logout.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "login-logout/01",
+          "exit_code": 0,
+          "wall_ms": 4702,
+          "outcome": "logged_out",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "login-logout/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 4575,
+          "jev_ms": 1089,
+          "adjudication_ms": 224,
+          "browser_ms": 1305,
+          "requests": 6,
+          "input_tokens": 9770,
+          "output_tokens": 1368,
+          "model": "jev-1.14.0",
+          "steps": 5,
+          "actions_executed": 4,
+          "decision_confidence": 0.99,
+          "min_decision_confidence": 0.96,
+          "step_confidences": [
+            0.98,
+            0.96,
+            1.0,
+            1.0
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 203,
+          "jev_warm_ms": 223.5,
+          "browser_per_action_ms": 310.5,
+          "step_jev_ms": [
+            203,
+            223,
+            213,
+            224,
+            226
+          ],
+          "step_browser_ms": [
+            153,
+            158,
+            531,
+            463,
+            null
+          ],
+          "action_browser_ms": [
+            153,
+            158,
+            531,
+            463
+          ],
+          "launch_ms": 134,
+          "navigation_ms": 1417,
+          "setup_ms": 0,
+          "result": "login-logout/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Login Page",
+          "first_seen_at_step": 5
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "logged_out": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 4702,
+        "duration_ms": 4575,
+        "jev_ms": 1089,
+        "browser_ms": 1305,
+        "requests": 6,
+        "input_tokens": 9770,
+        "decision_confidence": 0.99,
+        "steps": 5
+      },
+      "passes": 1,
+      "environment_failures": [],
+      "reason": null
+    },
+    "menu-random": {
+      "spec": "../../../../jev-v070/specs/examples/menu-random.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "menu-random/01",
+          "exit_code": 0,
+          "wall_ms": 2493,
+          "outcome": "all_entries",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "menu-random/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 2361,
+          "jev_ms": 211,
+          "adjudication_ms": 199,
+          "browser_ms": 0,
+          "requests": 2,
+          "input_tokens": 2238,
+          "output_tokens": 287,
+          "model": "jev-1.14.0",
+          "steps": 1,
+          "actions_executed": 0,
+          "decision_confidence": null,
+          "min_decision_confidence": null,
+          "step_confidences": [],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 211,
+          "jev_warm_ms": null,
+          "browser_per_action_ms": null,
+          "step_jev_ms": [
+            211
+          ],
+          "step_browser_ms": [
+            null
+          ],
+          "action_browser_ms": [],
+          "launch_ms": 149,
+          "navigation_ms": 1508,
+          "setup_ms": 0,
+          "result": "menu-random/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": null,
+          "first_seen_at_step": 1
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "all_entries": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 2493,
+        "duration_ms": 2361,
+        "jev_ms": 211,
+        "browser_ms": 0,
+        "requests": 2,
+        "input_tokens": 2238,
+        "decision_confidence": null,
+        "steps": 1
+      },
+      "passes": 1,
+      "environment_failures": [],
+      "reason": null
+    },
+    "modal-close": {
+      "spec": "../../../../jev-v070/specs/examples/modal-close.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "modal-close/01",
+          "exit_code": 0,
+          "wall_ms": 3245,
+          "outcome": "modal_closed",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "modal-close/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 3114,
+          "jev_ms": 570,
+          "adjudication_ms": 178,
+          "browser_ms": 527,
+          "requests": 4,
+          "input_tokens": 4033,
+          "output_tokens": 552,
+          "model": "jev-1.14.0",
+          "steps": 3,
+          "actions_executed": 1,
+          "decision_confidence": 0.7,
+          "min_decision_confidence": 0.4,
+          "step_confidences": [
+            0.4,
+            1.0
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 1,
+          "jev_first_ms": 177,
+          "jev_warm_ms": 196.5,
+          "browser_per_action_ms": 198,
+          "step_jev_ms": [
+            177,
+            222,
+            171
+          ],
+          "step_browser_ms": [
+            329,
+            198,
+            null
+          ],
+          "action_browser_ms": [
+            198
+          ],
+          "launch_ms": 138,
+          "navigation_ms": 1374,
+          "setup_ms": 0,
+          "result": "modal-close/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": null,
+          "first_seen_at_step": 3
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "modal_closed": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 3245,
+        "duration_ms": 3114,
+        "jev_ms": 570,
+        "browser_ms": 527,
+        "requests": 4,
+        "input_tokens": 4033,
+        "decision_confidence": 0.7,
+        "steps": 3
+      },
+      "passes": 1,
+      "environment_failures": [],
+      "reason": null
+    },
+    "notify-random": {
+      "spec": "../../../../jev-v070/specs/examples/notify-random.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "notify-random/01",
+          "exit_code": 0,
+          "wall_ms": 3137,
+          "outcome": "action_successful",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "notify-random/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 3008,
+          "jev_ms": 396,
+          "adjudication_ms": 180,
+          "browser_ms": 483,
+          "requests": 3,
+          "input_tokens": 3218,
+          "output_tokens": 413,
+          "model": "jev-1.14.0",
+          "steps": 2,
+          "actions_executed": 1,
+          "decision_confidence": 0.92,
+          "min_decision_confidence": 0.92,
+          "step_confidences": [
+            0.92
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 203,
+          "jev_warm_ms": 193,
+          "browser_per_action_ms": 483,
+          "step_jev_ms": [
+            203,
+            193
+          ],
+          "step_browser_ms": [
+            483,
+            null
+          ],
+          "action_browser_ms": [
+            483
+          ],
+          "launch_ms": 137,
+          "navigation_ms": 1491,
+          "setup_ms": 0,
+          "result": "notify-random/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Action successful",
+          "first_seen_at_step": 2
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "action_successful": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 3137,
+        "duration_ms": 3008,
+        "jev_ms": 396,
+        "browser_ms": 483,
+        "requests": 3,
+        "input_tokens": 3218,
+        "decision_confidence": 0.92,
+        "steps": 2
+      },
+      "passes": 1,
+      "environment_failures": [],
+      "reason": null
+    },
+    "shop-add-second-item": {
+      "spec": "../../../../jev-v070/specs/examples/shop-add-second-item.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "shop-add-second-item/01",
+          "exit_code": 0,
+          "wall_ms": 3031,
+          "outcome": "bike_light_in_cart",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "shop-add-second-item/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 2901,
+          "jev_ms": 591,
+          "adjudication_ms": 179,
+          "browser_ms": 322,
+          "requests": 4,
+          "input_tokens": 10869,
+          "output_tokens": 1113,
+          "model": "jev-1.14.0",
+          "steps": 3,
+          "actions_executed": 2,
+          "decision_confidence": 0.885,
+          "min_decision_confidence": 0.78,
+          "step_confidences": [
+            0.99,
+            0.78
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 204,
+          "jev_warm_ms": 193.5,
+          "browser_per_action_ms": 161,
+          "step_jev_ms": [
+            204,
+            208,
+            179
+          ],
+          "step_browser_ms": [
+            175,
+            147,
+            null
+          ],
+          "action_browser_ms": [
+            175,
+            147
+          ],
+          "launch_ms": 142,
+          "navigation_ms": 813,
+          "setup_ms": 565,
+          "result": "shop-add-second-item/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Sauce Labs Bike Light",
+          "first_seen_at_step": 3
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "bike_light_in_cart": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 3031,
+        "duration_ms": 2901,
+        "jev_ms": 591,
+        "browser_ms": 322,
+        "requests": 4,
+        "input_tokens": 10869,
+        "decision_confidence": 0.885,
+        "steps": 3
+      },
+      "passes": 1,
+      "environment_failures": [],
+      "reason": null
+    },
+    "shop-checkout-error-account": {
+      "spec": "../../../../jev-v070/specs/examples/shop-checkout-error-account.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "shop-checkout-error-account/01",
+          "exit_code": 0,
+          "wall_ms": 5035,
+          "outcome": "undetermined",
+          "verdict": null,
+          "status": "blocked",
+          "trace": "shop-checkout-error-account/01/trace.json",
+          "pass": false,
+          "error": null,
+          "duration_ms": 4893,
+          "jev_ms": 1996,
+          "adjudication_ms": null,
+          "browser_ms": 1079,
+          "requests": 10,
+          "input_tokens": 26266,
+          "output_tokens": 3154,
+          "model": "jev-1.14.0",
+          "steps": 9,
+          "actions_executed": 8,
+          "decision_confidence": 0.92,
+          "min_decision_confidence": 0.56,
+          "step_confidences": [
+            0.96,
+            0.99,
+            0.92,
+            0.96,
+            1.0,
+            0.89,
+            0.86,
+            0.56,
+            0.81
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 210,
+          "jev_warm_ms": 201,
+          "browser_per_action_ms": 136.5,
+          "step_jev_ms": [
+            210,
+            206,
+            200,
+            183,
+            178,
+            220,
+            190,
+            202,
+            407
+          ],
+          "step_browser_ms": [
+            161,
+            142,
+            153,
+            119,
+            112,
+            113,
+            148,
+            131,
+            null
+          ],
+          "action_browser_ms": [
+            161,
+            142,
+            153,
+            119,
+            112,
+            113,
+            148,
+            131
+          ],
+          "launch_ms": 150,
+          "navigation_ms": 585,
+          "setup_ms": 564,
+          "result": "shop-checkout-error-account/01/result.json",
+          "suggested_verdict": "bug",
+          "evidence_line": null,
+          "first_seen_at_step": null,
+          "expected": true,
+          "expected_mismatches": {}
+        }
+      ],
+      "verdict": "expected",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": 1,
+      "outcome_counts": {
+        "undetermined": 1
+      },
+      "verdict_counts": {
+        "undetermined": 1
+      },
+      "suggested_verdicts": {
+        "bug": 1
+      },
+      "medians": {
+        "wall_ms": 5035,
+        "duration_ms": 4893,
+        "jev_ms": 1996,
+        "browser_ms": 1079,
+        "requests": 10,
+        "input_tokens": 26266,
+        "decision_confidence": 0.92,
+        "steps": 9
+      },
+      "passes": 0,
+      "environment_failures": [],
+      "reason": null
+    },
+    "shop-checkout-problem-account": {
+      "spec": "../../../../jev-v070/specs/examples/shop-checkout-problem-account.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "shop-checkout-problem-account/01",
+          "exit_code": 1,
+          "wall_ms": 4620,
+          "outcome": "form_error",
+          "verdict": "bug",
+          "status": "outcome",
+          "trace": "shop-checkout-problem-account/01/trace.json",
+          "pass": false,
+          "error": null,
+          "duration_ms": 4497,
+          "jev_ms": 1628,
+          "adjudication_ms": 182,
+          "browser_ms": 965,
+          "requests": 9,
+          "input_tokens": 23457,
+          "output_tokens": 2901,
+          "model": "jev-1.14.0",
+          "steps": 8,
+          "actions_executed": 7,
+          "decision_confidence": 0.93,
+          "min_decision_confidence": 0.8,
+          "step_confidences": [
+            0.97,
+            0.99,
+            0.85,
+            0.86,
+            0.98,
+            0.93,
+            0.8
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 205,
+          "jev_warm_ms": 192,
+          "browser_per_action_ms": 146,
+          "step_jev_ms": [
+            205,
+            211,
+            187,
+            192,
+            185,
+            182,
+            245,
+            221
+          ],
+          "step_browser_ms": [
+            178,
+            150,
+            146,
+            119,
+            109,
+            109,
+            154,
+            null
+          ],
+          "action_browser_ms": [
+            178,
+            150,
+            146,
+            119,
+            109,
+            109,
+            154
+          ],
+          "launch_ms": 134,
+          "navigation_ms": 589,
+          "setup_ms": 550,
+          "result": "shop-checkout-problem-account/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Error: Last Name is required",
+          "first_seen_at_step": 8
+        }
+      ],
+      "verdict": "bug",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "form_error": 1
+      },
+      "verdict_counts": {
+        "bug": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 4620,
+        "duration_ms": 4497,
+        "jev_ms": 1628,
+        "browser_ms": 965,
+        "requests": 9,
+        "input_tokens": 23457,
+        "decision_confidence": 0.93,
+        "steps": 8
+      },
+      "passes": 0,
+      "environment_failures": [],
+      "reason": null
+    },
+    "shop-checkout": {
+      "spec": "../../../../jev-v070/specs/examples/shop-checkout.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "shop-checkout/01",
+          "exit_code": 0,
+          "wall_ms": 5016,
+          "outcome": "order_complete",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "shop-checkout/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 4892,
+          "jev_ms": 1793,
+          "adjudication_ms": 185,
+          "browser_ms": 1137,
+          "requests": 10,
+          "input_tokens": 24991,
+          "output_tokens": 2987,
+          "model": "jev-1.14.0",
+          "steps": 9,
+          "actions_executed": 8,
+          "decision_confidence": 0.995,
+          "min_decision_confidence": 0.96,
+          "step_confidences": [
+            0.97,
+            0.96,
+            1.0,
+            0.98,
+            1.0,
+            1.0,
+            0.99,
+            1.0
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 208,
+          "jev_warm_ms": 202.5,
+          "browser_per_action_ms": 150,
+          "step_jev_ms": [
+            208,
+            211,
+            182,
+            179,
+            202,
+            203,
+            207,
+            204,
+            197
+          ],
+          "step_browser_ms": [
+            167,
+            159,
+            155,
+            121,
+            119,
+            114,
+            157,
+            145,
+            null
+          ],
+          "action_browser_ms": [
+            167,
+            159,
+            155,
+            121,
+            119,
+            114,
+            157,
+            145
+          ],
+          "launch_ms": 134,
+          "navigation_ms": 667,
+          "setup_ms": 566,
+          "result": "shop-checkout/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Checkout: Complete!",
+          "first_seen_at_step": 9
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "order_complete": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 5016,
+        "duration_ms": 4892,
+        "jev_ms": 1793,
+        "browser_ms": 1137,
+        "requests": 10,
+        "input_tokens": 24991,
+        "decision_confidence": 0.995,
+        "steps": 9
+      },
+      "passes": 1,
+      "environment_failures": [],
+      "reason": null
+    },
+    "table-sort-due": {
+      "spec": "../../../../jev-v070/specs/examples/table-sort-due.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "table-sort-due/01",
+          "exit_code": 0,
+          "wall_ms": 4344,
+          "outcome": "undetermined",
+          "verdict": null,
+          "status": "low_confidence",
+          "trace": "table-sort-due/01/trace.json",
+          "pass": false,
+          "error": null,
+          "duration_ms": 4223,
+          "jev_ms": 857,
+          "adjudication_ms": null,
+          "browser_ms": 1447,
+          "requests": 4,
+          "input_tokens": 10122,
+          "output_tokens": 893,
+          "model": "jev-1.14.0",
+          "steps": 3,
+          "actions_executed": 0,
+          "decision_confidence": 0.3,
+          "min_decision_confidence": 0.29,
+          "step_confidences": [
+            0.32,
+            0.29,
+            0.3
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 3,
+          "jev_first_ms": 202,
+          "jev_warm_ms": 327.5,
+          "browser_per_action_ms": null,
+          "step_jev_ms": [
+            202,
+            264,
+            391
+          ],
+          "step_browser_ms": [
+            535,
+            912,
+            null
+          ],
+          "action_browser_ms": [],
+          "launch_ms": 137,
+          "navigation_ms": 1392,
+          "setup_ms": 0,
+          "result": "table-sort-due/01/result.json",
+          "suggested_verdict": "test_issue",
+          "evidence_line": null,
+          "first_seen_at_step": null,
+          "expected": true,
+          "expected_mismatches": {}
+        }
+      ],
+      "verdict": "expected",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": 1,
+      "outcome_counts": {
+        "undetermined": 1
+      },
+      "verdict_counts": {
+        "undetermined": 1
+      },
+      "suggested_verdicts": {
+        "test_issue": 1
+      },
+      "medians": {
+        "wall_ms": 4344,
+        "duration_ms": 4223,
+        "jev_ms": 857,
+        "browser_ms": 1447,
+        "requests": 4,
+        "input_tokens": 10122,
+        "decision_confidence": 0.3,
+        "steps": 3
+      },
+      "passes": 0,
+      "environment_failures": [],
+      "reason": null
+    },
+    "todo-add-filter": {
+      "spec": "../../../../jev-v070/specs/examples/todo-add-filter.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "todo-add-filter/01",
+          "exit_code": 0,
+          "wall_ms": 3802,
+          "outcome": "active_filtered",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "todo-add-filter/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 3670,
+          "jev_ms": 1478,
+          "adjudication_ms": 187,
+          "browser_ms": 823,
+          "requests": 8,
+          "input_tokens": 15169,
+          "output_tokens": 2126,
+          "model": "jev-1.14.0",
+          "steps": 7,
+          "actions_executed": 6,
+          "decision_confidence": 0.88,
+          "min_decision_confidence": 0.69,
+          "step_confidences": [
+            0.69,
+            0.84,
+            0.92,
+            0.95,
+            1.0,
+            0.84
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 201,
+          "jev_warm_ms": 208.5,
+          "browser_per_action_ms": 138,
+          "step_jev_ms": [
+            201,
+            212,
+            200,
+            195,
+            205,
+            215,
+            250
+          ],
+          "step_browser_ms": [
+            146,
+            145,
+            119,
+            112,
+            131,
+            170,
+            null
+          ],
+          "action_browser_ms": [
+            146,
+            145,
+            119,
+            112,
+            131,
+            170
+          ],
+          "launch_ms": 150,
+          "navigation_ms": 660,
+          "setup_ms": 0,
+          "result": "todo-add-filter/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "1 item left",
+          "first_seen_at_step": 7
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "active_filtered": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 3802,
+        "duration_ms": 3670,
+        "jev_ms": 1478,
+        "browser_ms": 823,
+        "requests": 8,
+        "input_tokens": 15169,
+        "decision_confidence": 0.88,
+        "steps": 7
+      },
+      "passes": 1,
+      "environment_failures": [],
+      "reason": null
+    },
+    "toolshop-search-cart": {
+      "spec": "../../../../jev-v070/specs/examples/toolshop-search-cart.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "toolshop-search-cart/01",
+          "exit_code": 1,
+          "wall_ms": 4030,
+          "outcome": "undetermined",
+          "verdict": null,
+          "status": "blocked",
+          "trace": "toolshop-search-cart/01/trace.json",
+          "pass": false,
+          "error": null,
+          "duration_ms": 3908,
+          "jev_ms": 1290,
+          "adjudication_ms": null,
+          "browser_ms": 957,
+          "requests": 6,
+          "input_tokens": 23554,
+          "output_tokens": 2377,
+          "model": "jev-1.14.0",
+          "steps": 5,
+          "actions_executed": 3,
+          "decision_confidence": 0.65,
+          "min_decision_confidence": 0.55,
+          "step_confidences": [
+            0.96,
+            0.63,
+            0.93,
+            0.65,
+            0.55
+          ],
+          "stale_steps": 1,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 220,
+          "jev_warm_ms": 233,
+          "browser_per_action_ms": 218,
+          "step_jev_ms": [
+            220,
+            226,
+            211,
+            240,
+            393
+          ],
+          "step_browser_ms": [
+            192,
+            391,
+            218,
+            156,
+            null
+          ],
+          "action_browser_ms": [
+            192,
+            391,
+            218
+          ],
+          "launch_ms": 141,
+          "navigation_ms": 960,
+          "setup_ms": 0,
+          "result": "toolshop-search-cart/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": null,
+          "first_seen_at_step": null
+        }
+      ],
+      "verdict": "undetermined",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "undetermined": 1
+      },
+      "verdict_counts": {
+        "undetermined": 1
+      },
+      "suggested_verdicts": {
+        "none": 1
+      },
+      "medians": {
+        "wall_ms": 4030,
+        "duration_ms": 3908,
+        "jev_ms": 1290,
+        "browser_ms": 957,
+        "requests": 6,
+        "input_tokens": 23554,
+        "decision_confidence": 0.65,
+        "steps": 5
+      },
+      "passes": 0,
+      "environment_failures": [],
+      "reason": null
+    },
+    "web-form-submit": {
+      "spec": "../../../../jev-v070/specs/examples/web-form-submit.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "web-form-submit/01",
+          "exit_code": 0,
+          "wall_ms": 4753,
+          "outcome": "form_submitted",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "web-form-submit/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 4612,
+          "jev_ms": 1561,
+          "adjudication_ms": 172,
+          "browser_ms": 1487,
+          "requests": 9,
+          "input_tokens": 23844,
+          "output_tokens": 2925,
+          "model": "jev-1.14.0",
+          "steps": 8,
+          "actions_executed": 6,
+          "decision_confidence": 0.96,
+          "min_decision_confidence": 0.43,
+          "step_confidences": [
+            0.99,
+            0.43,
+            0.57,
+            0.96,
+            0.99,
+            0.98,
+            0.92
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 1,
+          "jev_first_ms": 195,
+          "jev_warm_ms": 195,
+          "browser_per_action_ms": 128.5,
+          "step_jev_ms": [
+            195,
+            195,
+            188,
+            194,
+            193,
+            201,
+            198,
+            197
+          ],
+          "step_browser_ms": [
+            149,
+            514,
+            113,
+            122,
+            126,
+            131,
+            332,
+            null
+          ],
+          "action_browser_ms": [
+            149,
+            113,
+            122,
+            126,
+            131,
+            332
+          ],
+          "launch_ms": 133,
+          "navigation_ms": 848,
+          "setup_ms": 0,
+          "result": "web-form-submit/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Form submitted",
+          "first_seen_at_step": 8
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "form_submitted": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 4753,
+        "duration_ms": 4612,
+        "jev_ms": 1561,
+        "browser_ms": 1487,
+        "requests": 9,
+        "input_tokens": 23844,
+        "decision_confidence": 0.96,
+        "steps": 8
+      },
+      "passes": 1,
+      "environment_failures": [],
+      "reason": null
+    },
+    "wiki-search": {
+      "spec": "../../../../jev-v070/specs/examples/wiki-search.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "wiki-search/01",
+          "exit_code": 0,
+          "wall_ms": 3922,
+          "outcome": "article_shown",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "wiki-search/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 3779,
+          "jev_ms": 783,
+          "adjudication_ms": 310,
+          "browser_ms": 1255,
+          "requests": 4,
+          "input_tokens": 33491,
+          "output_tokens": 3511,
+          "model": "jev-1.14.0",
+          "steps": 3,
+          "actions_executed": 2,
+          "decision_confidence": 0.795,
+          "min_decision_confidence": 0.76,
+          "step_confidences": [
+            0.83,
+            0.76
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 269,
+          "jev_warm_ms": 257,
+          "browser_per_action_ms": 627.5,
+          "step_jev_ms": [
+            269,
+            270,
+            244
+          ],
+          "step_browser_ms": [
+            369,
+            886,
+            null
+          ],
+          "action_browser_ms": [
+            369,
+            886
+          ],
+          "launch_ms": 138,
+          "navigation_ms": 808,
+          "setup_ms": 0,
+          "result": "wiki-search/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Playwright (software)",
+          "first_seen_at_step": 3
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "article_shown": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 3922,
+        "duration_ms": 3779,
+        "jev_ms": 783,
+        "browser_ms": 1255,
+        "requests": 4,
+        "input_tokens": 33491,
+        "decision_confidence": 0.795,
+        "steps": 3
+      },
+      "passes": 1,
+      "environment_failures": [],
+      "reason": null
+    }
+  },
+  "suite": {
+    "all_pass": false,
+    "verdicts": {
+      "add-remove-elements": "pass",
+      "dynamic-controls": "pass",
+      "forgot-password": "pass",
+      "load-wait": "pass",
+      "login-logout": "pass",
+      "menu-random": "pass",
+      "modal-close": "pass",
+      "notify-random": "pass",
+      "shop-add-second-item": "pass",
+      "shop-checkout-error-account": "expected",
+      "shop-checkout-problem-account": "bug",
+      "shop-checkout": "pass",
+      "table-sort-due": "expected",
+      "todo-add-filter": "pass",
+      "toolshop-search-cart": "undetermined",
+      "web-form-submit": "pass",
+      "wiki-search": "pass"
+    },
+    "flaky": [],
+    "undetermined": [
+      "toolshop-search-cart"
+    ],
+    "environment_failures": {}
+  }
+}
