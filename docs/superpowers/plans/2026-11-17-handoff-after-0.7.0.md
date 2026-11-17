@@ -4,15 +4,13 @@ Fares chose four items from the morning's handoff (`2026-11-17-handoff-after-liv
 6): keep the triage rule and change eval 1, the date placeholder, naming across shadow roots, the suggested verdict.
 All four are done. The numbers are in `measurements/README.md`, section "0.7.0".
 
-## State when this was written
+## State
 
-- `main` is at `b6dc583` (0.6.0). The work is on the local branch **`feat/dates-shadow-names`**, five commits
-  (`45d681b` verdict, `3983b35` dates, `ff5385e` shadow names, `83c61d5` `ab.py --a-runner`, `554b427` 0.7.0
-  changelog and version). **Not pushed, no pull request**: pushing, CI on the three systems and the merge (which
-  tags and releases `v0.7.0`) are Fares's to start.
-- `dev-docs`: this handoff, the eval change, the measurement files and one experiment spec, committed locally on top
-  of `74033d5`, not pushed.
-- Offline at `554b427`: 191 unit tests, SELFTEST OK (macOS only; Windows and Linux are CI's).
+- **0.7.0 is merged and released.** Pull request #6 (`feat/dates-shadow-names`, five commits: `45d681b` verdict,
+  `3983b35` dates, `ff5385e` shadow names, `83c61d5` `ab.py --a-runner`, `554b427` changelog and version) passed CI
+  on the three systems (unit tests on Linux, macOS and Windows; the offline self-test on Linux and Windows) and was
+  merged by this session on Fares's word as `1fa29a9`; the release workflow tagged `v0.7.0`.
+- `dev-docs` is pushed: this handoff, the eval change, the measurement files and one experiment spec.
 
 ## What changed, in one line each
 
