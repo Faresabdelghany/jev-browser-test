@@ -29,7 +29,7 @@
       "12-28"
     ]
   },
-  "setup": [
+  "login": [
     {
       "action": "fill",
       "selector": "input[name=\"username\"]",
@@ -53,7 +53,9 @@
       "action": "wait_for",
       "selector": "a[href*=\"/pim/\"]",
       "timeout_ms": 30000
-    },
+    }
+  ],
+  "setup": [
     {
       "action": "goto",
       "url": "https://opensource-demo.orangehrmlive.com/web/index.php/pim/addEmployee"

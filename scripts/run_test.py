@@ -41,6 +41,8 @@ from policy import (
 )
 from replay import (ATTRS_JS, POLL_MS, REPLAYABLE, STABLE_ATTRS, VERIFY_MODES, Replay, Tokens, describe_target, find_target, match_final,
                     match_page, page_print)
+from session import (DEFAULT_CACHE_DIR, DEFAULT_MAX_AGE_S, DEFAULT_SESSION_DIR, VALIDATE_WAIT_MS, CacheSlot, drop_session, load_session,
+                     local_storage_script, page_mismatch, save_session, session_file, session_key, strip_profile)
 from spec import (DIAGNOSTIC_ASSERTIONS, HEADED_ENV, UNDETERMINED, effective_outcomes, load_dotenv, load_spec, match_expect, resolve_headless,
                   spec_warnings, utf8_stdio, validate)
 from summarize_trace import STALLED_STATUSES, is_action_step, summarize, unobserved_controls
@@ -76,7 +78,7 @@ def redacted_spec(spec: dict) -> dict:
     s = copy.deepcopy(spec)
     for k in s["secrets"]:
         s["data"][k] = "<secret>"
-    for step in [*s["setup"], *s.get("teardown", [])]:
+    for step in [*s.get("login", []), *s["setup"], *s.get("teardown", [])]:
         if step.get("action") == "fill":
             step["value"] = "<redacted>"
     return s
@@ -1208,6 +1210,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         "outcome": None,
         "verdict": None,
         "steps": [],
+        "login": [],
         "setup": [],
         "teardown": [],
         "final": None,
@@ -1373,7 +1376,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         ok = all(a["ok"] for a in final["assertions"])
         step["assertions"] = final["assertions"]
         finish(page, step, "passed" if ok else "assert_failed", {"action": action, "ok": True, "error": None, "confirmed": True})
-        if ok and not spec["setup"] and not any("reason" not in h for h in history):
+        if ok and not spec["setup"] and not spec.get("login") and not any("reason" not in h for h in history):
             trace["passed_without_actions"] = True
         if rp is not None and ok:
             # the page a replay of this run should end on
@@ -1476,6 +1479,13 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     with sync_playwright() as p:
         t_lap = time.perf_counter()
         cdp_url = spec["browser"]["cdp_url"]
+        sess_cfg = spec.get("session") or {}
+        # reuse a saved login: only for a spec that names its login steps, and never in a browser that is not ours
+        sessions_on = bool(sess_cfg.get("reuse")) and bool(spec.get("login")) and not cdp_url
+        session, session_info, cache_slot, sess_file = None, None, None, None
+        if sessions_on:
+            sess_dir = sess_cfg.get("dir") or DEFAULT_SESSION_DIR
+            sess_file = session_file(sess_dir, session_key(spec, sess_dir))
         headless = bool(spec["browser"]["headless"])
         viewport = {"width": spec["browser"]["viewport"][0], "height": spec["browser"]["viewport"][1]}
         created_context = True
@@ -1506,19 +1516,47 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 device = spec["browser"].get("device")
                 # a device's viewport, user agent, pixel ratio and touch replace the spec's viewport (a phone is its screen)
                 ctx_kwargs = device_settings(p, device) if device else {"viewport": viewport}
-                browser = p.chromium.launch(headless=headless, channel=spec["browser"]["channel"])
-                if spec["browser"]["storage_state"]:
-                    ctx_kwargs["storage_state"] = spec["browser"]["storage_state"]
-                context = browser.new_context(**ctx_kwargs)
-                context.add_init_script(ANNOUNCE_INIT_JS)
-                page = context.new_page()
+                if sessions_on:
+                    # a saved session for this login on this site (session.py): tried now, checked once its page is open
+                    session, why_not = load_session(sess_file, sess_cfg.get("max_age_s", DEFAULT_MAX_AGE_S))
+                    session_info = {"reused": False, **({"not_reused": why_not} if session is None else {"age_s": session["age_s"]})}
+                state = session["state"] if session else spec["browser"]["storage_state"]
+                if spec["browser"].get("http_cache"):
+                    cache_slot = CacheSlot.acquire(spec["browser"].get("http_cache_dir") or DEFAULT_CACHE_DIR)
+                if cache_slot is not None:
+                    # The browser on a profile that keeps its HTTP cache between runs and nothing else (strip_profile).
+                    strip_profile(cache_slot.path)
+                    browser = None
+                    context = p.chromium.launch_persistent_context(cache_slot.path, headless=headless, channel=spec["browser"]["channel"], **ctx_kwargs)
+                    if state:  # such a context takes no storage_state: cookies and localStorage are put back by hand
+                        if isinstance(state, str):
+                            with open(state, encoding="utf-8") as f:
+                                state = json.load(f)
+                        if state.get("cookies"):
+                            context.add_cookies(state["cookies"])
+                        restore = local_storage_script(state)
+                        if restore:
+                            context.add_init_script(restore)
+                    context.add_init_script(ANNOUNCE_INIT_JS)
+                    page = context.pages[0] if context.pages else context.new_page()
+                else:
+                    browser = p.chromium.launch(headless=headless, channel=spec["browser"]["channel"])
+                    if state:
+                        ctx_kwargs["storage_state"] = state
+                    context = browser.new_context(**ctx_kwargs)
+                    context.add_init_script(ANNOUNCE_INIT_JS)
+                    page = context.new_page()
                 trace["browser"] = {"attached": False, "headless": headless}
+                if spec["browser"].get("http_cache"):
+                    trace["browser"]["http_cache"] = os.path.basename(cache_slot.path) if cache_slot else "no free slot: ran without"
                 if device:
                     trace["browser"]["device"] = device
                     trace["browser"]["viewport"] = ctx_kwargs.get("viewport")
         except Exception as e:  # noqa: BLE001 - nothing to trace yet: this is the environment, not the test
             what = (f"could not attach to the browser at {cdp_url} (is Chrome running with --remote-debugging-port?)"
                     if cdp_url else "could not launch the browser")
+            if cache_slot is not None:
+                cache_slot.release()
             for d in (os.path.join(out_dir, "steps"), out_dir):  # leave no empty run directory behind
                 try:
                     os.rmdir(d)
@@ -1552,10 +1590,48 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         try:
             phase = "navigation"
             try:
-                page.goto(spec["start_url"], wait_until="domcontentloaded", timeout=spec["browser"]["navigation_timeout_ms"])
-                settle(page, spec, net=net, since=action_started)
+                nav_timeout = spec["browser"]["navigation_timeout_ms"]
+                if session is not None:
+                    # The page the login ended on, with the saved cookies and storage. The session counts only if that
+                    # page answers as itself and shows what the login waited for; otherwise it is thrown away and the
+                    # run logs in like any other.
+                    page.goto(session["url"], wait_until="domcontentloaded", timeout=nav_timeout)
+                    settle(page, spec, net=net, since=action_started)
+                    stale = page_mismatch(session["url"], page.url)
+                    for st in ([] if stale else spec["login"]):
+                        if st["action"] == "wait_for" and st.get("selector"):
+                            try:
+                                step_locator(page, st).wait_for(state=st.get("state", "visible"),
+                                                                timeout=min(int(st.get("timeout_ms", VALIDATE_WAIT_MS)), VALIDATE_WAIT_MS))
+                            except Exception:  # noqa: BLE001
+                                stale = f"the page of the saved session does not show what the login waited for ({st['selector']})"
+                                break
+                    if stale:
+                        session_info.update({"reused": False, "not_reused": stale, "expired": True})
+                        drop_session(sess_file)
+                        session = None
+                        context.clear_cookies()
+                        try:
+                            page.evaluate("() => { try { localStorage.clear(); sessionStorage.clear(); } catch (e) {} }")
+                        except Exception:  # noqa: BLE001
+                            pass
+                    else:
+                        session_info["reused"] = True
+                if session is None:
+                    page.goto(spec["start_url"], wait_until="domcontentloaded", timeout=nav_timeout)
+                    settle(page, spec, net=net, since=action_started)
                 t_lap = lap("navigation_ms", t_lap)
                 phase = "setup"
+                if spec.get("login"):
+                    if session is None:
+                        run_steps(page, spec, spec["login"], trace["login"], "login", net)
+                        if sessions_on:
+                            try:
+                                save_session(sess_file, context.storage_state(), page.url)
+                                session_info["saved"] = True
+                            except Exception as e:  # noqa: BLE001 - the run goes on logged in; the next one logs in again
+                                session_info["save_error"] = f"{type(e).__name__}: {str(e)[:120]}"
+                    t_lap = lap("login_ms", t_lap)
                 run_setup(page, spec, trace["setup"], net)  # records into trace["setup"] as it goes, so a failed step is kept
                 t_lap = lap("setup_ms", t_lap)
                 last_action_end = action_started = time.perf_counter()
@@ -2296,8 +2372,13 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     context.close()
             else:
                 context.close()
-            browser.close()
+            if browser is not None:
+                browser.close()
+            if cache_slot is not None:
+                cache_slot.release()
 
+    if session_info is not None:
+        trace["session"] = session_info  # was a saved login reused, and if not, why; was this run's saved
     trace["status"] = status or "error"
     trace["status_meaning"] = TERMINAL_STATUSES.get(trace["status"], "")
     trace["pass"] = trace["status"] == "passed"
@@ -2324,6 +2405,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         result["expected"] = match_expect(result, spec["expect"])
     trace["expected"] = result.get("expected")
     trace["outcome"], trace["verdict"] = result["outcome"], result["verdict"]
+    if session_info is not None:
+        result["session"] = session_info
     if spec.get("batch_fields"):
         result["batch"] = trace["batch"] = batch_account  # fields typed without a request of their own, and where a batch stopped
     if rp is not None:
@@ -2360,6 +2443,13 @@ def main(argv: list[str]) -> int:
     deep.add_argument("--shadow-dom", action="store_true", help="observe inside open shadow roots (observation.shadow_dom; the default)")
     deep.add_argument("--no-shadow-dom", action="store_true", help="observe the document's own tree only (observation.shadow_dom false)")
     ap.add_argument("--junit", metavar="FILE", help="also write the result as a JUnit XML report (one test case) for a CI dashboard")
+    ap.add_argument("--reuse-sessions", action="store_true",
+                    help="a spec with a `login` block starts from the session an earlier run with the same login on the same site "
+                         "saved (.jev/sessions) and skips the login; the first run saves it (spec: \"session\": true)")
+    ap.add_argument("--session-dir", metavar="DIR", help="where sessions are kept (default .jev/sessions)")
+    ap.add_argument("--http-cache", action="store_true",
+                    help="keep the browser's HTTP cache between runs (.jev/http-cache; cookies and storage are not kept)")
+    ap.add_argument("--http-cache-dir", metavar="DIR", help="where the cache profiles are kept (default .jev/http-cache)")
     ap.add_argument("--settle", choices=("dom", "network"),
                     help="when a page counts as settled after an action: dom = quiet for browser.quiet_ms (the default); network = "
                          "the requests the action started have finished and the DOM has been quiet for browser.network_quiet_ms")
@@ -2395,6 +2485,14 @@ def main(argv: list[str]) -> int:
             spec["batch_fields"] = True
         if args.settle:
             spec["browser"]["settle"] = args.settle
+        if args.reuse_sessions and not spec["session"].get("never"):
+            spec["session"]["reuse"] = True
+        if args.session_dir:
+            spec["session"]["dir"] = args.session_dir
+        if args.http_cache:
+            spec["browser"]["http_cache"] = True
+        if args.http_cache_dir:
+            spec["browser"]["http_cache_dir"] = args.http_cache_dir
         if args.replay or args.no_replay:
             spec["replay"]["enabled"] = bool(args.replay) and not spec["replay"].get("never")  # "replay": "never" beats --replay
         if args.replay_record:

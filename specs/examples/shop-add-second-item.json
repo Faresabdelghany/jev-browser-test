@@ -3,7 +3,7 @@
   "start_url": "https://www.saucedemo.com/",
   "goal": "Add the Sauce Labs Bike Light to the cart and open the cart page, so that the cart lists the Sauce Labs Bike Light.",
   "notes": "Every product card has its own Add to cart button; use the one in the Sauce Labs Bike Light card. The cart icon in the top-right corner opens the cart.",
-  "setup": [
+  "login": [
     { "action": "fill", "selector": "#user-name", "value": "standard_user" },
     { "action": "fill", "selector": "#password", "value": "secret_sauce" },
     { "action": "click", "selector": "#login-button" },
