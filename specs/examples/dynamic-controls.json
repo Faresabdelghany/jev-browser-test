@@ -1,16 +1,16 @@
 {
   "id": "dynamic-controls",
-  "comment": "the-internet's Dynamic Controls: two buttons that each show a loading bar for a few seconds before the page changes (a checkbox is removed, a text field is enabled). Exercises WAIT after an asynchronous action, twice, undecided steps while a loader is visible (the runner waits them out with backoff and restarts the count when the page changes), and element_absent on the final page. The pass outcome carries no `requires`: the 'It's enabled!' check hovered at 0.79 while the outcome Choice read 0.81, and the exact facts are in `assert` anyway. The pass outcome names the button captions as well as the messages since the midday regression suite: on the finished page (both messages shown, 'Wait for it...' still in the text) the two-message wording read 0.77-0.82, on both sides of the 0.8 outcome gate, and two runs of three ended done_unverified with every assertion true.",
+  "comment": "the-internet's Dynamic Controls: two buttons that each show a loading bar for a few seconds before the page changes (a checkbox is removed, a text field is enabled). Exercises WAIT after an asynchronous action, twice, undecided steps while a loader is visible (the runner waits them out with backoff and restarts the count when the page changes), and element_absent on the final page. The pass outcome carries no `requires`: the 'It's enabled!' check hovered at 0.79 while the outcome Choice read 0.81, and the exact facts are in `assert` anyway. The pass outcome names the button captions as well as the messages since the midday regression suite: on the finished page (both messages shown, 'Wait for it...' still in the text) the two-message wording read 0.77-0.82, on both sides of the 0.8 outcome gate, and two runs of three ended done_unverified with every assertion true. On 2026-11-17 the demo had been redesigned with one message slot for both sections: finishing Enable replaces 'It's gone!' with 'It's enabled!' (probed with plain Playwright), so a pass that names both messages can no longer be true, and three runs of three ended done_unverified on a finished page. The pass is now worded on what the finished page shows: 'It's enabled!', the checkbox gone, the buttons reading Add and Disable; the removal that 'It's gone!' used to prove is asserted by the checkbox's absence and the Add caption, which only appears once Remove has finished.",
   "start_url": "https://the-internet.herokuapp.com/dynamic_controls",
-  "goal": "Click Remove and wait until the checkbox is gone, then click Enable and wait until the text field is enabled, so that the page shows both messages 'It's gone!' and 'It's enabled!' and the two buttons read Add and Disable.",
-  "notes": "After each button a loading bar runs for a few seconds; the message appears when it finishes. Do not click the button again while the bar is running. The text 'Wait for it...' stays on the page after a loading bar has finished and does not mean anything is still loading: the finished state is the message under the section plus the button's new caption (Add after Remove, Disable after Enable).",
+  "goal": "Click Remove and wait until the checkbox is gone, then click Enable and wait until the text field is enabled, so that the page shows 'It's enabled!' and the two buttons read Add and Disable.",
+  "notes": "After each button a loading bar runs for a few seconds; the message appears when it finishes. Do not click the button again while the bar is running. The page has one message line: 'It's gone!' shows after Remove and is replaced by 'It's enabled!' after Enable. The text 'Wait for it...' stays on the page after a loading bar has finished and does not mean anything is still loading: the finished state is the message plus the buttons' new captions (Add after Remove, Disable after Enable).",
   "checks": {
     "checkbox_gone": "The message 'It's gone!' is shown and no checkbox is visible",
-    "input_enabled": "The message 'It's enabled!' is shown"
+    "input_enabled": "The message 'It's enabled!' is shown and the text field is enabled"
   },
   "outcomes": {
     "both_done": {
-      "when": "The message 'It's gone!' is shown under Remove/add and the button there reads Add. The message 'It's enabled!' is shown under Enable/disable and the button there reads Disable",
+      "when": "No checkbox is shown and the button under Remove/add reads Add. The message 'It's enabled!' is shown under Enable/disable and the button there reads Disable",
       "verdict": "pass"
     },
     "app_error": {
@@ -20,14 +20,17 @@
   },
   "assert": [
     {
-      "text_contains": "It's gone!"
-    },
-    {
       "text_contains": "It's enabled!"
     },
     {
       "element_absent": {
         "role": "checkbox"
+      }
+    },
+    {
+      "element_present": {
+        "role": "button",
+        "name": "Add"
       }
     },
     {

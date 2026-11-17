@@ -3,6 +3,30 @@
 Notable changes to the jev-browser-test skill. Versions follow [semantic versioning](https://semver.org); the version
 is the one in `.claude-plugin/plugin.json`, and merging a new one to `main` tags and releases it.
 
+## [0.5.1] - 2026-11-17
+
+The first runs of 0.3.0 to 0.5.0 against the live Jev API (the smoke specs, the 22 examples x 3, `dynamic-controls`
+x 5). No verdict moved because of the runner: the September runner (`28a5506`) reproduces, request for request, the
+two runs that changed. Four example specs no longer matched what their demo sites do, and one 0.4.0 feature failed
+on its first real page.
+
+### Fixed
+- **Frames: a listed one-line `<iframe>` is observed.** `observation.frames` skipped any frame under 40 x 20 px as
+  "not visible"; Stripe's card element is one line in an iframe 323 x 18 px, so a payment form's card field, the
+  case the option exists for, contributed nothing. The floor is 10 x 10 (a tracking pixel), and a frame below it says
+  so (`smaller than 10 x 10 px`). Live after the fix: Jev typed the number, expiry and CVC into the cross-origin
+  frame at 0.75-1.00. Unit test and selftest D2.
+
+### Changed (example specs)
+- `dynamic-controls`: the redesigned demo has one message line, so 'It's gone!' is replaced by 'It's enabled!'; the
+  pass is worded on the finished page and the removal asserted by the checkbox's absence and the Add caption.
+  5/5 after (3/3 `done_unverified` before, every run's flow identical). The 0.4.0 loading-indicator rule fired in
+  all five (`LOADING-IND`), one run on three undecided looks in a row that used to end `low_confidence`.
+- `forgot-password`: the demo no longer answers 500; `expect: server_error` removed, the spec is a pass.
+- `modal-close`, `add-remove-elements`: the pass needs the flow's own click (`after: Close` / `after: Delete`);
+  both had passed by a shortcut (no action; one Add instead of two and a Delete).
+- `hrm-leave-assign`: the leave date had passed (listed Taken, not Scheduled); now 2026-16-12.
+
 ## [0.5.0] - 2026-11-16
 
 Jev can now drive the three interactions 0.4.0 could only script. Each is **off until the spec asks**: a spec that

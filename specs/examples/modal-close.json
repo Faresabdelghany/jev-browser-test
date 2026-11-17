@@ -1,5 +1,6 @@
 {
   "id": "modal-close",
+  "comment": "the-internet's Entry Ad: a modal opens over the page shortly after load. The pass outcome needs a click on the modal's Close (`after`): the modal is hidden for the first fraction of a second, and on 2026-11-17 the first observation came before it showed, so the pass ('no modal covers the page') was sighted on the start page and confirmed by the assertion at once, three runs of three with zero actions, with the same result from the September runner. A statement that is true before the flow has done anything needs `after` or `requires_action`.",
   "start_url": "https://the-internet.herokuapp.com/entry_ad",
   "goal": "Close the modal window that appears on page load, so that the page's own content, including the 'click here' link that re-enables the ad, can be used.",
   "checks": {
@@ -7,7 +8,7 @@
     "content_usable": "The 'Entry Ad' heading and a 'click here' link are visible and not covered"
   },
   "outcomes": {
-    "modal_closed": { "when": "No modal window covers the page and the 'Entry Ad' heading with its 'click here' link is visible", "verdict": "pass" }
+    "modal_closed": { "when": "No modal window covers the page and the 'Entry Ad' heading with its 'click here' link is visible", "verdict": "pass", "after": { "click": "Close" } }
   },
   "assert": [ { "element_present": { "role": "link", "name": "click here" } } ],
   "budget": { "max_steps": 6, "max_seconds": 60 }
