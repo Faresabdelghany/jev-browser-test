@@ -1201,3 +1201,38 @@ same next id to two visitors.
 
 Decision: opt-in. One request per plain extra field is a real gain and a small one (half a second of 5.6 on the
 checkout), and on forms that react it costs tokens and saves nothing.
+
+## 0.10.0 (2026-11-17, evening): the network-aware settle
+
+Step 3: `browser.settle: "network"` (`run_test.NetWatch`, `settle`). `ab.py --b-arg=--settle=network --repeat 5`,
+all 22 examples, two streams (`2026-11-17-settle-ab-public`, `-hrm`), `jev-1.14.0`.
+
+| | 17 public | 5 OrangeHRM |
+|---|---:|---:|
+| browser time per action, median (n actions) | 153 → 102 ms (345, 337) | 248.5 → 100 ms (282, 240) |
+| browser time per action, mean | 401 → 283 ms | 542 → 681 ms |
+| stale decisions, all runs | 6 → 0 | 8 → 0 |
+| undecided (low-confidence) steps, all runs | 39 → 28 | 46 → 24 |
+| Jev requests, sum of the specs' medians | 111 → 106 | 82 → 67 |
+| input tokens, sum of medians | 263,916 → 252,317 | 431,725 → 400,359 |
+| wall-clock, sum of medians | 83.6 → 78.5 s | 109.4 → 117.7 s |
+
+Verdicts. Public: 14 specs the same in all ten runs; `menu-random` and `notify-random` vary in both arms;
+`toolshop-search-cart` ended `budget_exhausted` once in arm A (6 stale steps there, none in B) and passed 5/5 with
+the option, 8.3 → 6.1 s. OrangeHRM: `hrm-admin-add-user` ended `low_confidence` twice in arm A and hit a setup
+timeout once in arm B (`wait_for` the saved employee's page, 45 s: the demo); the other four the same.
+
+Reading it. The 0.7.0 baseline's "260 ms and 560 ms per browser step" are means (288 and 433 ms per action, 319 and
+598 ms per step in the release-check files). A mean is mostly the steps that wait for the application, and those are
+not shortened: on OrangeHRM a click that loads a module takes 0.8 to 1.3 s with or without the option, and the
+steps that used to be Jev's WAITs (4 to 9 a run) are now inside the settle of the click before them (2 to 3.6 a
+run left). So the per-action mean rose while the number of steps and requests fell, and the wall-clock is where it
+was. The median, which is the typing step, fell from 249 to 100 ms.
+
+The shortcut that was dropped (`-settled-wait-dropped`): an undecided step asked Jev again after 300 ms when no
+request was in flight. Public: nothing moved (81.4 → 75.9 s, per action 153 → 103 ms, the same verdicts).
+OrangeHRM: `hrm-add-employee` low_confidence 1/5 → 3/5, wall-clock 124.7 → 125.4 s. Reverted before the pull
+request.
+
+Decision: opt-in. Fewer requests, no stale decisions, 6% less wall-clock on fast pages; none on the slow one, which
+was the target.
