@@ -121,6 +121,7 @@ class Tokens:
 
 
 _TOKEN_OR_DIGITS = re.compile(r"(\{\{[^{}]*\}\})|\d+")
+_WORD = re.compile(r"[^\W\d_]{2,}")  # two letters in a row: a name that says something ("Save", not "×", "+" or "3")
 _ID_SEGMENT = re.compile(r"(?:\d+|[0-9a-f]{8,}|[0-9a-f]{8}-[0-9a-f-]{27}|[A-Za-z0-9_-]{24,})", re.I)
 
 
@@ -156,9 +157,14 @@ def page_print(obs: dict, tokens: Tokens) -> dict:
     named fields and buttons offered (role and name). Controls of a record are left out, there being as many as there
     are records: those inside a table row (`row`, set by the observer) and those the observer gave a row or list
     context. Live: a list page of a shared demo showed another visitor's row with Approve and Reject buttons in one
-    run and not in the next, and the step after it was handed to Jev for a page that had not changed."""
+    run and not in the next, and the step after it was handed to Jev for a page that had not changed. And only a
+    control whose name is a word counts: an unnamed button, one named by a symbol ("×" on a filter chip that comes and
+    goes with the filter) or by a guess from its icon's class appears and disappears with the page's decoration.
+    Live: a chip's "×" rendered a moment later in one run than in the recording, and the step waited three seconds
+    for a page that was already there, or was handed to Jev."""
     controls = sorted({f'{e["role"]} "{no_digits(tokens.template(e.get("name") or ""))}"' for e in obs.get("elements") or []
-                       if e.get("role") in PRINT_ROLES and not e.get("context") and not e.get("row")})
+                       if e.get("role") in PRINT_ROLES and not e.get("context") and not e.get("row") and not e.get("icon_named")
+                       and _WORD.search(e.get("name") or "")})
     return {"url": url_shape(tokens.template(obs.get("url") or "")), "title": no_digits(tokens.template(obs.get("title") or "")),
             "controls": controls}
 

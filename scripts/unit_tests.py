@@ -3146,7 +3146,8 @@ class ReplayTests(unittest.TestCase):
         from replay import Tokens, match_page, page_print
         t = Tokens(self.spec())
         obs = _obs([_el(0, "link", "Home"), _el(1, "textbox", "First Name"), _el(2, "button", "Cart (2)"), _el(3, "option", "ada-zz91"),
-                    _el(4, "button", "Remove", context="Row ada-zz91"), _el(5, "button", "Greet Ada"), _el(6, "button", "Approve", row=True)],
+                    _el(4, "button", "Remove", context="Row ada-zz91"), _el(5, "button", "Greet Ada"), _el(6, "button", "Approve", row=True),
+                    _el(7, "button", "×"), _el(8, "button", ""), _el(9, "button", "calendar icon", icon_named=True), _el(10, "button", "3")],
                    url="https://shop.example/cart/77?x=1", title="Cart of ada-zz91")
         fp = page_print(obs, t)
         self.assertEqual(fp, {"url": "https://shop.example/cart/*?x", "title": "Cart of {{data:user}}",
