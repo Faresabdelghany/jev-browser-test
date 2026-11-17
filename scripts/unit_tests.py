@@ -2521,6 +2521,29 @@ class FrameFingerprintTests(unittest.TestCase):
         self.assertEqual(compare_fingerprint(before, {**before, "frame_heads": []}, "DONE"), "visible text changed in a frame")  # the frame is gone
         self.assertIsNone(compare_fingerprint(before, {**before, "frame_heads": ["Paid"]}, "WAIT"))
 
+    def test_a_one_line_frame_is_observed(self) -> None:
+        # live, 0.5.0: Stripe's card element is an iframe 323 x 18 px; the old 40 x 20 floor skipped it as "not visible"
+        from observe import frame_of
+
+        class Handle:
+            def __init__(self, box): self.box = box
+            def content_frame(self): return "frame"
+            def bounding_box(self): return self.box
+            def get_attribute(self, name): return "Secure card payment input frame" if name == "title" else None
+
+        class Page:
+            def __init__(self, box): self.handle = Handle(box)
+            def query_selector(self, sel): return self.handle
+
+        found, why = frame_of(Page({"x": 316, "y": 661, "width": 323, "height": 18}), "iframe")
+        self.assertIsNone(why)
+        self.assertEqual(found[0], "frame")
+        self.assertEqual(found[2], "Secure card payment input frame")
+        found, why = frame_of(Page({"x": 0, "y": 0, "width": 1, "height": 1}), "iframe")  # a tracking pixel
+        self.assertIsNone(found)
+        self.assertIn("smaller than", why)
+        self.assertEqual(frame_of(Page(None), "iframe"), (None, "not visible"))
+
     def test_without_frames_nothing_is_compared(self) -> None:
         from observe import compare_fingerprint
         plain = {"url": "u", "title": "t", "text_head": "h", "nodes": {}, "covered": 0, "loading": 0}

@@ -10,7 +10,7 @@ server on 127.0.0.1. One scenario per capability:
      a clean run records nothing and passes both assertions
   B. teardown: runs after a pass and after a red run alike; a failing step is reported and changes nothing
   C. scripted steps: hover, check / uncheck, upload, drag, and `frame` on a step
-  D. frames: the controls of a listed <iframe> join the table and are typed into and clicked; an unlisted frame
+  D. frames: the controls of a listed <iframe> join the table and are typed into and clicked (D2: a one-line frame 18 px tall too); an unlisted frame
      contributes nothing and the stalled run's summary says where to look
   E. device emulation: a phone's viewport, touch and user agent reach the page; an unknown device is exit-2 material
   F. new tabs: followed when the spec says so, flagged when it does not
@@ -227,6 +227,18 @@ CARD_PAGE = """<!doctype html><html><head><title>Card form</title></head><body>
   parent.postMessage({paid: document.getElementById('card').value.slice(-4)}, '*')">Pay now</button>
 <p id="status"></p></body></html>"""
 
+SLIM_CHECKOUT_PAGE = """<!doctype html><html><head><title>Checkout</title></head><body>
+<h1>Checkout</h1><p>Enter your card to pay.</p>
+<iframe id="card-line" title="Secure card payment input frame" src="/card-line" width="323" height="18" style="border:0"></iframe>
+<iframe id="pixel" title="Tracking" srcdoc="<button>Track</button>" width="1" height="1" style="border:0"></iframe>
+<p id="msg"></p>
+<script>window.addEventListener('message', e => { if (e.data && e.data.card) document.getElementById('msg').textContent = 'Saved successfully: ' + e.data.card; });</script>
+</body></html>"""
+
+CARD_LINE_PAGE = """<!doctype html><html><head><title>Card line</title><style>body{margin:0} input{height:18px;border:0;padding:0;margin:0;font-size:13px;width:300px}</style></head><body>
+<input id="card" aria-label="Credit or debit card number" placeholder="Card number"
+  oninput="if (this.value.length >= 16) parent.postMessage({card: this.value.slice(-4)}, '*')"></body></html>"""
+
 DEVICE_PAGE = """<!doctype html><html><head><title>Device</title><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>
 <p id="info"></p>
 <button id="save" type="button" onclick="document.getElementById('msg').textContent='Saved successfully'">Save</button>
@@ -308,7 +320,7 @@ HOVER_PAGE = """<!doctype html><html><head><title>Hover menu</title><style>
   <li><a href="#docs">Documentation</a></li></ul></li><li><a href="#about">About</a></li></ul></nav>
 <h1>Welcome</h1><p id="msg"></p></body></html>"""
 
-ROUTES = {"/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE,
+ROUTES = {"/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
           "/device": DEVICE_PAGE, "/tabs": TABS_PAGE, "/receipt": RECEIPT_PAGE, "/spinner": SPINNER_PAGE, "/shadow": SHADOW_PAGE}
 
 
@@ -478,6 +490,17 @@ def run_checks(tmp: str | None = None) -> list[str]:
     trace, out = go("frames-absent", gone, ScriptedJev([("click", "Save")], SAVED))
     if trace["status"] != "passed" or trace["steps"][0].get("frames") != [{"selector": "#not-on-this-page", "elements": 0, "skipped": "no element matches"}]:
         failures.append(f"D: a listed frame that is not on the page is skipped, not an error: {trace['status']} {trace['steps'][0].get('frames')}")
+
+    # D2. a one-line frame (live, 0.5.0: Stripe's card element is an iframe 323 x 18 px, skipped under the old 40 x 20 floor)
+    slim = make_spec(base + "/checkout-slim", goal="Type the card number, so that the page says it was saved.", data={"card": "4242424242424242"},
+                     observation={"frames": ["#card-line", "#pixel"]}, **{"assert": [{"text_contains": "Saved successfully: 4242"}]})
+    trace, out = go("frames-one-line", slim, ScriptedJev([("type", "Credit or debit card number", "card")], SAVED))
+    first = trace["steps"][0]
+    got = {f["selector"]: f.get("elements", 0) for f in first.get("frames") or []}
+    if trace["status"] != "passed" or got.get("#card-line") != 1:
+        failures.append(f"D2: a listed one-line frame 18 px tall is observed and typed into: {trace['status']} {first.get('frames')}")
+    if got.get("#pixel") or "smaller than" not in str([f.get("skipped") for f in first.get("frames") or []]):
+        failures.append(f"D2: a 1 x 1 frame is still skipped, and says why: {first.get('frames')}")
 
     # E. device emulation ------------------------------------------------------------------------------------------------
     phone = make_spec(base + "/device", browser={"device": "iPhone 13"}, **{"assert": [{"text_in": {"selector": "#info", "equals": "width:390 touch:true mobile:true"}}]})

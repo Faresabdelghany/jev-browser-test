@@ -693,7 +693,9 @@ TARGET_OPERATIONS = {"CLICK", "TYPE_TEXT", "SELECT", "HOVER", "UPLOAD_FILE"}
 
 
 FRAME_TABLE_ROOM = 250  # a Choice takes at most 255 options: the page's own elements and the frames' share this
-FRAME_MIN_BOX = (40, 20)  # an <iframe> smaller than this (a tracking pixel) holds nothing to choose
+FRAME_MIN_BOX = (10, 10)  # an <iframe> smaller than this (a tracking pixel) holds nothing to choose. Was (40, 20) until a
+# live run: Stripe's card element is one line of text in an iframe 323 x 18 px, and a frame the spec lists by name is
+# wanted whatever its height; OBSERVE_JS's own visibility rules decide what inside it is offered
 FRAME_TEXT_SHARE = 3  # a frame's visible text gets up to a third of max_text_chars
 
 
@@ -706,8 +708,10 @@ def frame_of(page, selector: str):
     if frame is None:
         return None, "not an <iframe>"
     box = handle.bounding_box()
-    if not box or box["width"] < FRAME_MIN_BOX[0] or box["height"] < FRAME_MIN_BOX[1]:
+    if not box:
         return None, "not visible"
+    if box["width"] < FRAME_MIN_BOX[0] or box["height"] < FRAME_MIN_BOX[1]:
+        return None, f"smaller than {FRAME_MIN_BOX[0]} x {FRAME_MIN_BOX[1]} px ({round(box['width'])} x {round(box['height'])})"
     label = handle.get_attribute("title") or handle.get_attribute("name") or handle.get_attribute("id") or selector
     return (frame, box, " ".join(label.split())[:40]), None
 
