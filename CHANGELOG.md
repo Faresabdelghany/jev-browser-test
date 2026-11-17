@@ -3,6 +3,49 @@
 Notable changes to the jev-browser-test skill. Versions follow [semantic versioning](https://semver.org); the version
 is the one in `.claude-plugin/plugin.json`, and merging a new one to `main` tags and releases it.
 
+## [0.9.0] - 2026-11-17
+
+Step 2 of the speed work: **one request per form**. Off by default (`--batch-fields`, `"batch_fields": true`), and
+it stays off: the gain is real and small, and only on forms that do not react to typing.
+
+### Added
+- **One request per form.** On a page with two or more empty text fields, the request that decides the next action
+  also asks, per field, which data value belongs in it (`fill_<index>`, a Choice over the data keys and
+  `leave_empty`). After a TYPE_TEXT the runner types the other fields Jev assigned at `thresholds.batch_confidence`
+  (0.8) or more, one step each and with no further request. The batch ends, and Jev decides again on the observation
+  in hand, the moment the page reacts to what was typed: a toast or live message, a field or button that appears or
+  goes, a covering layer, a list of suggestions, any change of the visible text. A value assigned to two fields is
+  typed into neither, and a disagreement between Jev's two answers about the field it chose plans nothing.
+  `step.fill` has every per-field answer, `step.batch_planned` the plan, batched steps are flagged `BATCHED` and a
+  stopped batch `BATCH-ENDED`; `result.batch` counts both.
+
+### Measured
+First runs, interleaved A/B (`ab.py --b-arg=--batch-fields`, 5 runs an arm), the eight form-heavy examples, live
+`jev-1.14.0`:
+
+| spec (text fields) | verdicts | requests | wall |
+|---|---|---:|---:|
+| `shop-checkout` (3) | order_complete 5/5 both | 10 → 8 | 5.6 → 5.1 s |
+| `shop-checkout-problem-account` (3) | form_error 5/5 both | 9 → 7 | 5.3 → 5.4 s |
+| `shop-checkout-error-account` (3) | blocked 5/5 both | 10 → 8 | 6.2 → 5.4 s |
+| `web-form-submit` (2, and a select, a checkbox, a radio) | form_submitted 5/5 both | 9 → 7 | 5.0 → 4.0 s |
+| `login-logout` (2) | logged_out 5/5 both | 6 → 5 | 5.0 → 4.6 s |
+| `hrm-add-employee` (2) | see below | 12 → 10 | 23.1 → 19.0 s |
+| `hrm-pim-add-employee-list` (2, then a type-ahead) | employee_listed 5/5 both | 18 → 17 | 20.2 → 19.8 s |
+| `hrm-admin-add-user` (a type-ahead, then 3) | user_listed 5/5 both | 20 → 21 | 29.0 → 31.2 s |
+| sum of medians | | 94 → 83 | 99.5 → 94.4 s |
+
+Jev's per-field answers were right in every run looked at: the sidebar's Search box and the optional middle name
+read `leave_empty` at 0.96 to 1.0, the fields the goal names read their keys at 0.8 to 1.0. On the two forms with a
+type-ahead the batch stopped where it should (the suggestion list, then a validation line) and nothing was saved;
+there the extra questions cost about 9% more input tokens for no fewer requests. `hrm-add-employee` ended
+`low_confidence` once in the batch arm of the first five; alone, ten runs an arm, it did so once in each arm
+(employee_saved 8/10 without, 9/10 with): the spec's own base rate today, not the option's.
+
+So: two requests and about half a second off a plain three-field form, nothing off a form that reacts, the same
+verdicts. Worth turning on in a spec whose form is plain fields; not worth making every first run pay the extra
+questions.
+
 ## [0.8.0] - 2026-11-17
 
 The first of six steps to make reruns fast without making them less correct: **replay**. Off by default; measured

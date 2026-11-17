@@ -188,6 +188,33 @@ screenshots in the loop, event-based short waits, a persistent HTTP client. This
 adds the results contract on top; what it pays for the contract is one confirmation request per pass and one
 adjudication request per bug sighting.
 
+## One request per form
+
+The September probe (above) found that eight questions cost the time of two: the questions of a request are
+evaluated in parallel over one reading of the state. A form of N text fields costs N requests when each field is its
+own decision, and nothing forces that. With `batch_fields`, `policy.build_fill_questions` adds one Choice per empty
+text field to the ordinary request (`fill_<index>`: the data keys and `leave_empty`), and when the decision is a
+TYPE_TEXT, `policy.plan_batch` turns the confident answers into a plan: the other fields, in table order, each with
+the key Jev gave it. The loop then types them one step at a time through the same `act()` as every action, finding
+each field again by role and name (`replay.find_target`), without a request.
+
+The batch is dropped, and the next decision is Jev's on the observation in hand, as soon as the page is no longer
+the page the plan was made on (`batch_next`): a toast or live message was announced; the set of fields and buttons
+changed (a dependent field appeared); controls went under a layer; a list of options opened (a type-ahead); the
+visible text changed at all (a validation line, a strength meter, a counter); or the next field is gone, ambiguous
+or no longer empty. Typing into a plain input changes none of these, so a plain form goes through in one request and
+anything livelier falls back to one request per field, which is what it costs today.
+
+Three rules keep a wrong plan from typing: the threshold (`thresholds.batch_confidence`, 0.8); a value that Jev
+assigned to two fields goes into neither (which field is exactly what it was unsure of); and if the `fill_` answer
+for the field Jev chose to type names a different value than `type_value` did, nothing is planned.
+
+Measured (2026-11-17, `jev-1.14.0`, dev-docs `measurements/`, section "0.9.0"): first runs of the eight form-heavy
+examples, five an arm: the same verdicts, 94 → 83 requests and 99.5 → 94.4 s as sums of medians; two requests and
+about half a second off a three-field checkout form, nothing off the two forms with a type-ahead (the batch stops
+at the suggestion list, and the extra questions cost about 9% more input tokens there). It stays opt-in for that
+reason: the saving is one request per plain extra field, and a first run should not pay for questions it cannot use.
+
 ## Replay: a saved path is a second source of decisions
 
 `run()` has one loop, and replay does not add a second: on each step, before the request is built, a run with a

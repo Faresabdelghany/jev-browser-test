@@ -288,6 +288,11 @@ and the waiting:
 - Give the spec assertions: a pass then confirms itself in code, saving a pause, an observation and a request.
 - Name the visible end state in the goal and the outcomes; a vague goal buys WAITs and wandering steps.
 - Use `wait_for {selector|url}` instead of `wait {ms}` in `setup`.
+- A form of several plain text fields can be filled on one request: `"batch_fields": true` in the spec (or
+  `--batch-fields`). The request that types the first field also assigns the others their values, and the runner
+  types those without asking again, stopping the moment the page reacts (a message, a new field, a list of
+  suggestions). It saves one request per extra field (a three-field checkout: 10 → 8 requests, about half a second)
+  and nothing on a form with type-aheads or live validation, where it only adds questions: turn it on per spec.
 - Rerun with `--replay` (above): the requests of a rerun fall to one, and the steps to the browser's own time. It
   does not shorten the page's loading, a login in `setup` or a loader the flow waits for.
 - Do not add repeats to be sure: one run is evidence, three to five measure stability, more is load on the host.

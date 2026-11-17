@@ -3518,6 +3518,7 @@ class FormBatchTests(unittest.TestCase):
                 json.dump(body, f)
             for extra in ([], ["--batch-fields"]):
                 with mock.patch.object(run_test, "JevClient"), mock.patch.object(run_test, "summarize", lambda *a: ""), \
+                        mock.patch.dict("sys.modules", {"playwright": mock.MagicMock()}), \
                         mock.patch.object(run_test, "run", lambda spec, jev, out, screenshots=None: seen.append(spec) or {"pass": True}):
                     run_test.main(["run_test.py", file, "--out", os.path.join(tmp, "o"), *extra])
         self.assertEqual([s["batch_fields"] for s in seen], [False, True])

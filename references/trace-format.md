@@ -38,6 +38,7 @@ evidence, the file Claude reads first. The trace is the *evidence* behind it; th
   "teardown": { "ok": true, "steps": 3, "ran": 3 },             // only for a spec with `teardown`; on a failure ok false and "failed": { "n", "action", "error" }. Never changes the result
   "expected": { "expect": { "outcome": "bad_credentials" }, "actual": { "outcome": "bad_credentials" },   // only when the spec declares `expect`:
                 "matched": true, "mismatches": {} },                                                     // did the run end in the declared result?
+  "batch": { "fields_typed": 2, "stopped": [ { "step": 5, "reason": "the page's text changed after a field was typed ...", "fields_left": 1 } ] },   // only with batch_fields
   "replay": { "path": ".jev/paths/shop-checkout.json", "used": true,      // only with replay on (spec `replay`, --replay). used: a saved path was read
               "steps_in_path": 8, "steps_replayed": 8, "steps_by_jev": 0,  //   saved steps, how many ran without a request, executed actions Jev chose
               "handed_back": null,                                         //   or { "at_step": 4, "path_step": 4, "reason": "the page's fields and buttons differ ..." }
@@ -249,6 +250,12 @@ environment failure (or a spec file is missing / two files share an id).
       "no_effect": true,                                             // this step's executed CLICK/TYPE_TEXT/SELECT/PRESS_ENTER changed nothing (page_changed false): flag NO-EFFECT
       "after_no_effect": true,                                       // this observation is the page the previous action failed to change (a key-mode picture)
       "adjudication_merged": true,                                   // the confirming step: the evidence questions rode in this request (state.lines added)
+      "fill": { "3": { "choice": "last_name", "confidence": 0.97 }, "4": { "choice": "leave_empty", "confidence": 0.91 } },   // with batch_fields, on a TYPE_TEXT step
+                                                                     //   of a page with several empty fields: Jev's answer per field (by element index)
+      "batch_planned": [ { "field": "textbox \"Last Name\"", "value_key": "last_name", "confidence": 0.97 } ],   // the fields the runner will type next without asking
+      "batched": true,                                               // this TYPE_TEXT was one of them: no request (operation / target / type_value carry the assignment's
+                                                                     //   confidence and "batched": true; flag BATCHED)
+      "batch_stopped": "a list of suggestions opened",               // the page reacted to what was typed: the rest of the batch was dropped and Jev decided (flag BATCH-ENDED)
       "at_ms": 2392,                                                 // when this page was observed, in ms from the start of the run
       "replayed": true, "replay_waited_ms": 0,                       // with replay: this action came from the saved path, no request (operation / target / type_value carry
                                                                      //   "replayed": true and no confidence; the summary shows `saved path`); how long the step waited for its page
