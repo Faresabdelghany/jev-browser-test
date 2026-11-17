@@ -1,0 +1,1914 @@
+{
+  "label": "0.8.0 replay on, first run (public), 8d9c8c1",
+  "timestamp": "2026-11-17T15:45:50+02:00",
+  "git_commit": "8d9c8c1",
+  "repeat": 1,
+  "workers": 1,
+  "replay": true,
+  "run_args": [
+    "--replay"
+  ],
+  "elapsed_ms": 84710,
+  "out_dir": "runs/suite/r2-record-public",
+  "specs": {
+    "add-remove-elements": {
+      "spec": "../../../specs/examples/add-remove-elements.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "add-remove-elements/01",
+          "exit_code": 0,
+          "wall_ms": 4396,
+          "outcome": "one_delete_left",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "add-remove-elements/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 4234,
+          "jev_ms": 849,
+          "adjudication_ms": 202,
+          "browser_ms": 446,
+          "requests": 5,
+          "input_tokens": 5862,
+          "output_tokens": 798,
+          "model": "jev-1.14.0",
+          "steps": 4,
+          "actions_executed": 3,
+          "decision_confidence": 0.96,
+          "min_decision_confidence": 0.86,
+          "step_confidences": [
+            0.97,
+            0.96,
+            0.86
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 198,
+          "jev_warm_ms": 218,
+          "browser_per_action_ms": 137,
+          "step_jev_ms": [
+            198,
+            200,
+            233,
+            218
+          ],
+          "step_browser_ms": [
+            172,
+            137,
+            137,
+            null
+          ],
+          "action_browser_ms": [
+            172,
+            137,
+            137
+          ],
+          "launch_ms": 202,
+          "navigation_ms": 2134,
+          "setup_ms": 0,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "add-remove-elements/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Delete",
+          "first_seen_at_step": 4,
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": true
+          }
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "one_delete_left": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 4396,
+        "duration_ms": 4234,
+        "jev_ms": 849,
+        "browser_ms": 446,
+        "requests": 5,
+        "input_tokens": 5862,
+        "decision_confidence": 0.96,
+        "steps": 4,
+        "replayed_steps": 0
+      },
+      "passes": 1,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "dynamic-controls": {
+      "spec": "../../../specs/examples/dynamic-controls.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "dynamic-controls/01",
+          "exit_code": 0,
+          "wall_ms": 9314,
+          "outcome": "both_done",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "dynamic-controls/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 9179,
+          "jev_ms": 2051,
+          "adjudication_ms": 199,
+          "browser_ms": 4893,
+          "requests": 11,
+          "input_tokens": 17446,
+          "output_tokens": 2108,
+          "model": "jev-1.14.0",
+          "steps": 10,
+          "actions_executed": 8,
+          "decision_confidence": 0.83,
+          "min_decision_confidence": 0.32,
+          "step_confidences": [
+            0.97,
+            0.73,
+            0.57,
+            0.32,
+            0.56,
+            0.93,
+            0.97,
+            0.95,
+            0.83
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 1,
+          "jev_first_ms": 207,
+          "jev_warm_ms": 204,
+          "browser_per_action_ms": 522.5,
+          "step_jev_ms": [
+            207,
+            218,
+            224,
+            188,
+            213,
+            204,
+            183,
+            193,
+            203,
+            218
+          ],
+          "step_browser_ms": [
+            162,
+            523,
+            915,
+            516,
+            221,
+            137,
+            522,
+            919,
+            978,
+            null
+          ],
+          "action_browser_ms": [
+            162,
+            523,
+            915,
+            221,
+            137,
+            522,
+            919,
+            978
+          ],
+          "launch_ms": 146,
+          "navigation_ms": 1466,
+          "setup_ms": 0,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "dynamic-controls/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Add",
+          "first_seen_at_step": 10,
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": true
+          }
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "both_done": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 9314,
+        "duration_ms": 9179,
+        "jev_ms": 2051,
+        "browser_ms": 4893,
+        "requests": 11,
+        "input_tokens": 17446,
+        "decision_confidence": 0.83,
+        "steps": 10,
+        "replayed_steps": 0
+      },
+      "passes": 1,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "forgot-password": {
+      "spec": "../../../specs/examples/forgot-password.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "forgot-password/01",
+          "exit_code": 0,
+          "wall_ms": 3634,
+          "outcome": "email_sent",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "forgot-password/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 3509,
+          "jev_ms": 667,
+          "adjudication_ms": 207,
+          "browser_ms": 609,
+          "requests": 4,
+          "input_tokens": 4427,
+          "output_tokens": 600,
+          "model": "jev-1.14.0",
+          "steps": 3,
+          "actions_executed": 2,
+          "decision_confidence": 0.98,
+          "min_decision_confidence": 0.96,
+          "step_confidences": [
+            1.0,
+            0.96
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 242,
+          "jev_warm_ms": 212.5,
+          "browser_per_action_ms": 304.5,
+          "step_jev_ms": [
+            242,
+            200,
+            225
+          ],
+          "step_browser_ms": [
+            129,
+            480,
+            null
+          ],
+          "action_browser_ms": [
+            129,
+            480
+          ],
+          "launch_ms": 151,
+          "navigation_ms": 1582,
+          "setup_ms": 0,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "forgot-password/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Your e-mail's been sent!",
+          "first_seen_at_step": 3,
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": true
+          }
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "email_sent": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 3634,
+        "duration_ms": 3509,
+        "jev_ms": 667,
+        "browser_ms": 609,
+        "requests": 4,
+        "input_tokens": 4427,
+        "decision_confidence": 0.98,
+        "steps": 3,
+        "replayed_steps": 0
+      },
+      "passes": 1,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "load-wait": {
+      "spec": "../../../specs/examples/load-wait.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "load-wait/01",
+          "exit_code": 0,
+          "wall_ms": 9081,
+          "outcome": "loaded",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "load-wait/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 8952,
+          "jev_ms": 1422,
+          "adjudication_ms": 201,
+          "browser_ms": 4188,
+          "requests": 7,
+          "input_tokens": 8147,
+          "output_tokens": 1212,
+          "model": "jev-1.14.0",
+          "steps": 6,
+          "actions_executed": 5,
+          "decision_confidence": 1,
+          "min_decision_confidence": 0.99,
+          "step_confidences": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.99
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 221,
+          "jev_warm_ms": 225,
+          "browser_per_action_ms": 890,
+          "step_jev_ms": [
+            221,
+            225,
+            221,
+            188,
+            333,
+            234
+          ],
+          "step_browser_ms": [
+            149,
+            517,
+            908,
+            1724,
+            890,
+            null
+          ],
+          "action_browser_ms": [
+            149,
+            517,
+            908,
+            1724,
+            890
+          ],
+          "launch_ms": 156,
+          "navigation_ms": 2661,
+          "setup_ms": 0,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "load-wait/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Hello World!",
+          "first_seen_at_step": 6,
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": true
+          }
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "loaded": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 9081,
+        "duration_ms": 8952,
+        "jev_ms": 1422,
+        "browser_ms": 4188,
+        "requests": 7,
+        "input_tokens": 8147,
+        "decision_confidence": 1,
+        "steps": 6,
+        "replayed_steps": 0
+      },
+      "passes": 1,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "login-logout": {
+      "spec": "../../../specs/examples/login-logout.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "login-logout/01",
+          "exit_code": 0,
+          "wall_ms": 4642,
+          "outcome": "logged_out",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "login-logout/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 4497,
+          "jev_ms": 1024,
+          "adjudication_ms": 194,
+          "browser_ms": 1229,
+          "requests": 6,
+          "input_tokens": 9770,
+          "output_tokens": 1368,
+          "model": "jev-1.14.0",
+          "steps": 5,
+          "actions_executed": 4,
+          "decision_confidence": 0.97,
+          "min_decision_confidence": 0.95,
+          "step_confidences": [
+            0.98,
+            0.95,
+            0.96,
+            1.0
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 197,
+          "jev_warm_ms": 206,
+          "browser_per_action_ms": 306.5,
+          "step_jev_ms": [
+            197,
+            199,
+            213,
+            188,
+            227
+          ],
+          "step_browser_ms": [
+            135,
+            139,
+            474,
+            481,
+            null
+          ],
+          "action_browser_ms": [
+            135,
+            139,
+            474,
+            481
+          ],
+          "launch_ms": 150,
+          "navigation_ms": 1531,
+          "setup_ms": 0,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "login-logout/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Login Page",
+          "first_seen_at_step": 5,
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": true
+          }
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "logged_out": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 4642,
+        "duration_ms": 4497,
+        "jev_ms": 1024,
+        "browser_ms": 1229,
+        "requests": 6,
+        "input_tokens": 9770,
+        "decision_confidence": 0.97,
+        "steps": 5,
+        "replayed_steps": 0
+      },
+      "passes": 1,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "menu-random": {
+      "spec": "../../../specs/examples/menu-random.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "menu-random/01",
+          "exit_code": 1,
+          "wall_ms": 2563,
+          "outcome": "entry_missing",
+          "verdict": "bug",
+          "status": "outcome",
+          "trace": "menu-random/01/trace.json",
+          "pass": false,
+          "error": null,
+          "duration_ms": 2424,
+          "jev_ms": 208,
+          "adjudication_ms": 212,
+          "browser_ms": 0,
+          "requests": 2,
+          "input_tokens": 2126,
+          "output_tokens": 275,
+          "model": "jev-1.14.0",
+          "steps": 1,
+          "actions_executed": 0,
+          "decision_confidence": null,
+          "min_decision_confidence": null,
+          "step_confidences": [],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 208,
+          "jev_warm_ms": null,
+          "browser_per_action_ms": null,
+          "step_jev_ms": [
+            208
+          ],
+          "step_browser_ms": [
+            null
+          ],
+          "action_browser_ms": [],
+          "launch_ms": 135,
+          "navigation_ms": 1579,
+          "setup_ms": 0,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "menu-random/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": null,
+          "first_seen_at_step": 1,
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": false
+          }
+        }
+      ],
+      "verdict": "bug",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "entry_missing": 1
+      },
+      "verdict_counts": {
+        "bug": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 2563,
+        "duration_ms": 2424,
+        "jev_ms": 208,
+        "browser_ms": 0,
+        "requests": 2,
+        "input_tokens": 2126,
+        "decision_confidence": null,
+        "steps": 1,
+        "replayed_steps": 0
+      },
+      "passes": 0,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "modal-close": {
+      "spec": "../../../specs/examples/modal-close.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "modal-close/01",
+          "exit_code": 0,
+          "wall_ms": 3541,
+          "outcome": "modal_closed",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "modal-close/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 3406,
+          "jev_ms": 646,
+          "adjudication_ms": 236,
+          "browser_ms": 491,
+          "requests": 4,
+          "input_tokens": 4033,
+          "output_tokens": 552,
+          "model": "jev-1.14.0",
+          "steps": 3,
+          "actions_executed": 1,
+          "decision_confidence": 0.66,
+          "min_decision_confidence": 0.33,
+          "step_confidences": [
+            0.33,
+            0.99
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 1,
+          "jev_first_ms": 194,
+          "jev_warm_ms": 226,
+          "browser_per_action_ms": 154,
+          "step_jev_ms": [
+            194,
+            201,
+            251
+          ],
+          "step_browser_ms": [
+            337,
+            154,
+            null
+          ],
+          "action_browser_ms": [
+            154
+          ],
+          "launch_ms": 137,
+          "navigation_ms": 1555,
+          "setup_ms": 0,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "modal-close/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": null,
+          "first_seen_at_step": 3,
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": true
+          }
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "modal_closed": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 3541,
+        "duration_ms": 3406,
+        "jev_ms": 646,
+        "browser_ms": 491,
+        "requests": 4,
+        "input_tokens": 4033,
+        "decision_confidence": 0.66,
+        "steps": 3,
+        "replayed_steps": 0
+      },
+      "passes": 1,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "notify-random": {
+      "spec": "../../../specs/examples/notify-random.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "notify-random/01",
+          "exit_code": 0,
+          "wall_ms": 3386,
+          "outcome": "action_successful",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "notify-random/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 3249,
+          "jev_ms": 414,
+          "adjudication_ms": 206,
+          "browser_ms": 514,
+          "requests": 3,
+          "input_tokens": 3218,
+          "output_tokens": 413,
+          "model": "jev-1.14.0",
+          "steps": 2,
+          "actions_executed": 1,
+          "decision_confidence": 0.83,
+          "min_decision_confidence": 0.83,
+          "step_confidences": [
+            0.83
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 210,
+          "jev_warm_ms": 204,
+          "browser_per_action_ms": 514,
+          "step_jev_ms": [
+            210,
+            204
+          ],
+          "step_browser_ms": [
+            514,
+            null
+          ],
+          "action_browser_ms": [
+            514
+          ],
+          "launch_ms": 147,
+          "navigation_ms": 1656,
+          "setup_ms": 0,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "notify-random/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Action successful",
+          "first_seen_at_step": 2,
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": true
+          }
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "action_successful": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 3386,
+        "duration_ms": 3249,
+        "jev_ms": 414,
+        "browser_ms": 514,
+        "requests": 3,
+        "input_tokens": 3218,
+        "decision_confidence": 0.83,
+        "steps": 2,
+        "replayed_steps": 0
+      },
+      "passes": 1,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "shop-add-second-item": {
+      "spec": "../../../specs/examples/shop-add-second-item.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "shop-add-second-item/01",
+          "exit_code": 0,
+          "wall_ms": 2941,
+          "outcome": "bike_light_in_cart",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "shop-add-second-item/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 2807,
+          "jev_ms": 636,
+          "adjudication_ms": 199,
+          "browser_ms": 304,
+          "requests": 4,
+          "input_tokens": 10869,
+          "output_tokens": 1113,
+          "model": "jev-1.14.0",
+          "steps": 3,
+          "actions_executed": 2,
+          "decision_confidence": 0.865,
+          "min_decision_confidence": 0.75,
+          "step_confidences": [
+            0.98,
+            0.75
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 209,
+          "jev_warm_ms": 213.5,
+          "browser_per_action_ms": 152,
+          "step_jev_ms": [
+            209,
+            227,
+            200
+          ],
+          "step_browser_ms": [
+            156,
+            148,
+            null
+          ],
+          "action_browser_ms": [
+            156,
+            148
+          ],
+          "launch_ms": 137,
+          "navigation_ms": 634,
+          "setup_ms": 565,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "shop-add-second-item/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Sauce Labs Bike Light",
+          "first_seen_at_step": 3,
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": true
+          }
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "bike_light_in_cart": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 2941,
+        "duration_ms": 2807,
+        "jev_ms": 636,
+        "browser_ms": 304,
+        "requests": 4,
+        "input_tokens": 10869,
+        "decision_confidence": 0.865,
+        "steps": 3,
+        "replayed_steps": 0
+      },
+      "passes": 1,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "shop-checkout-error-account": {
+      "spec": "../../../specs/examples/shop-checkout-error-account.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "shop-checkout-error-account/01",
+          "exit_code": 0,
+          "wall_ms": 5508,
+          "outcome": "undetermined",
+          "verdict": null,
+          "status": "blocked",
+          "trace": "shop-checkout-error-account/01/trace.json",
+          "pass": false,
+          "error": null,
+          "duration_ms": 5373,
+          "jev_ms": 2277,
+          "adjudication_ms": null,
+          "browser_ms": 1147,
+          "requests": 10,
+          "input_tokens": 26266,
+          "output_tokens": 3154,
+          "model": "jev-1.14.0",
+          "steps": 9,
+          "actions_executed": 8,
+          "decision_confidence": 0.91,
+          "min_decision_confidence": 0.57,
+          "step_confidences": [
+            0.95,
+            0.99,
+            0.91,
+            0.99,
+            1.0,
+            0.86,
+            0.85,
+            0.57,
+            0.71
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 255,
+          "jev_warm_ms": 228,
+          "browser_per_action_ms": 145,
+          "step_jev_ms": [
+            255,
+            242,
+            205,
+            299,
+            199,
+            256,
+            214,
+            208,
+            399
+          ],
+          "step_browser_ms": [
+            142,
+            159,
+            148,
+            175,
+            126,
+            114,
+            155,
+            128,
+            null
+          ],
+          "action_browser_ms": [
+            142,
+            159,
+            148,
+            175,
+            126,
+            114,
+            155,
+            128
+          ],
+          "launch_ms": 190,
+          "navigation_ms": 641,
+          "setup_ms": 583,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "shop-checkout-error-account/01/result.json",
+          "suggested_verdict": "bug",
+          "evidence_line": null,
+          "first_seen_at_step": null,
+          "expected": true,
+          "expected_mismatches": {},
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": false
+          }
+        }
+      ],
+      "verdict": "expected",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": 1,
+      "outcome_counts": {
+        "undetermined": 1
+      },
+      "verdict_counts": {
+        "undetermined": 1
+      },
+      "suggested_verdicts": {
+        "bug": 1
+      },
+      "medians": {
+        "wall_ms": 5508,
+        "duration_ms": 5373,
+        "jev_ms": 2277,
+        "browser_ms": 1147,
+        "requests": 10,
+        "input_tokens": 26266,
+        "decision_confidence": 0.91,
+        "steps": 9,
+        "replayed_steps": 0
+      },
+      "passes": 0,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "shop-checkout-problem-account": {
+      "spec": "../../../specs/examples/shop-checkout-problem-account.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "shop-checkout-problem-account/01",
+          "exit_code": 1,
+          "wall_ms": 4862,
+          "outcome": "form_error",
+          "verdict": "bug",
+          "status": "outcome",
+          "trace": "shop-checkout-problem-account/01/trace.json",
+          "pass": false,
+          "error": null,
+          "duration_ms": 4729,
+          "jev_ms": 1660,
+          "adjudication_ms": 204,
+          "browser_ms": 982,
+          "requests": 9,
+          "input_tokens": 23457,
+          "output_tokens": 2901,
+          "model": "jev-1.14.0",
+          "steps": 8,
+          "actions_executed": 7,
+          "decision_confidence": 0.96,
+          "min_decision_confidence": 0.8,
+          "step_confidences": [
+            0.98,
+            0.99,
+            0.93,
+            0.94,
+            0.98,
+            0.96,
+            0.8
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 205,
+          "jev_warm_ms": 212,
+          "browser_per_action_ms": 147,
+          "step_jev_ms": [
+            205,
+            212,
+            186,
+            193,
+            228,
+            212,
+            231,
+            193
+          ],
+          "step_browser_ms": [
+            154,
+            151,
+            147,
+            129,
+            129,
+            115,
+            157,
+            null
+          ],
+          "action_browser_ms": [
+            154,
+            151,
+            147,
+            129,
+            129,
+            115,
+            157
+          ],
+          "launch_ms": 134,
+          "navigation_ms": 612,
+          "setup_ms": 582,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "shop-checkout-problem-account/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Error: Last Name is required",
+          "first_seen_at_step": 8,
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": false
+          }
+        }
+      ],
+      "verdict": "bug",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "form_error": 1
+      },
+      "verdict_counts": {
+        "bug": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 4862,
+        "duration_ms": 4729,
+        "jev_ms": 1660,
+        "browser_ms": 982,
+        "requests": 9,
+        "input_tokens": 23457,
+        "decision_confidence": 0.96,
+        "steps": 8,
+        "replayed_steps": 0
+      },
+      "passes": 0,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "shop-checkout": {
+      "spec": "../../../specs/examples/shop-checkout.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "shop-checkout/01",
+          "exit_code": 0,
+          "wall_ms": 5254,
+          "outcome": "order_complete",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "shop-checkout/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 5117,
+          "jev_ms": 2044,
+          "adjudication_ms": 190,
+          "browser_ms": 1119,
+          "requests": 10,
+          "input_tokens": 24991,
+          "output_tokens": 2987,
+          "model": "jev-1.14.0",
+          "steps": 9,
+          "actions_executed": 8,
+          "decision_confidence": 0.985,
+          "min_decision_confidence": 0.93,
+          "step_confidences": [
+            0.97,
+            0.96,
+            1.0,
+            0.93,
+            1.0,
+            1.0,
+            0.96,
+            1.0
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 216,
+          "jev_warm_ms": 214.5,
+          "browser_per_action_ms": 146.5,
+          "step_jev_ms": [
+            216,
+            230,
+            211,
+            215,
+            198,
+            214,
+            209,
+            240,
+            311
+          ],
+          "step_browser_ms": [
+            158,
+            147,
+            146,
+            121,
+            127,
+            116,
+            148,
+            156,
+            null
+          ],
+          "action_browser_ms": [
+            158,
+            147,
+            146,
+            121,
+            127,
+            116,
+            148,
+            156
+          ],
+          "launch_ms": 135,
+          "navigation_ms": 600,
+          "setup_ms": 548,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "shop-checkout/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Checkout: Complete!",
+          "first_seen_at_step": 9,
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": true
+          }
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "order_complete": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 5254,
+        "duration_ms": 5117,
+        "jev_ms": 2044,
+        "browser_ms": 1119,
+        "requests": 10,
+        "input_tokens": 24991,
+        "decision_confidence": 0.985,
+        "steps": 9,
+        "replayed_steps": 0
+      },
+      "passes": 1,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "table-sort-due": {
+      "spec": "../../../specs/examples/table-sort-due.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "table-sort-due/01",
+          "exit_code": 0,
+          "wall_ms": 4577,
+          "outcome": "undetermined",
+          "verdict": null,
+          "status": "low_confidence",
+          "trace": "table-sort-due/01/trace.json",
+          "pass": false,
+          "error": null,
+          "duration_ms": 4444,
+          "jev_ms": 853,
+          "adjudication_ms": null,
+          "browser_ms": 1433,
+          "requests": 4,
+          "input_tokens": 10122,
+          "output_tokens": 891,
+          "model": "jev-1.14.0",
+          "steps": 3,
+          "actions_executed": 0,
+          "decision_confidence": 0.42,
+          "min_decision_confidence": 0.31,
+          "step_confidences": [
+            0.47,
+            0.42,
+            0.31
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 3,
+          "jev_first_ms": 197,
+          "jev_warm_ms": 328,
+          "browser_per_action_ms": null,
+          "step_jev_ms": [
+            197,
+            217,
+            439
+          ],
+          "step_browser_ms": [
+            518,
+            915,
+            null
+          ],
+          "action_browser_ms": [],
+          "launch_ms": 135,
+          "navigation_ms": 1583,
+          "setup_ms": 0,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "table-sort-due/01/result.json",
+          "suggested_verdict": "test_issue",
+          "evidence_line": null,
+          "first_seen_at_step": null,
+          "expected": true,
+          "expected_mismatches": {},
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": false
+          }
+        }
+      ],
+      "verdict": "expected",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": 1,
+      "outcome_counts": {
+        "undetermined": 1
+      },
+      "verdict_counts": {
+        "undetermined": 1
+      },
+      "suggested_verdicts": {
+        "test_issue": 1
+      },
+      "medians": {
+        "wall_ms": 4577,
+        "duration_ms": 4444,
+        "jev_ms": 853,
+        "browser_ms": 1433,
+        "requests": 4,
+        "input_tokens": 10122,
+        "decision_confidence": 0.42,
+        "steps": 3,
+        "replayed_steps": 0
+      },
+      "passes": 0,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "todo-add-filter": {
+      "spec": "../../../specs/examples/todo-add-filter.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "todo-add-filter/01",
+          "exit_code": 0,
+          "wall_ms": 4184,
+          "outcome": "active_filtered",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "todo-add-filter/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 4054,
+          "jev_ms": 1551,
+          "adjudication_ms": 230,
+          "browser_ms": 840,
+          "requests": 8,
+          "input_tokens": 15169,
+          "output_tokens": 2126,
+          "model": "jev-1.14.0",
+          "steps": 7,
+          "actions_executed": 6,
+          "decision_confidence": 0.935,
+          "min_decision_confidence": 0.77,
+          "step_confidences": [
+            0.77,
+            0.92,
+            0.96,
+            0.95,
+            1.0,
+            0.91
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 230,
+          "jev_warm_ms": 220.5,
+          "browser_per_action_ms": 139,
+          "step_jev_ms": [
+            230,
+            214,
+            190,
+            246,
+            242,
+            227,
+            202
+          ],
+          "step_browser_ms": [
+            147,
+            155,
+            122,
+            120,
+            131,
+            165,
+            null
+          ],
+          "action_browser_ms": [
+            147,
+            155,
+            122,
+            120,
+            131,
+            165
+          ],
+          "launch_ms": 132,
+          "navigation_ms": 901,
+          "setup_ms": 0,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "todo-add-filter/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "1 item left",
+          "first_seen_at_step": 7,
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": true
+          }
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "active_filtered": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 4184,
+        "duration_ms": 4054,
+        "jev_ms": 1551,
+        "browser_ms": 840,
+        "requests": 8,
+        "input_tokens": 15169,
+        "decision_confidence": 0.935,
+        "steps": 7,
+        "replayed_steps": 0
+      },
+      "passes": 1,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "toolshop-search-cart": {
+      "spec": "../../../specs/examples/toolshop-search-cart.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "toolshop-search-cart/01",
+          "exit_code": 0,
+          "wall_ms": 8276,
+          "outcome": "in_cart",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "toolshop-search-cart/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 8136,
+          "jev_ms": 2265,
+          "adjudication_ms": 204,
+          "browser_ms": 3332,
+          "requests": 11,
+          "input_tokens": 46217,
+          "output_tokens": 5305,
+          "model": "jev-1.14.0",
+          "steps": 10,
+          "actions_executed": 5,
+          "decision_confidence": 0.94,
+          "min_decision_confidence": 0.27,
+          "step_confidences": [
+            0.99,
+            0.57,
+            0.97,
+            0.97,
+            0.44,
+            1.0,
+            0.27,
+            0.94,
+            0.71
+          ],
+          "stale_steps": 2,
+          "low_confidence_steps": 2,
+          "jev_first_ms": 211,
+          "jev_warm_ms": 231,
+          "browser_per_action_ms": 203,
+          "step_jev_ms": [
+            211,
+            232,
+            225,
+            295,
+            190,
+            198,
+            219,
+            232,
+            231,
+            232
+          ],
+          "step_browser_ms": [
+            184,
+            195,
+            157,
+            216,
+            269,
+            203,
+            918,
+            383,
+            807,
+            null
+          ],
+          "action_browser_ms": [
+            184,
+            195,
+            216,
+            203,
+            383
+          ],
+          "launch_ms": 138,
+          "navigation_ms": 1061,
+          "setup_ms": 0,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "toolshop-search-cart/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Proceed to checkout",
+          "first_seen_at_step": 10,
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": true
+          }
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "in_cart": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 8276,
+        "duration_ms": 8136,
+        "jev_ms": 2265,
+        "browser_ms": 3332,
+        "requests": 11,
+        "input_tokens": 46217,
+        "decision_confidence": 0.94,
+        "steps": 10,
+        "replayed_steps": 0
+      },
+      "passes": 1,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "web-form-submit": {
+      "spec": "../../../specs/examples/web-form-submit.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "web-form-submit/01",
+          "exit_code": 0,
+          "wall_ms": 4284,
+          "outcome": "form_submitted",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "web-form-submit/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 4154,
+          "jev_ms": 1754,
+          "adjudication_ms": 184,
+          "browser_ms": 874,
+          "requests": 8,
+          "input_tokens": 20532,
+          "output_tokens": 2539,
+          "model": "jev-1.14.0",
+          "steps": 7,
+          "actions_executed": 6,
+          "decision_confidence": 0.975,
+          "min_decision_confidence": 0.62,
+          "step_confidences": [
+            0.99,
+            0.62,
+            0.94,
+            0.99,
+            0.99,
+            0.96
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 213,
+          "jev_warm_ms": 238,
+          "browser_per_action_ms": 130.5,
+          "step_jev_ms": [
+            213,
+            244,
+            266,
+            195,
+            231,
+            373,
+            232
+          ],
+          "step_browser_ms": [
+            131,
+            107,
+            122,
+            130,
+            142,
+            242,
+            null
+          ],
+          "action_browser_ms": [
+            131,
+            107,
+            122,
+            130,
+            142,
+            242
+          ],
+          "launch_ms": 136,
+          "navigation_ms": 825,
+          "setup_ms": 0,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "web-form-submit/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Form submitted",
+          "first_seen_at_step": 7,
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": true
+          }
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "form_submitted": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 4284,
+        "duration_ms": 4154,
+        "jev_ms": 1754,
+        "browser_ms": 874,
+        "requests": 8,
+        "input_tokens": 20532,
+        "decision_confidence": 0.975,
+        "steps": 7,
+        "replayed_steps": 0
+      },
+      "passes": 1,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    },
+    "wiki-search": {
+      "spec": "../../../specs/examples/wiki-search.json",
+      "runs": [
+        {
+          "run": 1,
+          "out_dir": "wiki-search/01",
+          "exit_code": 0,
+          "wall_ms": 4240,
+          "outcome": "article_shown",
+          "verdict": "pass",
+          "status": "passed",
+          "trace": "wiki-search/01/trace.json",
+          "pass": true,
+          "error": null,
+          "duration_ms": 4105,
+          "jev_ms": 769,
+          "adjudication_ms": 313,
+          "browser_ms": 1335,
+          "requests": 4,
+          "input_tokens": 34385,
+          "output_tokens": 3575,
+          "model": "jev-1.14.0",
+          "steps": 3,
+          "actions_executed": 2,
+          "decision_confidence": 0.74,
+          "min_decision_confidence": 0.67,
+          "step_confidences": [
+            0.81,
+            0.67
+          ],
+          "stale_steps": 0,
+          "low_confidence_steps": 0,
+          "jev_first_ms": 270,
+          "jev_warm_ms": 249.5,
+          "browser_per_action_ms": 667.5,
+          "step_jev_ms": [
+            270,
+            236,
+            263
+          ],
+          "step_browser_ms": [
+            368,
+            967,
+            null
+          ],
+          "action_browser_ms": [
+            368,
+            967
+          ],
+          "launch_ms": 134,
+          "navigation_ms": 1112,
+          "setup_ms": 0,
+          "replayed_steps": 0,
+          "replay_handed_back": null,
+          "result": "wiki-search/01/result.json",
+          "suggested_verdict": null,
+          "evidence_line": "Playwright (software)",
+          "first_seen_at_step": 3,
+          "replay": {
+            "used": false,
+            "steps_in_path": null,
+            "steps_replayed": 0,
+            "handed_back": null,
+            "verified_by": null,
+            "saved": true
+          }
+        }
+      ],
+      "verdict": "pass",
+      "agreement": 1.0,
+      "outcome_agreement": 1.0,
+      "expected_matched": null,
+      "outcome_counts": {
+        "article_shown": 1
+      },
+      "verdict_counts": {
+        "pass": 1
+      },
+      "suggested_verdicts": {},
+      "medians": {
+        "wall_ms": 4240,
+        "duration_ms": 4105,
+        "jev_ms": 769,
+        "browser_ms": 1335,
+        "requests": 4,
+        "input_tokens": 34385,
+        "decision_confidence": 0.74,
+        "steps": 3,
+        "replayed_steps": 0
+      },
+      "passes": 1,
+      "replay": {
+        "full": 0,
+        "handed_back": 0,
+        "rerun_without": 0,
+        "disagreed": 0
+      },
+      "environment_failures": [],
+      "reason": null
+    }
+  },
+  "suite": {
+    "all_pass": false,
+    "verdicts": {
+      "add-remove-elements": "pass",
+      "dynamic-controls": "pass",
+      "forgot-password": "pass",
+      "load-wait": "pass",
+      "login-logout": "pass",
+      "menu-random": "bug",
+      "modal-close": "pass",
+      "notify-random": "pass",
+      "shop-add-second-item": "pass",
+      "shop-checkout-error-account": "expected",
+      "shop-checkout-problem-account": "bug",
+      "shop-checkout": "pass",
+      "table-sort-due": "expected",
+      "todo-add-filter": "pass",
+      "toolshop-search-cart": "pass",
+      "web-form-submit": "pass",
+      "wiki-search": "pass"
+    },
+    "flaky": [],
+    "undetermined": [],
+    "environment_failures": {},
+    "replay": {
+      "full": 0,
+      "handed_back": 0,
+      "rerun_without": 0,
+      "disagreed": 0,
+      "disagreed_specs": []
+    }
+  }
+}

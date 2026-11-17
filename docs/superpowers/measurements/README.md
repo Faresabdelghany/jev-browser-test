@@ -1104,3 +1104,65 @@ measurement of stability. Offline at the same commit: 191 unit tests, SELFTEST O
 
 Cost of the afternoon: **77 runner runs, 589 Jev requests** (5 leave runs 130; 50 A/B runs 265; 22 suite runs 194).
 No eval agent ran; one grader agent read two reports.
+
+## 0.8.0 (2026-11-17, evening): replay
+
+Step 1 of the speed work: a passing run saves its path, a later run walks it without asking Jev
+(`run_test.py --replay`, `scripts/replay.py`). Baseline for the whole programme: the 0.7.0 release check above, the
+22 examples on one worker in 198 s (17 public specs 85.7 s, 5 OrangeHRM specs 112.5 s), 194 requests, about 676k
+input tokens.
+
+**Protocol.** `.jev/paths` emptied; one suite with `--replay` to record (`2026-11-17-replay-suite-record-*`); then
+`ab.py --b-arg=--replay --repeat 3` (`2026-11-17-replay-ab-*-8d9c8c1`), arm A the spec as it is, arm B with the saved
+paths; then one rerun suite with `--replay` (`-suite-rerun-*`), one with `--replay --replay-verify assert`
+(`-suite-assert-*`) and one without replay (`-suite-plain-*`). Two streams side by side, the 17 public specs and the
+5 OrangeHRM specs, one run at a time in each. Commit `8d9c8c1`, `jev-1.14.0`.
+
+| 22 examples, 3 runs an arm, sums of the specs' medians | without replay | with replay |
+|---|---:|---:|
+| Jev requests | 190 | 53 |
+| input tokens | 674,879 | 171,590 |
+| Jev time | 39.1 s | 11.4 s |
+| wall-clock | 184.6 s | 150.8 s |
+
+Verdicts: the same in every run of 19 specs. Three moved in some runs, none through a saved path: `menu-random`
+(entry_missing once in each arm) and `notify-random` (3 of 3 successful in A, 1 of 3 in B) are random pages, and
+`hrm-add-employee` ended `employee_id_taken` once in arm B in a run that had no path to walk (the recording run had
+ended undetermined, so B1 was Jev's from the first step; the demo's own id collision). On the 16 specs with a path
+every replayed run cost one request, the deciding look.
+
+| per spec, medians | requests | input tokens | wall |
+|---|---:|---:|---:|
+| `shop-checkout` | 10 → 1 | 24,991 → 2,101 | 5.2 → 3.5 s |
+| `web-form-submit` | 9 → 1 | 23,844 → 1,506 | 4.9 → 2.6 s |
+| `todo-add-filter` | 8 → 1 | 15,169 → 2,384 | 4.0 → 2.5 s |
+| `toolshop-search-cart` | 11 → 1 | 46,217 → 5,266 | 8.8 → 5.6 s |
+| `load-wait` (a 5 s loader) | 7 → 1 | 8,147 → 1,114 | 8.1 → 7.5 s |
+| `hrm-leave-assign` | 23 → 1 | 133,164 → 8,581 | 27.9 → 21.4 s |
+| `hrm-admin-add-user` | 21 → 1 | 110,191 → 10,597 | 30.2 → 23.7 s |
+| `hrm-login` | 5 → 1 | 12,010 → 3,672 | 5.9 → 5.3 s |
+
+| the 22 as two suites on one worker | wall | requests | input tokens |
+|---|---:|---:|---:|
+| 0.7.0 release check | 198.2 s | 194 | 676k |
+| recording (first run with `--replay`) | 84.7 + 97.6 s | 110 + 73 | 267k + 375k |
+| rerun, `--replay` | 79.0 + 79.2 = 158.2 s | 39 + 5 | 103k + 38k |
+| rerun, `--replay --replay-verify assert` | 67.4 + 75.8 = 143.1 s | 23 + 1 | 60k + 8k |
+| without replay, same hour | 83.9 s + (152.1 s) | 110 + 78 | 267k + 418k |
+
+The OrangeHRM suite without replay ran last, in a slow stretch of the demo (one start page that never loaded, two
+flows at 40 to 45 s): its 152 s is the hour, not the option, which is why the comparison is the interleaved A/B. In
+the rerun, `notify-random` rolled its failure after one saved step, so the suite ran it again without the path
+(8.3 s for the two runs; the second passed, the page being random) and listed it under `replay.disagreed_specs`.
+
+What the time is made of after replay, `shop-checkout` (3.2 s inside the runner): launch 0.14 s, the start page
+0.60 s, the login in `setup` 0.60 s, eight replayed steps at about 165 ms each (the observation 15 ms, the action,
+the settle 105 to 130 ms), the deciding request 0.21 s. On OrangeHRM the saved steps mostly wait for the application
+(4 to 7 s a flow, `result.replay.waited_ms`): a Save that takes five seconds takes five seconds.
+
+Two things were changed on the way and are in the numbers above. The first A/B (`-ab-*-6a3cc07`: the same verdicts,
+190 → 43 requests, 193 → 161 s) showed saved steps on OrangeHRM waiting two to four seconds, or handing over, for a
+filter chip's "×" button and an icon-named button that render a moment earlier or later from run to run, and a final
+page recorded under its loading layer being waited for until the budget ran out (`hrm-add-employee` 17.7 → 21.7 s
+with replay). The fingerprint now counts only word-named controls outside table rows, and the wait for the ending
+ends when the assertions hold.
