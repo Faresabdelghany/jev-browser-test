@@ -3283,6 +3283,40 @@ class ReplayTests(unittest.TestCase):
             self.assertEqual(rp.handed_back, {"at_step": 4, "path_step": 2, "reason": "the page changed"})
             self.assertFalse(rp.active)
 
+    def test_the_path_resumes_when_jevs_decision_is_the_saved_step(self) -> None:
+        from replay import RESUME_TRIES, Replay, Tokens, describe_target, page_print
+        spec = self.spec()
+        t = Tokens(spec)
+        form = _obs([_el(0, "textbox", "First Name"), _el(1, "button", "Continue"), _el(2, "button", "Cancel")])
+        steps = [{"operation": "TYPE_TEXT", "page": page_print(form, t), "wait_ms": 0, "value_key": "first", "target": describe_target(form["elements"][0], None, t)},
+                 {"operation": "CLICK", "page": page_print(form, t), "wait_ms": 0, "target": describe_target(form["elements"][1], None, t)},
+                 {"operation": "CLICK", "page": page_print(form, t), "wait_ms": 0, "target": describe_target(form["elements"][2], None, t)}]
+        now = _obs([_el(0, "button", "Help"), _el(1, "textbox", "First Name"), _el(2, "button", "Continue"), _el(3, "button", "Cancel")])  # one more button
+        with tempfile.TemporaryDirectory() as tmp:
+            file = self.path_for(spec, tmp, steps)
+            rp = Replay(spec, file)
+            self.assertIn("fields and buttons differ", rp.decide(rp.next_step(), now)[1])
+            rp.hand_back(1, "the page's fields and buttons differ")
+            self.assertEqual((rp.cursor, rp.resume_at), (None, 0))
+            # Jev types another value into the field: not the saved step
+            self.assertFalse(rp.try_resume(1, "TYPE_TEXT", now, now["elements"][1], None, "user"))
+            # Jev types the saved value into the control the path describes: the path goes on from its second step
+            self.assertTrue(rp.try_resume(2, "TYPE_TEXT", now, now["elements"][1], None, "first"))
+            self.assertEqual((rp.cursor, rp.resume_at, rp.resumed, rp.active), (1, None, [{"at_step": 2, "path_step": 1}], True))
+            self.assertEqual(rp.handed_back["at_step"], 1)  # the account keeps where and why Jev was asked
+            # a second handover, and Jev leaves the path: after RESUME_TRIES other actions it is given up
+            rp.hand_back(3, "again")
+            for k in range(RESUME_TRIES):
+                self.assertEqual(rp.resume_at, 1)
+                self.assertFalse(rp.try_resume(4 + k, "CLICK", now, now["elements"][3], None, None))  # Cancel, not Continue
+            self.assertIsNone(rp.resume_at)
+            self.assertFalse(rp.try_resume(9, "CLICK", now, now["elements"][2], None, None))
+            # a handover at the ending (no saved step left) has nothing to resume
+            done = Replay(spec, file)
+            done.cursor = len(steps)
+            done.hand_back(5, "no declared outcome")
+            self.assertIsNone(done.resume_at)
+
     def test_a_path_is_dropped_when_the_spec_the_options_or_the_format_change(self) -> None:
         import replay
         spec = self.spec()

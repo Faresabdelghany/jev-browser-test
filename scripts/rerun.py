@@ -152,6 +152,7 @@ def summarize(report: dict, previous: dict | None = None) -> str:
     rp = report["suite"].get("replay")
     if rp:
         handed = [f"{sid} at step {(r['replay'].get('handed_back') or {}).get('at_step')}: {_line((r['replay'].get('handed_back') or {}).get('reason'), 100)}"
+                  + (" (the path resumed)" if r["replay"].get("resumed") else "")
                   for sid, sp in specs.items() for r in sp["runs"] if (r.get("replay") or {}).get("handed_back")]
         fresh = sum(1 for sp in specs.values() for r in sp["runs"] if r.get("replay") and not r["replay"].get("used") and not r.get("replay_attempt"))
         lines.append(f"Replay: {rp['full']} walked their saved path, {rp['handed_back']} handed over to Jev on the way, {fresh} had no path "

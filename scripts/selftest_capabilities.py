@@ -443,6 +443,7 @@ REPLAY_CONFIRM = {
     "moved": '<button id="more" type="button" onclick="document.getElementById(\'save\').hidden = false; this.remove()">More options</button> '
              '<button id="save" type="button" hidden>Save</button>',
     "bug": '<button id="save" type="button">Save</button>',
+    "extra": '<button id="save" type="button">Save</button>',
 }
 
 
@@ -577,6 +578,9 @@ class _Site(http.server.BaseHTTPRequestHandler):
         elif path == "/static/big.js":
             status, body, ctype = 200, "window.big = 1; /*" + "x" * 50000 + "*/", "application/javascript"
             extra["Cache-Control"] = "public, max-age=3600"
+        elif path == "/replay-form" and site.variant == "extra":
+            # the same form with one more button on it: another page to the fingerprint, the same thing to do
+            status, body, ctype = 200, REPLAY_FORM_PAGE.replace("</body>", '<button type="button">Clear form</button></body>'), "text/html; charset=utf-8"
         elif path == "/replay-confirm":
             status, body, ctype = 200, replay_confirm_page(type(self).variant), "text/html; charset=utf-8"
         elif path in ROUTES:
@@ -1268,6 +1272,22 @@ def run_checks(tmp: str | None = None) -> list[str]:
     rp = trace["result"].get("replay") or {}
     if (trace["status"], replayed(trace), (rp.get("handed_back") or {}).get("at_step"), rp.get("saved")) != ("passed", [True, True, False, False], 3, True):
         failures.append(f"O: a moved control hands over to Jev and the run still passes: {trace['status']} {replayed(trace)} {rp}")
+
+    # a page that differs from the recording in something that does not change what to do (one more button on the form):
+    # Jev is asked, chooses what the saved step says, and the path goes on; twice here, then the third step is replayed
+    site.variant = "v1"
+    go("replay-rerecord-plain", replay_spec("r7hh"), ScriptedJev(full_moves, replay_rules))
+    site.variant = "extra"
+    jev = ScriptedJev([("type", "Name", "name"), ("click", "Continue")], replay_rules)
+    trace, out = go("replay-resumed", replay_spec("r7ii"), jev)
+    rp = trace["result"].get("replay") or {}
+    if (trace["status"], replayed(trace), (rp.get("handed_back") or {}).get("at_step"), [r["path_step"] for r in rp.get("resumed") or []], jev.requests) != \
+            ("passed", [False, False, True], 1, [1, 2], 3):
+        failures.append(f"O: when Jev's own decision is the saved step the path resumes: {trace['status']} {replayed(trace)} {rp} requests={jev.requests}")
+    if "REPLAY-RESUMED" not in flags_of(trace, out) or "the path resumed" not in flags_of(trace, out) or not rp.get("saved"):
+        failures.append(f"O: the summary says the path resumed, and the path is written again with the page as it is now: {rp}")
+    site.variant = "v1"  # (the plain pages again, and their path, for the scenarios below)
+    go("replay-rerecord-plain-2", replay_spec("r7jj"), ScriptedJev(full_moves, replay_rules))
 
     # a page that now fails: the saved steps all apply, the ending is the bug, under both ways of deciding it
     site.variant = "v1"

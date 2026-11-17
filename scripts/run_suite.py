@@ -215,7 +215,7 @@ def run_once(runner: str, python: str, spec_path: str, out_dir: str, run_args: l
             rec["expected_mismatches"] = result["expected"].get("mismatches")
         if result.get("replay"):
             rp = result["replay"]
-            rec["replay"] = {k: rp.get(k) for k in ("used", "steps_in_path", "steps_replayed", "handed_back", "verified_by", "saved")}
+            rec["replay"] = {k: rp.get(k) for k in ("used", "steps_in_path", "steps_replayed", "handed_back", "resumed", "verified_by", "saved")}
     else:
         # the runner ran but wrote no readable result (a crash after the first observation): an error run
         rec["status"] = rec.get("status") or "error"
