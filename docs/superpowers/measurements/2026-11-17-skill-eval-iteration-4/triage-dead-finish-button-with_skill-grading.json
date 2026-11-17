@@ -1,9 +1,9 @@
 {
   "expectations": [
     {
-      "text": "Verdict is BUG (product defect): the Finish button on Checkout: Overview does nothing",
-      "passed": false,
-      "evidence": "Verdict: TEST_ISSUE ('not a product bug'): the overnight spec lacked the example's expect block"
+      "text": "Verdict is TEST_ISSUE, not a product bug to file and not flaky: the run reproduced the breakage documented for the error_user account (the Finish button on Checkout: Overview does nothing), and it reads red only because the spec as run has no `expect` block declaring that ending",
+      "passed": true,
+      "evidence": "'Verdict: TEST_ISSUE. It is not a product bug and it is not flaky ... its Finish button does nothing'; 'The copy of the spec that ran overnight had lost its `expect` block ... so without it the documented breakage showed up as red'"
     },
     {
       "text": "Evidence cites the divergence: the step-8 click on button 'Finish' (target confidence 0.99) followed by BLOCKED at step 9 with no page change",
@@ -36,9 +36,9 @@
       "evidence": "no stale steps, executed.ok everywhere, reconnects 0, settles quiet"
     },
     {
-      "text": "The report explicitly rules out a test problem: the earlier steps (add to cart, cart, form filled, Continue) succeeded with high confidence, so the test's actions were reasonable",
-      "passed": false,
-      "evidence": "says Jev followed the flow correctly but classifies the red as a test problem (missing expect) instead of ruling one out"
+      "text": "The report locates the test problem in the spec, not in the run: it says Jev's actions were reasonable (the flow was followed through cart, form and Continue to Finish, with no wrong click, missing value or failed action), and it compares the spec as run (trace.spec) with the skill's example of it (specs/examples/shop-checkout-error-account.json), naming the `expect` block the run's copy lacks",
+      "passed": true,
+      "evidence": "'Jev followed the flow correctly: Add to cart ..., then the cart, Checkout, the three fields, Continue and Finish', every action executed.ok; 'trace.spec ... is the same as the reference specs/examples/shop-checkout-error-account.json ... The one material difference is that the reference has \"expect\" ... and the copy that ran does not'"
     },
     {
       "text": "The report notes that the spec's own notes already describe error_user as an account whose Finish button is expected not to work (a known, expected failure) and says how that affects the ticket",
@@ -52,10 +52,10 @@
     }
   ],
   "summary": {
-    "passed": 8,
-    "failed": 2,
+    "passed": 10,
+    "failed": 0,
     "total": 10,
-    "pass_rate": 0.8
+    "pass_rate": 1.0
   },
-  "notes": "The September skill (28a5506, old_skill arm) gives the same verdict: this follows the b14d587 triage instruction (compare trace.spec with the example: a missing expect means the fix is in the spec), not the 0.3-0.5 rewording."
+  "notes": "Re-graded on 2026-11-17 after eval 1's expectations 1 and 8 were changed (evals.json iteration_notes 4): an independent grader read the saved report against the two new texts; the other eight grades are iteration 4's, unchanged. Before the change this arm scored 8/10."
 }

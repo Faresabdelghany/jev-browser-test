@@ -298,9 +298,9 @@
       "configuration": "with_skill",
       "run_number": 1,
       "result": {
-        "pass_rate": 0.8,
-        "passed": 8,
-        "failed": 2,
+        "pass_rate": 1.0,
+        "passed": 10,
+        "failed": 0,
         "total": 10,
         "time_seconds": 142.0,
         "tokens": 103072,
@@ -441,9 +441,9 @@
       "configuration": "old_skill",
       "run_number": 1,
       "result": {
-        "pass_rate": 0.8,
-        "passed": 8,
-        "failed": 2,
+        "pass_rate": 1.0,
+        "passed": 10,
+        "failed": 0,
         "total": 10,
         "time_seconds": 93.0,
         "tokens": 93352,
@@ -508,9 +508,9 @@
   "run_summary": {
     "with_skill": {
       "pass_rate": {
-        "mean": 0.9197,
-        "stddev": 0.0746,
-        "min": 0.8,
+        "mean": 0.953,
+        "stddev": 0.0516,
+        "min": 0.9,
         "max": 1.0
       },
       "time_seconds": {
@@ -528,10 +528,10 @@
     },
     "old_skill": {
       "pass_rate": {
-        "mean": 0.8,
+        "mean": 1.0,
         "stddev": 0.0,
-        "min": 0.8,
-        "max": 0.8
+        "min": 1.0,
+        "max": 1.0
       },
       "time_seconds": {
         "mean": 93.0,
@@ -547,15 +547,15 @@
       }
     },
     "delta": {
-      "pass_rate": "+0.12",
+      "pass_rate": "-0.05",
       "time_seconds": "+150.0",
       "tokens": "+11817"
     }
   },
   "notes": [
-    "The old_skill arm (SKILL.md at 28a5506, before the 0.3.0 rewording) ran eval 1 only; the aggregate delta compares 6 evals with 1 and is not meaningful. On eval 1 both arms score 8/10 with the same verdict.",
-    "Per id: 0 ticket-sort-bug 9/10, 1 triage-dead-finish-button 8/10, 2 flaky-notification 8/8, 3 slow-spa 11/11, 4 triage-unverified-save 10/11, 5 fix-loop 10/11. Ids 0-2: 25/28 (iteration 2: 28/28); ids 3-5: 31/33 (iteration 3: 30/33).",
-    "Eval 1's two misses (verdict BUG; 'rules out a test problem') follow the triage instruction added in b14d587 after iteration 2 (compare trace.spec with the skill's example: a missing expect means the fix is in the spec); the September skill gives the same verdict, so not a 0.3-0.5 regression. The eval's expectation and the skill disagree: a decision for the owner.",
+    "The old_skill arm (SKILL.md at 28a5506, before the 0.3.0 rewording) ran eval 1 only; the aggregate delta compares 6 evals with 1 and is not meaningful. On eval 1 both arms give the same verdict and, on the expectations as changed on 2026-11-17, both score 10/10 (8/10 each before the change).",
+    "Per id: 0 ticket-sort-bug 9/10, 1 triage-dead-finish-button 10/10 (8/10 on the expectations as they were when the runs were made), 2 flaky-notification 8/8, 3 slow-spa 11/11, 4 triage-unverified-save 10/11, 5 fix-loop 10/11. Ids 0-2: 27/28 (25/28 before eval 1 changed; iteration 2: 28/28); ids 3-5: 31/33 (iteration 3: 30/33).",
+    "Eval 1's two misses (verdict BUG; 'rules out a test problem') followed the triage instruction added after iteration 2 (main 534da71; an earlier version of this note named b14d587): compare trace.spec with the skill's example, a missing expect means the fix is in the spec. The September skill gives the same verdict. Decided by the owner on 2026-11-17: the rule stays and the eval changes. Expectations 1 and 8 were rewritten (evals.json iteration_notes 4) and the two saved reports re-graded on them by an independent grader, not rerun: both pass both, the old-skill report as borderline (it does not print the label TEST_ISSUE and was saved condensed).",
     "Eval 0's miss: the ticket block prints the published demo password; SKILL.md (unchanged since 28a5506) allows a site-published credential plainly, the assertion does not.",
     "Eval 4's miss (NO-EFFECT on Save not read as in flight) and eval 5's (report lacks per-evidence confidence / Expected line) are single-run omissions; the guidance for both is present in today's SKILL.md and rubric.",
     "Every subagent's harness refused report.md writes; the reports were saved by the orchestrator from the subagents' final messages (marked at the top of each file). Two agents briefly wrote a spec into the skill directory after a shell cwd reset and moved it; later briefs asked for absolute paths."

@@ -1,0 +1,22 @@
+{
+  "id": "exp-shadow-mdn-copy",
+  "comment": "A/B probe for naming controls across shadow roots (2026-11-17, ab.py --a-runner): MDN's code examples each end in a Copy button that is a web component, <mdn-button>Copy</mdn-button>, whose shadow root holds <button><slot></slot></button>. The caption is the host's own text shown through the slot, which innerText does not read, so until 0.7.0 all ten reached Jev as `button \"\"`. The flow needs one of them. A headless browser has no clipboard permission, so the page answers 'Copy failed!' where a person's browser says 'Copied!': either caption proves the click landed on the right control, which is what this spec measures (it is an experiment, not an example: do not copy the two-captions outcome into a real test).",
+  "start_url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/checkbox",
+  "goal": "Click the Copy button of one of the page's code examples, so that the button's caption changes from 'Copy' to the result of the copy.",
+  "notes": "The code examples are below the first screen, each with a Copy button at its top right corner. The Reset button belongs to the interactive example at the top and is not a Copy button.",
+  "outcomes": {
+    "copy_answered": {
+      "when": "A code example's button says 'Copied!' or 'Copy failed!' where it said 'Copy'",
+      "verdict": "pass",
+      "requires_action": true
+    },
+    "app_error": {
+      "when": "An error page, a stack trace or 'something went wrong' text is shown",
+      "verdict": "bug"
+    }
+  },
+  "budget": {
+    "max_steps": 10,
+    "max_seconds": 90
+  }
+}

@@ -1024,8 +1024,9 @@ With-skill arm on ids 0–5 at `839d2f5` (SKILL.md as of 0.5.0/0.5.1), one run e
 0 ticket-sort-bug 9/10, 1 triage-dead-finish-button 8/10, 2 flaky-notification 8/8, 3 slow-spa 11/11, 4
 triage-unverified-save 10/11, 5 fix-loop 10/11. **Ids 0–2: 25/28** (iteration 2: 28/28); **ids 3–5: 31/33**
 (iteration 3: 30/33). Eval 1 again with the September skill (`28a5506`, old_skill arm): 8/10, the same verdict
-(TEST_ISSUE: the overnight spec lacks the example's `expect`), so its two misses come from `b14d587`'s triage rule,
-written after iteration 2, not from the 0.3.0 rewording; the eval expects BUG with an expected-red note. Eval 0's miss
+(TEST_ISSUE: the overnight spec lacks the example's `expect`), so its two misses come from the triage rule written
+after iteration 2 (`534da71`; this paragraph first named `b14d587`), not from the 0.3.0 rewording; the eval expected
+BUG with an expected-red note, and was changed the same afternoon (section "0.7.0" below: 10/10 on both arms). Eval 0's miss
 is the published demo password printed in the ticket block (SKILL.md allows it, unchanged since September). Browser
 runs per eval 3 / 2 / 15 / 4 / 2 / 3 (eval 2: 5 runs of the check as written, 10 of its replacement, 5 of those wasted
 on a `no_failed_requests` assertion against the DNS-blocked beacon). Mean 104k tokens a run.
@@ -1033,3 +1034,73 @@ on a `no_failed_requests` assertion against the DNS-blocked beacon). Mean 104k t
 ### Cost of the day
 
 756 runner runs (714 under `runs/`, 42 by the eval agents), **6,344 Jev requests**, 22.9 M input tokens.
+
+## 0.7.0 (2026-11-17, afternoon): `b6dc583` → `45d681b` → `3983b35` → `ff5385e` → `83c61d5` → `554b427`
+
+The four follow-ups Fares chose from the morning's handoff: eval 1's expectation, the date placeholder, naming across
+shadow roots, the suggested verdict. `jev-1.14.0` throughout.
+
+### Eval 1: the rule stays, the eval follows it
+
+`evals/evals.json`, id 1: expectation 1 asks for TEST_ISSUE with the documented breakage and the missing `expect`
+named; expectation 8 ("rules out a test problem") asks that the report puts the test problem in the spec and not in
+the run. Prompt, files and the other eight are unchanged, so iteration 4's two saved reports were **re-graded, not
+rerun**: an independent grader agent was given the two reports and the two new texts and nothing else. With-skill
+10/10 (was 8/10); old-skill (`28a5506`) 10/10 (was 8/10), both new ones borderline there: the report does not print
+the label TEST_ISSUE ("The test is what needs fixing") and was saved condensed. Ids 0–2 are now 27/28. The grading
+files and `benchmark.*` in `2026-11-17-skill-eval-iteration-4/` carry the new grades and say what they were.
+
+### Date placeholders (`3983b35`; `2026-11-17-hrm-leave-assign-date-placeholder.md`)
+
+Five runs of `hrm-leave-assign`, 130 requests. With `${DATE+30d+workday:yyyy-dd-mm}`: pass today, and
+`low_confidence` with `RUN_DATE=2026-12-17`, because the leave fell on 18 January 2027 and the demo's Leave List
+shows the current leave year only. With `${DATE+2d+workday:yyyy-dd-mm}`: pass today twice and pass pinned to 17
+December, the day the literal date it replaces (`2026-16-12`) would have gone red. Left over: the last two to four
+days of each December. The demo's sixteen holidays and its work week were read through its API (one login, no Jev).
+
+### Naming across shadow roots (`ff5385e`; `2026-11-17-ab-shadow-names-*`)
+
+Offline first, with a Playwright probe of the observer (no Jev): the Polymer shop's list page 17 entries with 7
+unnamed → 10 with none; MDN's checkbox page 61 entries with 13 unnamed → 61 with 1 (the code editor, a
+contenteditable). Old and new observer, both with shadow DOM on, on the 15 start pages of the example and smoke
+specs, element table and assertion oracle: **identical on all 15** (none has a shadow root).
+
+A/B with `ab.py --a-runner`, arm A the runner at `3983b35` (`git archive` into `runs/old-3983b35`), arm B the
+working tree that became `ff5385e`, interleaved, the three specs in `experiments/jev-driven/`:
+
+| spec | A | B | decision confidence A / B | requests A / B |
+|---|---|---|---:|---:|
+| `shadow-mdn-copy` (needs a slot-named button) ×5 | `low_confidence` ×4, pass ×1 | pass ×5 | 0.35 / 0.89 | 5 / 3 |
+| `shadow-polymer-shop` ×5 | pass ×5 | pass ×5 | 0.98 / 0.93 | 8 / 8 |
+| `shadow-mdn-chrome` ×5 | pass ×5 | pass ×5 | 0.60 / 0.48 | 5 / 5 |
+| `shadow-mdn-chrome` ×10 (rerun, the tool's advice for a flagged delta) | pass ×10 | pass ×10 | 0.61 / 0.51 | 5 / 5 |
+
+Reading the two flagged deltas step by step. **MDN table of contents:** the one action, CLICK on the 'Browser
+compatibility' link, is 0.99–1.00 in both arms. What fell is the looks after it, where Jev answers DONE below
+`min_confidence` and the runner waits for the assertion instead: median 0.60 (0.52–0.75) in A, 0.47 (0.35–0.52) in B
+over the ten-run rerun. The ranges barely overlap, so it is the change's doing: with ten buttons now reading `Copy`
+and one `Reset`, Jev is less sure there is nothing left to do. No ending, request count or action moved. **Polymer
+shop:** the first click's target confidence is 0.97 in A (`link "Men's Outerwear Shop Now"`) and 0.80–0.85 in B
+(`link "Men's Outerwear"`): the category's image link was `link ""` and now carries the same name as its Shop Now
+link, and Jev splits between two links to the same page. The product click is 1.00 in both, on a table of 9 entries
+in place of 30.
+
+MDN's Copy button answers 'Copy failed!' in a headless browser (no clipboard permission): the spec accepts either
+caption, as an experiment, and says so. MDN's Log in link, the other slot-named control, leads to a third-party
+CAPTCHA page and was not used as a flow.
+
+### The suggested verdict (`45d681b`)
+
+Offline only: unit tests and selftest H reproduce the morning's Polymer probe (`2026-11-17-probes/polymer-off-result.json`:
+`low_confidence`, `control_not_on_page`, suggested `bug`) and now read `test_issue` with `reason.hints`.
+
+### Release check at `554b427` and cost
+
+The 22 examples once each, 1 worker (`2026-11-17-examples-suite-554b427*`): the 17 non-hrm in 86 s, every spec
+ending in its documented result (13 pass; `shop-checkout-problem-account` its `form_error` bug; the two expected-red
+specs matched; of the two random specs `menu-random` landed pass and `notify-random` bug); the five OrangeHRM specs
+5/5 in 113 s, `hrm-leave-assign` among them with the placeholder. One repeat each: a check that nothing broke, not a
+measurement of stability. Offline at the same commit: 191 unit tests, SELFTEST OK.
+
+Cost of the afternoon: **77 runner runs, 589 Jev requests** (5 leave runs 130; 50 A/B runs 265; 22 suite runs 194).
+No eval agent ran; one grader agent read two reports.
