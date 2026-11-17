@@ -162,8 +162,9 @@ before the first run and stop it when you are done.
 
 **Run once, read, then decide.** One run answers "does this flow work". Rerun only after you read the result: a
 rerun that passes tells you nothing about why the first one failed. A suite (below) answers "is it stable" with
-3–5 repeats. Never fire dozens of runs at a page to answer one question, and use at most 2 workers against a
-shared demo host: its load timeouts are then your flakiness, not the page's.
+3–5 repeats. Never fire dozens of runs at a page to answer one question, and never more than 2 runs at once against a
+shared demo host: its load timeouts are then your flakiness, not the page's. `run_suite.py` keeps that limit per
+host by itself (`--per-host`, default 2), so `--workers` can be higher when the specs are spread over several hosts.
 
 **Running a spec again that already passed: `--replay`.** A run with `--replay` (or `"replay": true` in the spec)
 that passes saves the path it took to `.jev/paths/<id>.json`: per action the operation, how to find the control again

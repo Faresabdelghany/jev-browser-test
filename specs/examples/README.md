@@ -2,9 +2,10 @@
 
 Twenty-two specs against public demo and practice sites. Each exercises a runner path the smoke specs do not. The
 credentials in the shop and HRM specs are the demo accounts the sites print on their own login pages. Run them all
-with `python scripts/run_suite.py specs/examples/*.json --repeat 3 --workers 2`, one with `python scripts/run_test.py
-specs/examples/<id>.json --headed`, and the `hrm-*` specs on one worker (`--workers 1`: the demo pre-fills the next
-Employee Id when a form opens, and two forms opened in the same second collide). the-internet is a free Heroku app: a
+with `python scripts/run_suite.py specs/examples/*.json --workers 8`, one with `python scripts/run_test.py
+specs/examples/<id>.json --headed`. The suite keeps every host at two runs at a time whatever `--workers` says, and
+the `hrm-*` specs at one (`"host_limit": 1` in each: the demo pre-fills the next Employee Id when a form opens, and
+two forms opened in the same second collide). the-internet is a free Heroku app: a
 cold start can add 25 s to a run's navigation, which the runner reports as such. The latest suite results are in
 `docs/superpowers/measurements/README.md` (on the `dev-docs` branch).
 

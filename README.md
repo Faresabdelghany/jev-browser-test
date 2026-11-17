@@ -108,7 +108,7 @@ and an admin single-page app under loading overlays. [`specs/examples/README.md`
 each one exercises and the result to expect. Run them all with:
 
 ```bash
-python scripts/run_suite.py specs/examples/*.json --repeat 3 --workers 2   # the hrm-* specs on one worker
+python scripts/run_suite.py specs/examples/*.json --workers 8              # at most 2 at once per host, 1 on the hrm demo
 python scripts/run_suite.py specs/examples/*.json --replay                 # again, walking the paths the passes saved
 ```
 

@@ -3,6 +3,42 @@
 Notable changes to the jev-browser-test skill. Versions follow [semantic versioning](https://semver.org); the version
 is the one in `.claude-plugin/plugin.json`, and merging a new one to `main` tags and releases it.
 
+## [0.12.0] - 2026-11-17
+
+Step 5 of the speed work: **parallel runs with a limit per host**.
+
+### Added
+- **`run_suite.py --per-host N`** (default 2) and **`--host-limit 'HOST=N'`** (a host name or a pattern, repeatable).
+  `--workers` is now the total over all hosts; each host sees at most its own limit at a time, so the total can rise
+  without any shared host seeing more load than before.
+- **`host_limit`** in a spec lowers the limit for its host (the smallest value among the host's specs counts; a spec
+  cannot raise it). The five OrangeHRM examples declare `"host_limit": 1`: one suite can now hold all 22 examples.
+- A scheduler in place of the thread pool's queue: a free worker takes, among the jobs whose host has room, one from
+  the host with the most work left per slot, so the host that will finish last never idles.
+- `results.json` `hosts`: per host its limit, the most runs it saw at once, and how many specs it has; `results.md`
+  names the limits in its header.
+
+### Changed
+- **`--workers N` alone no longer puts N runs on one host.** The default `--per-host 2` is what `--workers 2` used
+  to protect a shared host with. For an application you host yourself, say so: `--workers 8 --per-host 8`, or
+  `--host-limit 'app.example.com=8'` (`references/suites.md`).
+
+### Measured
+The 22 examples, once each, live `jev-1.14.0`, no other option on:
+
+| | wall-clock | most runs at once on a host |
+|---|---:|---|
+| 0.7.0, its safe setting: the 17 public specs on 2 workers, then the 5 OrangeHRM specs on 1 | 38.9 + 96.5 = 135.4 s | 2; 1 |
+| one suite, `--workers 8` | 105.4 s and 121.9 s (two runs) | 2 on the-internet and saucedemo, 1 on OrangeHRM, 1 elsewhere |
+| one suite, `--workers 4` | 121.0 s | the same limits |
+
+The whole suite now takes as long as its slowest host's queue: the five OrangeHRM specs, one at a time, were 96 s
+on their own and 105 to 122 s with the other seventeen running beside them (the 17 alone take 24 s on 6 workers).
+More workers cannot shorten that; shorter OrangeHRM flows can, which is what replay and saved sessions do. The
+runs that were not green were the usual ones (the documented bug, the two random pages, `hrm-add-employee`'s first
+field once) plus `toolshop-search-cart`, whose site answered "0 products found" for a product it has in every
+run of that hour, before and after, and `hrm-leave-assign` once (`low_confidence` after 50 s in a slow stretch).
+
 ## [0.11.0] - 2026-11-17
 
 Step 4 of the speed work: **log in once, keep the cache**. Both off by default.
