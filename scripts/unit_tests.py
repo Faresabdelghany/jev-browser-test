@@ -3699,6 +3699,15 @@ class SessionTests(unittest.TestCase):
         self.assertIsNone(page_mismatch("https://app.example/pim/emp/12?tab=a", "https://app.example/pim/emp/15?tab=b"))
         self.assertIn("answered with https://app.example/auth/login", page_mismatch("https://app.example/dashboard/index", "https://app.example/auth/login"))
 
+    def test_what_the_probe_of_an_expired_session_saw_is_forgotten(self) -> None:
+        from run_test import Diagnostics
+        d = Diagnostics([])
+        d._add("http_errors", {"status": 500, "method": "GET", "url": "https://app.example/home", "resource": "document"})
+        d._add("console_errors", {"text": "denied"})
+        self.assertTrue(d.any() and d.server_errors == 1)
+        d.reset()
+        self.assertEqual((d.any(), d.server_errors, d.take(1), d.for_trace()["counts"]["http_errors"]), (False, 0, {}, 0))
+
     def test_local_storage_is_put_back_per_origin_once_per_tab(self) -> None:
         from session import local_storage_script
         self.assertIsNone(local_storage_script({"cookies": [], "origins": []}))

@@ -53,7 +53,10 @@ Step 4 of the speed work: **log in once, keep the cache**. Both off by default.
   not loaded twice) must answer at its own URL shape and show what the login waited for; otherwise the session is
   deleted and the run logs in. The key covers the site's origin, the login as executed and the device; file names
   are HMACs under a per-directory key; the file holds cookies and localStorage, never what was typed.
-  `"session": "never"` opts a spec out. `result.session`, `timing.login_ms`.
+  `"session": "never"` opts a spec out. `result.session`, `timing.login_ms`. What the application says to a session
+  it no longer accepts (its "log in first" alert, its 404) is dropped with the session and never reaches the run:
+  live, the shop's ten-minute cookie ran out between two suites, the alert reached Jev as an announcement on the
+  first step after the fresh login, and two runs ended blocked on an application error that was not one.
 - **An HTTP cache that outlives the run** (`--http-cache`, `browser.http_cache`). The browser runs on a profile
   under `.jev/http-cache/` from which everything but the cache folders is removed before each launch: the HTTP
   cache carries over, cookies, storage and service workers do not. One slot per concurrent browser.
