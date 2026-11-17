@@ -44,6 +44,7 @@ secrets out of any model that does not need them, and turns a missing value into
 | `scripts/replay.py` | The saved path of a passing run (`--replay`): its format and where it is kept, the tokens that stand for a run's values, the page fingerprint, how a saved target is found again, when a path is dropped. Pure; the loop in `run_test.py` asks it for a decision where it would ask Jev |
 | `scripts/summarize_trace.py` | Summary table, `--step N` dump, `--result` |
 | `scripts/run_suite.py` | Specs × repeats as `run_test.py` subprocesses on a thread pool; `aggregate_spec` (outcome distribution, agreement, unanimous verdict or `flaky`), `suite_verdict`, `results.json` + `results.md`; exit 0 iff all unanimously pass |
+| `scripts/rerun.py` | The one command for running existing specs again: collects specs from files, folders or an earlier suite, calls `run_suite` with replay and sessions on, prints `summarize(report, previous)` (a few lines: green or what is not, what changed since the last rerun), remembers the verdicts under `.jev/reruns/` |
 | `scripts/report.py` | `render_report(trace, result, images)`: one self-contained `report.html` per run, screenshots inline as base64; given a suite directory, `suite_run_dirs` resolves the relative paths of its `results.json` and renders every run that has a trace |
 | `scripts/bench.py` | Runs a spec N times as subprocesses and reports medians; every number in the docs comes from its `--json` output |
 | `scripts/selftest.py` | Offline end-to-end test with local pages and a rule-based fake Jev |

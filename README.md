@@ -109,7 +109,7 @@ each one exercises and the result to expect. Run them all with:
 
 ```bash
 python scripts/run_suite.py specs/examples/*.json --workers 8              # at most 2 at once per host, 1 on the hrm demo
-python scripts/run_suite.py specs/examples/*.json --replay                 # again, walking the paths the passes saved
+python scripts/rerun.py specs/examples/                                    # again: saved paths, saved logins, a few lines out
 ```
 
 Keep specs for a private application under `specs/local/` (git-ignored).
@@ -127,7 +127,7 @@ and the 22 examples from 190 requests to 53 (the rest are specs that do not end 
 
 ```
 SKILL.md          the instructions Claude loads
-scripts/          scaffold, run_test, run_suite, report, summarize_trace, spec, bench, ab, junit, selftest
+scripts/          scaffold, run_test, run_suite, rerun, report, summarize_trace, spec, bench, ab, junit, selftest
                   (with selftest_capabilities), unit_tests; observe / policy / rules / replay / session / jev_client
                   are the runner's parts
 references/       spec-format, trace-format, verdict-rubric, suites, troubleshooting, runner-design

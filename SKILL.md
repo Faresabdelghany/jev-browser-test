@@ -30,6 +30,10 @@ evidence.
 The loop: **ticket or flow → Claude writes the spec → Jev runs it → Claude judges → if BUG, Claude fixes the code
 → the same spec re-runs green → PR.** Steps 1–4 get you to the verdict; step 5 produces the value.
 
+**Asked to run specs that already exist again** ("run the suite again", "is it still green", "did anything
+change")? That is one command and a few lines of reading: go straight to "Running specs again" below. Nothing else
+in this file is needed for it.
+
 ## When Jev earns its place
 
 Use plain Playwright (a `setup` step) for anything with a stable selector that is *not* what you are testing:
@@ -274,10 +278,43 @@ Launch it with the Bash tool's `run_in_background` and do nothing until the comp
 for a spec that is `undetermined` or `flaky`. `--junit runs/junit.xml` adds a JUnit report for a CI dashboard. `references/suites.md` says how to read agreement and flakiness, which
 kind of flaky it is (environment or an app that varies by design), and how to get a `report.html` for a human.
 
-A suite you run again and again takes `--replay`: every spec walks the path its last passing run saved and asks Jev
-only about the ending (one request instead of five to twenty-five), and a run that ends red after saved steps is run
-once more without the path by the suite itself, so a red in `results.md` is always a run in which Jev chose every
+## Running specs again: one command, a few lines
+
+```bash
+python $SKILL/scripts/rerun.py specs/                       # a folder of specs, spec files, or an earlier suite's folder
+```
+
+Run it in the foreground for a handful of specs (it takes about as long as the slowest host's specs one after
+another), in the background for more. It runs every spec once with what makes a rerun cheap: each spec's saved
+path (the steps of its last passing run without asking Jev, then one request for the ending), a saved login for
+specs that share one, and several runs at once with every host inside its limit. A run that ends red after saved
+steps is run again without the path by the command itself, so a red here is always a run in which Jev chose every
 step.
+
+**Read its output and nothing else.** It prints a few lines and sets the exit code (0: every spec green):
+
+```
+GREEN: 8 of 8 specs in 14 s (4 workers, 17 Jev requests). Nothing to read.
+Same verdicts as the last rerun (2026-11-17 15:02).
+```
+
+or one line per spec that is not green (verdict, outcome, the page's own line, its run folder) and what changed
+since the last rerun of the same specs. Then:
+
+- **Everything green: report that and stop.** Do not open `results.md`, a `result.json`, a trace or a screenshot of
+  a green spec, and do not run anything again "to be sure". `GREEN` counts a spec with `expect` that ended in its
+  declared result; say how many of those there are only if the user would otherwise read them as passes of the
+  flow.
+- **Something not green:** read `result.json` in the folder the line names, then the trace only if that does not
+  settle it, and judge it as in step 4. Leave the green specs alone.
+- The first rerun of a set of specs has no "last rerun" to compare with; compare with what the user tells you, or
+  with the earlier suite's `results.md` if they point at one, and only for the specs that are not green now.
+
+`--workers`, `--per-host` and `--host-limit` as for `run_suite.py`; `--http-cache` and
+`--run-arg=--settle=network` make it faster still on fast hosts; `--replay-verify assert` lets specs with
+assertions pass on them alone (no request at all for a green spec); `--no-replay` when every step should be Jev's
+again; `--repeat 3` to measure stability. A spec that was edited since its last pass, or that has never passed, has
+no path yet: its run is an ordinary one and saves the path for next time.
 
 ## What makes a run fast (and what does not)
 
@@ -322,7 +359,8 @@ keys or two same-named elements wants keys named like the app's labels, or a `no
 ## Files
 
 - `scripts/scaffold.py` (URL + goal + data → a valid spec to edit), `run_test.py` (one spec → `result.json` +
-  `trace.json`), `run_suite.py` (specs × repeats → `results.json` + `results.md`), `report.py` (a run →
+  `trace.json`), `run_suite.py` (specs × repeats → `results.json` + `results.md`), `rerun.py` (existing specs again:
+  a few lines and an exit code), `report.py` (a run →
   `report.html`), `spec.py` (validation), `summarize_trace.py`, `selftest.py` (offline check, with
   `selftest_capabilities.py`), `unit_tests.py`, `bench.py` (N repeats, medians), `ab.py` (the specs with and without
   an option, or on two versions of the runner, interleaved), `junit.py`, and the pieces
