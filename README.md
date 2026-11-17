@@ -88,8 +88,11 @@ A spec can also declare, each in a line or two ([`references/spec-format.md`](re
 | | |
 |---|---|
 | `teardown` | scripted steps after the verdict, whatever it was: delete what the run created |
-| `setup` steps `upload`, `hover`, `drag`, `"frame"` | the interactions Jev is not offered, scripted; selectors reach into shadow DOM |
+| `setup` steps `upload`, `hover`, `drag`, `"frame"` | interactions scripted as preconditions; selectors reach into shadow DOM |
 | `observation.frames` | iframes whose controls Jev may use: a card form, an embedded widget |
+| `observation.shadow_dom` | Jev sees and uses the controls inside web components |
+| `files` | files Jev may attach to a file field, hidden ones included |
+| `extra_operations: ["HOVER"]` | Jev may hover to open a menu that only shows on hover |
 | `browser.device` | a phone or tablet: `"iPhone 13"`, `"Pixel 7"` (also `--device`) |
 | `browser.follow_new_tabs` | carry on in the tab a click opens |
 | `no_page_errors`, `no_failed_requests` | assertions on what the browser recorded: no uncaught exception, no 5xx, no failed request |
@@ -121,7 +124,7 @@ driving the same flow step by step with a snapshot tool. Every number, and how i
 
 ```
 SKILL.md          the instructions Claude loads
-scripts/          scaffold, run_test, run_suite, report, summarize_trace, spec, bench, junit, selftest
+scripts/          scaffold, run_test, run_suite, report, summarize_trace, spec, bench, ab, junit, selftest
                   (with selftest_capabilities), unit_tests; observe / policy / rules / jev_client are the runner's parts
 references/       spec-format, trace-format, verdict-rubric, suites, troubleshooting, runner-design
 specs/            two smoke specs; examples/ (public sites), compare/ (the Jev vs Playwright-CLI comparison)
@@ -138,6 +141,9 @@ CI runs both on every push and pull request. The design notes, session handoffs,
 evals live on the [`dev-docs`](https://github.com/Faresabdelghany/jev-browser-test/tree/dev-docs) branch, so that an
 install carries only the skill; check it out beside the code with
 `git fetch origin dev-docs && git worktree add dev origin/dev-docs -B dev-docs` (`dev/` is git-ignored here).
+`.github/workflows/live.yml` runs a plan against the real Jev API on GitHub's runners when a `live/<name>` branch is
+pushed (it needs the repository secret `TYPESAFE_API_KEY`) and publishes the results to the `live-results` branch;
+`scripts/ab.py` compares a set of specs with and without a runner option.
 To release, bump `version` in `.claude-plugin/plugin.json` and `marketplace.json` and add its section to
 [`CHANGELOG.md`](CHANGELOG.md): merging to `main` tags `v<version>` and publishes the release.
 

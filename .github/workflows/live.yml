@@ -1,0 +1,90 @@
+name: Live
+
+# Runs against the real Jev API and the public demo sites, on GitHub's runners: the one check CI cannot make.
+# What it runs is the plan in .github/live/plan.sh of the branch that started it, so a measurement is a branch:
+#
+#   git checkout -b live/hover-ab && edit .github/live/plan.sh && git push origin live/hover-ab
+#
+# It needs the repository secret TYPESAFE_API_KEY (Settings > Secrets and variables > Actions). Without it the job
+# says so and ends having run nothing. Summaries go to the job summary and to the `live-results` branch
+# (runs/<run number>-<branch>/), with the trace and pictures of every run that was not green; everything else is in
+# the run's artifact for 14 days. One live run at a time: the demo hosts are shared.
+on:
+  workflow_dispatch:
+  push:
+    branches: ["live/**"]
+
+permissions:
+  contents: write   # to push the results to the live-results branch
+
+concurrency:
+  group: live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+      OUT: ${{ github.workspace }}/runs/live          # everything the plan writes
+      PUBLISH: ${{ github.workspace }}/runs/publish   # what goes to the live-results branch
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is the key there?
+        id: key
+        run: |
+          if [ -z "$TYPESAFE_API_KEY" ]; then
+            echo "::notice::No TYPESAFE_API_KEY secret in this repository: nothing was run. Add it under Settings > Secrets and variables > Actions, then run this again."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.key.outputs.ready == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+      - name: Install
+        if: steps.key.outputs.ready == 'true'
+        run: |
+          pip install -r scripts/requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Run the plan
+        if: steps.key.outputs.ready == 'true'
+        run: |
+          mkdir -p "$OUT" "$PUBLISH"
+          bash .github/live/plan.sh
+      - name: Collect what gets published
+        if: always() && steps.key.outputs.ready == 'true'
+        run: |
+          python .github/live/publish.py "$OUT" "$PUBLISH"
+          cat "$PUBLISH"/SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.key.outputs.ready == 'true'
+        with:
+          name: live-${{ github.run_number }}
+          path: runs/live
+          retention-days: 14
+      - name: Push the results to the live-results branch
+        if: always() && steps.key.outputs.ready == 'true'
+        run: |
+          label=$(echo "${GITHUB_REF_NAME#live/}" | tr -c 'A-Za-z0-9._-' '-' | sed 's/-*$//')
+          dest="runs/$(printf '%04d' "$GITHUB_RUN_NUMBER")-${label:-manual}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch --depth 1 origin live-results 2>/dev/null; then
+            git worktree add -B live-results "$RUNNER_TEMP/results" FETCH_HEAD
+          else
+            git worktree add --detach "$RUNNER_TEMP/results"
+            git -C "$RUNNER_TEMP/results" checkout --orphan live-results
+            git -C "$RUNNER_TEMP/results" rm -rfq .
+            printf '# Live results\n\nWritten by the Live workflow: one folder per run, `runs/<run number>-<branch>/`.\n' > "$RUNNER_TEMP/results/README.md"
+          fi
+          mkdir -p "$RUNNER_TEMP/results/$dest"
+          cp -r "$PUBLISH"/. "$RUNNER_TEMP/results/$dest/"
+          cd "$RUNNER_TEMP/results"
+          git add -A
+          git commit -q -m "Live run $GITHUB_RUN_NUMBER ($GITHUB_REF_NAME at ${GITHUB_SHA::7})"
+          git push origin live-results

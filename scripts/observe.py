@@ -18,6 +18,54 @@ import hashlib
 # move boxes without changing what an element means, and Playwright re-resolves geometry at click time.
 JS_HELPERS = r"""
   const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+  // Shadow DOM (spec observation.shadow_dom). Every script that includes these helpers declares `deep` first. With it,
+  // the queries, the hit test and the text walks below also look inside the page's open shadow roots (a web
+  // component's own tree); without it each of them is the document-only call it always was, so a spec that does not
+  // ask for shadow DOM gets the observation it always got. The roots are found once per script run (the page cannot
+  // change while a script runs), outer before inner.
+  let rootsFound = null;
+  const shadowRoots = () => {
+    if (rootsFound) return rootsFound;
+    rootsFound = [];
+    const scan = root => { for (const el of root.querySelectorAll('*')) if (el.shadowRoot) { rootsFound.push(el.shadowRoot); scan(el.shadowRoot); } };
+    scan(document);
+    return rootsFound;
+  };
+  const qsa = sel => {
+    if (!deep) return document.querySelectorAll(sel);
+    const out = Array.from(document.querySelectorAll(sel));
+    for (const root of shadowRoots()) for (const el of root.querySelectorAll(sel)) out.push(el);
+    return out;
+  };
+  // Is `a` the node `b` or one of its ancestors, stepping from a shadow root up to its host?
+  const holds = (a, b) => { for (let n = b; n; n = n.parentNode || n.host) if (n === a) return true; return false; };
+  // The element painted at a point. document.elementFromPoint stops at the outermost shadow host; with `deep` the
+  // point is asked again inside each shadow root on the way down, so a button inside a component is found as itself.
+  const topAt = (x, y) => {
+    let top = document.elementFromPoint(x, y);
+    while (deep && top && top.shadowRoot) {
+      const inner = top.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === top) break;
+      top = inner;
+    }
+    return top;
+  };
+  // The text nodes under `root` in document order, as a next() function. With `deep`, a host's shadow tree is read
+  // where the host stands (its unslotted light children have no box and drop out at the callers' size test).
+  const textWalk = root => {
+    if (!deep) { const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); return () => walker.nextNode(); }
+    const both = NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT;
+    const stack = [document.createTreeWalker(root, both)];
+    return () => {
+      while (stack.length) {
+        const n = stack[stack.length - 1].nextNode();
+        if (!n) { stack.pop(); continue; }
+        if (n.nodeType === 3) return n;
+        if (n.shadowRoot) stack.push(document.createTreeWalker(n.shadowRoot, both));
+      }
+      return null;
+    };
+  };
   // FNV-1a over UTF-16 code units, as 8 hex chars: small, deterministic, good enough to spot a changed row/form.
   const strHash = s => {
     let h = 0x811c9dc5;
@@ -28,12 +76,14 @@ JS_HELPERS = r"""
   const BUTTON_INPUTS = ['submit', 'button', 'reset', 'image'];  // their .value is a caption, not content
   // The current content of a field, for the table and the fingerprint alike: text-like inputs (password
   // shown as "(filled)"), textareas, the selected option of a select, the text of a contenteditable.
-  // Buttons, checkboxes, radios and file inputs have no content.
+  // A file input's content is the file chosen for it, "(file: cv.pdf)", once there is one. Buttons, checkboxes and
+  // radios have no content.
   const valueOf = el => {
     const tag = (el.tagName || '').toLowerCase();
     const type = (el.getAttribute('type') || '').toLowerCase();
     if (tag === 'input') {
-      if (type === 'checkbox' || type === 'radio' || type === 'file' || BUTTON_INPUTS.includes(type)) return '';
+      if (type === 'file') return el.files && el.files.length ? ('(file: ' + el.files[0].name + ')').slice(0, 40) : '';
+      if (type === 'checkbox' || type === 'radio' || BUTTON_INPUTS.includes(type)) return '';
       return type === 'password' ? (el.value ? '(filled)' : '') : String(el.value || '').slice(0, 40);
     }
     if (tag === 'textarea') return String(el.value || '').slice(0, 40);
@@ -63,8 +113,9 @@ JS_HELPERS = r"""
   const coveredAt = (el, r) => {
     const cx = Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2));
     const cy = Math.min(window.innerHeight - 1, Math.max(0, r.top + r.height / 2));
-    const top = document.elementFromPoint(cx, cy);
-    if (!top || top === el || el.contains(top) || top.contains(el)) return null;
+    const top = topAt(cx, cy);
+    if (!top || top === el) return null;
+    if (deep ? (holds(el, top) || holds(top, el)) : (el.contains(top) || top.contains(el))) return null;
     const tag = el.tagName.toLowerCase();
     const formControl = tag === 'input' || tag === 'select' || tag === 'textarea';
     const lbl = top.closest('label');
@@ -81,7 +132,7 @@ JS_HELPERS = r"""
     && LOADING_OPTION.test(clean(el.innerText || el.textContent).slice(0, 40));
   const loadingNow = () => {
     let n = 0;
-    for (const el of document.querySelectorAll('[role="option"]')) {
+    for (const el of qsa('[role="option"]')) {
       if (!el.isConnected || !loadingOption(el)) continue;
       const r = el.getBoundingClientRect();
       if (r.width >= 2 && r.height >= 2) n++;
@@ -90,7 +141,7 @@ JS_HELPERS = r"""
   };
   const coveredNow = () => {
     let n = 0;
-    for (const el of document.querySelectorAll('[data-jev-covered]')) {
+    for (const el of qsa('[data-jev-covered]')) {
       if (!el.isConnected) continue;
       const r = el.getBoundingClientRect();
       if (r.width >= 2 && r.height >= 2 && coveredAt(el, r)) n++;
@@ -113,10 +164,10 @@ JS_HELPERS = r"""
     if (!document.body) return '';
     const inView = [], rest = [];
     let inLen = 0;
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const nextText = textWalk(document.body);
     const range = document.createRange();
     let node;
-    while (inLen < maxChars && (node = walker.nextNode())) {
+    while (inLen < maxChars && (node = nextText())) {
       const raw = node.textContent;
       if (!raw || !raw.trim()) continue;
       const parent = node.parentElement;
@@ -140,13 +191,13 @@ JS_HELPERS = r"""
   };
 """
 
-OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
+OBSERVE_JS = "(args) => {\n  const deep = !!args.shadowDom;\n" + JS_HELPERS + r"""
   // wholeDocument: the assertion oracle (run_test.check_assertions). Every rendered control on the page,
   // wherever it sits, with no viewport or hit-test gates and no cursor:pointer scan, and without touching
   // the numbering Jev saw. The default is the table Jev chooses from: viewport, hit-tested, cursor scan.
   const { maxElements, maxTextChars, wholeDocument } = args;
   const idxOffset = args.idxOffset || 0;  // a child frame's elements are numbered after the page's own (observe.add_frames)
-  if (!wholeDocument) document.querySelectorAll('[data-jev-idx], [data-jev-covered]').forEach(e => {
+  if (!wholeDocument) qsa('[data-jev-idx], [data-jev-covered]').forEach(e => {
     e.removeAttribute('data-jev-idx'); e.removeAttribute('data-jev-covered'); });
   const SEL = [
     'a[href]', 'button', 'input', 'select', 'textarea', 'summary',
@@ -258,7 +309,8 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
     if (el.labels && el.labels.length) labelText = clean(el.labels[0].innerText);
     if (!labelText) {  // aria-labelledby: the named elements' text, in order
       const by = el.getAttribute('aria-labelledby');
-      if (by) labelText = clean(by.split(/\s+/).map(id => (document.getElementById(id) || {}).innerText || '').join(' '));
+      const scope = deep && el.getRootNode().getElementById ? el.getRootNode() : document;  // ids are scoped to their shadow root
+      if (by) labelText = clean(by.split(/\s+/).map(id => (scope.getElementById(id) || {}).innerText || '').join(' '));
     }
     const caption = tag === 'input' && BUTTON_INPUTS.includes(type) ? el.value : '';
     let name = clean(
@@ -306,11 +358,30 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
 
   // Pass 1: semantic controls (tags, ARIA roles, explicit handlers). The assertion oracle also takes every
   // element with an explicit role (alert, status, dialog, heading, ...): not actionable, but assertable.
-  for (const el of document.querySelectorAll(wholeDocument ? SEL + ',[role]' : SEL)) describe(el, 'semantic');
+  for (const el of qsa(wholeDocument ? SEL + ',[role]' : SEL)) describe(el, 'semantic');
+
+  // Pass 1b (only when the spec declares `files`): a file input the page hides behind a styled button (display: none,
+  // no box) is still the control an upload goes into, and setting its files needs no click. Offered as a `file`
+  // element named by its label, marked hidden, placed where its nearest rendered ancestor is.
+  if (args.fileInputs && !wholeDocument) for (const el of qsa('input[type="file"]')) {
+    if (seen.has(el) || el.disabled) continue;
+    let box = el.parentElement;
+    while (box && box !== document.body && box.getBoundingClientRect().width < 2) box = box.parentElement;
+    const r = (box || el).getBoundingClientRect();
+    const lab = el.labels && el.labels.length ? clean(el.labels[0].innerText) : '';
+    seen.add(el);
+    candidates.push({
+      el, role: 'file', tag: 'input', type: 'file',
+      name: clean(el.getAttribute('aria-label') || lab || el.getAttribute('title') || el.getAttribute('name') || el.id || 'file').slice(0, 80),
+      value: valueOf(el) || undefined, via: 'semantic', hidden: true, disabled: false,
+      context: el.getAttribute('accept') ? ('accepts ' + el.getAttribute('accept')).slice(0, 70) : undefined,
+      x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)
+    });
+  }
 
   // Pass 2: a <label> whose checkbox/radio is parked offscreen (clip/left:-9999px) is the only thing
   // a human can click for it. Offer the label, described as the control.
-  for (const lbl of document.querySelectorAll('label')) {
+  for (const lbl of qsa('label')) {
     const c = lbl.control;
     if (!c || seen.has(c) || seen.has(lbl)) continue;
     const t = (c.getAttribute('type') || '').toLowerCase();
@@ -325,12 +396,15 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
   // clickable <div> (an avatar menu, a card, a table row) has no role, no tabindex and no onclick
   // attribute -- the only visible hint is `cursor: pointer`. Because `cursor` is inherited, keep the
   // OUTERMOST element of each pointer chain, and skip anything nested inside a pass-1 control.
-  let shadowHosts = 0;  // elements with an open shadow root: the controls inside are not in the table (a hint for the reader)
+  let shadowHosts = 0;  // without `deep`: elements whose open shadow root holds controls that are not in the table (a hint for the reader)
   if (document.body && !wholeDocument) {
     let scanned = 0;
-    for (const el of document.body.querySelectorAll('*')) {
+    const everything = deep
+      ? Array.from(document.body.querySelectorAll('*')).concat(...shadowRoots().map(root => Array.from(root.querySelectorAll('*'))))
+      : document.body.querySelectorAll('*');
+    for (const el of everything) {
       if (++scanned > 8000) break;
-      if (el.shadowRoot && el.shadowRoot.querySelector(SEL)) shadowHosts++;
+      if (!deep && el.shadowRoot && el.shadowRoot.querySelector(SEL)) shadowHosts++;
       if (el.ownerSVGElement) continue;                 // svg internals: the <svg> root is enough
       const tag = el.tagName.toLowerCase();
       if (tag === 'script' || tag === 'style' || tag === 'template' || tag === 'noscript') continue;
@@ -451,7 +525,8 @@ OBSERVE_JS = "(args) => {\n" + JS_HELPERS + r"""
 # visible text, grouped by block (a paragraph, a cell, a list item, a toast), with the lines that intersect the
 # viewport FIRST, then the rest, the same visibility rules as visibleText, cut to maxLines. body.innerText from
 # the top would let 200 lines of navigation and table rows crowd out the flash message at the bottom.
-LINES_JS = "(maxLines) => {\n" + JS_HELPERS + r"""
+LINES_JS = ("(arg) => {\n  const maxLines = typeof arg === 'number' ? arg : arg.maxLines;\n"
+            "  const deep = typeof arg === 'object' && !!arg.deep;\n" + JS_HELPERS + r"""
   if (!document.body) return [];
   const INLINE = new Set(['inline', 'inline-block', 'inline-flex', 'inline-grid', 'contents', 'ruby']);
   const blockOf = el => {
@@ -459,7 +534,7 @@ LINES_JS = "(maxLines) => {\n" + JS_HELPERS + r"""
     while (e && e !== document.body) { if (!INLINE.has(getComputedStyle(e).display)) return e; e = e.parentElement; }
     return document.body;
   };
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const nextText = textWalk(document.body);
   const range = document.createRange();
   const inView = [], rest = [];
   let node, cur = null, parts = [], seenInView = false;
@@ -468,7 +543,7 @@ LINES_JS = "(maxLines) => {\n" + JS_HELPERS + r"""
     if (t) (seenInView ? inView : rest).push(t);
     parts = []; seenInView = false;
   };
-  while ((node = walker.nextNode())) {
+  while ((node = nextText())) {
     const raw = node.textContent;
     if (!raw || !raw.trim()) continue;
     const parent = node.parentElement;
@@ -487,7 +562,7 @@ LINES_JS = "(maxLines) => {\n" + JS_HELPERS + r"""
   flush();
   return inView.concat(rest).slice(0, maxLines);
 }
-"""
+""")
 
 # Announcements: toasts and ARIA live messages that appear between two observations. A toast that fades before the
 # next observation is otherwise lost, and Jev then guesses from history; live, a Leave flow's decisive facts
@@ -561,9 +636,9 @@ ANNOUNCE_INIT_JS = r"""
 """.replace("__ANNOUNCE__", ANNOUNCE_FUNCTION)
 
 # Cheap re-read of what the observation recorded, without re-tagging: the nodes still carry data-jev-idx.
-FINGERPRINT_JS = "() => {\n" + JS_HELPERS + r"""
+FINGERPRINT_JS = "(deepArg) => {\n  const deep = !!deepArg;\n" + JS_HELPERS + r"""
   const nodes = {};
-  for (const el of document.querySelectorAll('[data-jev-idx]')) nodes[el.getAttribute('data-jev-idx')] = nodeTuple(el);
+  for (const el of qsa('[data-jev-idx]')) nodes[el.getAttribute('data-jev-idx')] = nodeTuple(el);
   return { url: location.href, title: document.title, text_head: visibleText(500), nodes, covered: coveredNow(), loading: loadingNow() };
 }
 """
@@ -614,7 +689,7 @@ INDICATORS_JS = r"""() => {
 
 TUPLE_FIELDS = ("connected", "visible", "value", "checked", "disabled", "context")
 GUARD_SKIPPED = {"SCROLL_DOWN", "SCROLL_UP", "WAIT"}
-TARGET_OPERATIONS = {"CLICK", "TYPE_TEXT", "SELECT"}
+TARGET_OPERATIONS = {"CLICK", "TYPE_TEXT", "SELECT", "HOVER", "UPLOAD_FILE"}
 
 
 FRAME_TABLE_ROOM = 250  # a Choice takes at most 255 options: the page's own elements and the frames' share this
@@ -637,7 +712,7 @@ def frame_of(page, selector: str):
     return (frame, box, " ".join(label.split())[:40]), None
 
 
-def add_frames(page, obs: dict, selectors: list[str], max_elements: int, max_text_chars: int) -> None:
+def add_frames(page, obs: dict, selectors: list[str], max_elements: int, max_text_chars: int, options: dict | None = None) -> None:
     """Append the controls of the listed <iframe>s to the observation (spec `observation.frames`).
 
     Each frame is observed by the same script as the page, numbered on from the page's own elements, so an index
@@ -663,7 +738,7 @@ def add_frames(page, obs: dict, selectors: list[str], max_elements: int, max_tex
                 rec["skipped"] = "the element table is full"
                 continue
             sub = frame.evaluate(OBSERVE_JS, {"maxElements": min(max_elements, room), "maxTextChars": max_text_chars,
-                                              "wholeDocument": False, "idxOffset": base})
+                                              "wholeDocument": False, "idxOffset": base, **(options or {})})
         except Exception as e:  # noqa: BLE001 - a frame navigating or detaching mid-read: nothing from it this time
             rec["skipped"] = f"{type(e).__name__}: {str(e).splitlines()[0][:120]}"
             continue
@@ -689,7 +764,7 @@ def add_frames(page, obs: dict, selectors: list[str], max_elements: int, max_tex
 
 
 def observe(page, max_elements: int = 200, max_text_chars: int = 4000, whole_document: bool = False,
-            frames: list[str] | None = None) -> dict:
+            frames: list[str] | None = None, shadow_dom: bool = False, file_inputs: bool = False) -> dict:
     """Run the observation script on the current page and return the observation dict.
 
     Besides the element table it carries `fingerprint`: url, title, the first 500 chars of visible text and
@@ -697,12 +772,17 @@ def observe(page, max_elements: int = 200, max_text_chars: int = 4000, whole_doc
     right before acting. `whole_document=True` is the assertion oracle (run_test.check_assertions): every
     rendered control on the page, not only what is in the viewport and under the pointer, and the nodes
     Jev saw keep their numbering. `frames` lists the <iframe>s whose controls join the table (add_frames);
-    without it only the main frame is observed.
+    without it only the main frame is observed. `shadow_dom` (spec observation.shadow_dom) also looks inside open
+    shadow roots: their controls join the table, their text the visible text, and the fingerprint is marked `deep`
+    so that every re-read looks there too. `file_inputs` (a spec with `files`) offers file inputs the page hides.
     """
+    options = {"shadowDom": bool(shadow_dom), "fileInputs": bool(file_inputs)}
     obs = page.evaluate(OBSERVE_JS, {"maxElements": max_elements, "maxTextChars": max_text_chars,
-                                     "wholeDocument": whole_document})
+                                     "wholeDocument": whole_document, **options})
+    if shadow_dom:
+        obs["fingerprint"]["deep"] = True
     if frames and not whole_document:
-        add_frames(page, obs, frames, max_elements, max_text_chars)
+        add_frames(page, obs, frames, max_elements, max_text_chars, options)
     s = obs["scroll"]
     obs["can_scroll_down"] = s["y"] + s["viewport"] < s["height"] - 8
     obs["can_scroll_up"] = s["y"] > 8
@@ -777,18 +857,21 @@ def mask_secrets(obs: dict, values: list[str]) -> dict:
     return obs
 
 
-def fingerprint(page, frames: list[str] | None = None) -> dict:
+def fingerprint(page, frames: list[str] | None = None, deep: bool = False) -> dict:
     """The current identity/meaning fingerprint of the tagged nodes (same functions as observe()). `frames` is the
     observation's `fingerprint["frames"]`: the <iframe>s that contributed elements are re-read the same way, so a
     control inside a frame goes stale like any other; a frame that is gone contributes nothing, and its nodes then
-    read as no longer on the page."""
-    fp = page.evaluate(FINGERPRINT_JS)
+    read as no longer on the page. `deep` is the observation's `fingerprint["deep"]`: the tagged nodes inside shadow
+    roots are re-read as well (and the text head and the covered count look there), as the observation did."""
+    fp = page.evaluate(FINGERPRINT_JS, bool(deep))
+    if deep:
+        fp["deep"] = True
     for sel in frames or []:
         try:
             found, _ = frame_of(page, sel)
             if found is None:
                 continue
-            sub = found[0].evaluate(FINGERPRINT_JS)
+            sub = found[0].evaluate(FINGERPRINT_JS, bool(deep))
         except Exception:  # noqa: BLE001 - the frame navigated or detached: its nodes are missing, which is the answer
             continue
         fp["nodes"].update(sub["nodes"])
@@ -891,6 +974,8 @@ def element_label(e: dict) -> str:
         parts.append("DISABLED")
     if e.get("below"):
         parts.append("(below the fold)")  # offered although below the first screen; the click scrolls to it
+    if e.get("hidden"):
+        parts.append("(hidden file field)")  # a file input the page hides behind a button: offered for UPLOAD_FILE only
     return " ".join(parts)
 
 

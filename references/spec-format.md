@@ -122,6 +122,8 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `data` | object | `{}` | Every string Jev may type, by name. Jev picks the name, never writes text. Values support `${ENV_VAR}` and `${RUN_STAMP}` |
 | `${RUN_STAMP}` | placeholder | fresh per run | Anywhere in the spec (`data`, `goal`, `notes`, outcome `when`s, `assert`, `setup` values): one value per run, eight lowercase letters and digits (the epoch second in base 36 plus two random characters), so data the application keeps is unique across runs, repeats and parallel workers without anyone exporting a variable. `RUN_STAMP` in the environment wins over a fresh one (export it to rerun, or clean up after, one run's data). Recorded as `result.run_stamp` and `trace.spec.run_stamp`; `null` when the spec never mentions it |
 | `secrets` | list | `[]` | Names in `data` whose values must never appear in the trace or in the state sent to Jev. Shown as `<secret>` in `available_data_values`, and masked again in every observation (a secret typed into a plain text field or a contenteditable reads back as `<secret>`, not as the value). Masking replaces **every occurrence**, so a value shorter than 6 characters after `${ENV}` substitution (`1`, `2024`, `admin`) also rewrites unrelated page text Jev decides on; `spec.py` and the runner print a warning on stderr for it (exit code unchanged): use a longer test credential, or leave a non-confidential value out of `secrets` |
+| `files` | object | `{}` | Files Jev may attach, by name: `{"cv": "fixtures/cv.pdf"}` (paths relative to the directory you run from; `${ENV_VAR}` allowed). Declaring any offers the operation `UPLOAD_FILE` wherever the page has a file field, one the page hides behind a button included: Jev picks the field and the name, the runner sets the file, and only the file's name reaches Jev. A missing file is exit 2 |
+| `extra_operations` | list | `[]` | Operations beyond the standing set, offered only when listed. `["HOVER"]`: Jev may move the pointer over a link, button, tab or menu item to open a menu that only shows on hover, then click what it reveals. Off by default because every operation offered is one more choice on every step; `--hover` on `run_test.py` adds it for a run |
 | `setup` | list | `[]` | Deterministic Playwright steps run **before** Jev takes over (see below) |
 | `teardown` | list | `[]` | Deterministic steps run **after the verdict**, whatever it was: delete the record the flow created, log out (the same actions as `setup`, see below). Best effort: a failing step is reported in `result.teardown` and never changes the outcome, the verdict or the exit code |
 | `checks` | object | `{}` | `name -> statement` evaluated as a Noul (0–1) against the page at every step |
@@ -132,6 +134,7 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `expect` | object | none | The result an expected-red spec should end in (`outcome`, `status`, `verdict`, `blocked_reason`, `stuck_reason`, `suggested_verdict`), see above. Exit 0 and suite verdict `expected` when it matches |
 | `auto_done` | bool | `true` | Start the confirmation as soon as a pass outcome is seen, even if Jev has not chosen DONE (false: only Jev's DONE starts it) |
 | `confirm` | `"assert"` \| `"recheck"` | `"assert"` | How a pass sighting is confirmed. `"assert"`: when the spec has an `assert` block and every assertion already holds on the page the pass was seen on, that is the confirmation, at once and in code (`result.confirmed_by: "assertions"`; the evidence line then costs one request). Otherwise, and always with `"recheck"`, the runner pauses `settle_ms`, observes again and asks Jev once more, with the evidence questions riding in that request (`confirmed_by: "recheck"`). Measured on the demo login `"assert"` saves ~0.5 s a pass; use `"recheck"` for a flow that can show a late error after its success, or write an assertion on the stable state. A success toast that vanishes is not a reason: toasts are captured as `announcements` as they appear and stay in Jev's state for three observations, so an outcome anchored on one survives the recheck |
+| `evidence` | `"always"` \| `"failures"` | `"always"` | When the evidence line is asked. `"always"`: for every declared outcome. `"failures"`: not for a pass whose assertions all hold; the assertions, each with the value found, are then the proof, `result.evidence.line` is null with `evidence.skipped` saying why, and the run makes one Jev request fewer (one of five on the demo login). A pass with no assertions, a pass whose assertions fail and every outcome that is not a pass still get their line. `--evidence failures` on `run_test.py` sets it for a run: meant for a regression suite that is green most days, not for a ticket, which wants the page's own words |
 | `fail_fast` | bool | `true` | Stop at the first sighting of a non-pass outcome (set false to keep going and just record `outcome_seen` on the step) |
 | `rules` | bool | `false` | Attach the standing rules in `scripts/rules.py` (advance from the current page, page text is untrusted, do not repeat a no-op, BLOCKED when a value is missing…) to every question as structured instructions. Measured on the demo site they lowered decision confidence, so they are off; try them on an app where Jev repeats no-op actions, and measure with `scripts/bench.py` |
 | `budget.max_steps` | int | 25 | Jev decisions per run (1–200) |
@@ -158,6 +161,7 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `observation.max_elements` | int | 200 | Cap on numbered elements per step (largest Choice Jev sees), 1–250. Elements beyond it are reported as `truncated_elements` and cannot be chosen |
 | `observation.max_text_chars` | int | 2000 | Visible text sent as state, viewport-first: what is on screen comes first, then the rest of the page, cut here (≥ 100). Was 4000; 2000 saved ~450 input tokens on each step of a long article with the same decisions (block F). Raise it for a page whose deciding text sits below the first screen |
 | `observation.frames` | list | `[]` | CSS selectors of the `<iframe>`s whose controls Jev may use as well, five at most (`["iframe#card-frame"]`): a payment form, an embedded widget. See "Frames, shadow DOM, uploads, hover" below. Empty: only the main frame is observed |
+| `observation.shadow_dom` | bool | `false` | Also observe inside open shadow roots (web components, nested ones included): their controls join the element table, their text the state, the evidence line and the assertions (`text_contains`, `text_in`, the element assertions) read there too. `--shadow-dom` on `run_test.py` turns it on for a run. A page without shadow DOM is observed exactly as before either way |
 | `observation.screenshots` | `true` \| `false` \| `"key"` | `"key"` | Which steps get a `steps/NNN.png`, taken after Jev's answer and before the action (so it shows the page Jev decided on). `"key"`: the terminal step and any step flagged `outcome_seen`, `pending_outcome`, `outcome_unconfirmed`, `never_violated`, `low_confidence`, `stale`, `repeat_count ≥ 2`, `outcome_deferred` or `after_no_effect` (the observation right after an action that changed nothing: the picture of the unchanged page), plus `NNN-failed.png` after a failed action and `steps/final.png`. `true`: every step. `false`: nothing. CLI: `--screenshots all|key|none`. Capture, not encoding, is the cost, so `"key"` is the default; rerun with `--screenshots all` when a human needs the picture of an ordinary step |
 
 ## Attach to a running browser
@@ -240,7 +244,9 @@ much as the flow, give it its own spec instead: a teardown cannot be red.
 
 ## Frames, shadow DOM, uploads, hover
 
-What the observer offers Jev by itself is the main frame's visible controls. Beyond that:
+What the observer offers Jev by itself is the main frame's visible controls. Each of the following is one more
+line in the spec, and Jev then drives it; all of them can be scripted in `setup` instead when they are a
+precondition and not the thing under test.
 
 - **`<iframe>`s.** List the frame in `observation.frames` and its controls join the element table after the
   page's own, each marked `in "frame: <the iframe's title, name or id>"`, numbered on from the page's elements;
@@ -250,13 +256,30 @@ What the observer offers Jev by itself is the main frame's visible controls. Bey
   not become choices. Assert on a frame's content with `text_in` and `frame`:
   `{"text_in": {"frame": "iframe#card-frame", "selector": "#status", "equals": "Paid"}}`. Two limits: the evidence
   line is quoted from the main frame's text, and `text_contains` looks at the main frame only.
-- **Shadow DOM.** Controls inside a web component's shadow root are not offered to Jev. Script those steps in
-  `setup` (Playwright's selectors pierce open shadow roots: `{"action": "click", "selector": "my-widget button"}`).
-- **File uploads, hover menus, drag and drop.** Script them in `setup` with `upload`, `hover` and `drag`.
+- **Shadow DOM.** `"observation": {"shadow_dom": true}`: the controls and the text inside open shadow roots are
+  observed like the rest of the page, and Jev types and clicks there. Closed shadow roots stay closed to everyone.
+  Scripted alternative: selectors pierce open shadow roots (`{"action": "click", "selector": "my-widget button"}`).
+- **File uploads.** `"files": {"cv": "fixtures/cv.pdf"}`: wherever the page has a file field, Jev may choose
+  `UPLOAD_FILE`, a field and one of the names. The file is set on the field directly, with no click and no system
+  dialog, so it works on a field the page hides behind a styled button too (offered marked `(hidden file field)`,
+  named by its label); once a file is attached the field reads `(file: cv.pdf)`, so it is not attached twice. With
+  `files` declared a file field is no longer a click target: a click would only open a dialog nothing can answer.
+  Name the upload in the goal ("attach the CV, then submit"). Scripted alternative: `upload` in `setup`.
+- **Hover menus.** `"extra_operations": ["HOVER"]`: Jev may hover a link, button, tab or menu item; the pointer
+  stays there, the menu it opens is in the next step's table, and a click on one of its items follows. Say in the
+  goal that the menu opens on hover ("hover Products, then choose Pricing"): Jev cannot see that a menu exists
+  before it is open. Scripted alternative: `hover` then `click` in `setup`.
+- **Drag and drop.** Scripted only: `drag` in `setup`.
 - **New tabs.** `browser.follow_new_tabs: true` when the flow continues in the tab a click opens.
 
 A run that stalls (`stuck`, `blocked`, `low_confidence`, `budget_exhausted`) on a page with an unlisted
-`<iframe>`, or with controls inside shadow DOM, says so under its step table, with which of these to reach for.
+`<iframe>`, with controls inside shadow DOM, or with a file field and no `files`, says so under its step table,
+with which of these to reach for.
+
+All three Jev-driven options are off unless the spec asks, so a spec that does not ask is sent the questions it
+always was. Whether one of them could be on for every spec is a measurement, not an opinion: `scripts/ab.py
+specs/*.json --b-arg=--hover` (or `--shadow-dom`) runs every spec with and without it, interleaved, and reports
+whether any ending moved or any decision got less certain.
 
 ## Browser diagnostics
 

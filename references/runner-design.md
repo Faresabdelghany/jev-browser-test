@@ -233,12 +233,39 @@ pass and its evidence line.
 
 ## Known limits
 
-What Jev is offered: the main frame's controls, and those of the `<iframe>`s the spec lists
-(`observation.frames`, below). Not offered to Jev: controls inside shadow DOM (counted, `shadow_hosts`), file
-uploads, drag-and-drop, hover-only menus, canvas. All of these have a scripted step instead (`upload`, `drag`,
-`hover`, and any selector reaches into open shadow roots and, with `frame`, into an iframe), so they can be
-preconditions or cleanup, not yet the thing Jev decides. One tab at a time: a tab the flow opens is followed with
-`browser.follow_new_tabs`, otherwise flagged and left.
+What Jev is offered by default: the main frame's controls. A spec adds, each with one field: the `<iframe>`s it
+lists (`observation.frames`, below), open shadow roots (`observation.shadow_dom`), file fields as upload targets
+(`files`), and hovering (`extra_operations: ["HOVER"]`); see "Operations and observation a spec turns on" below.
+Never offered: drag-and-drop and canvas content (a `drag` step can be scripted), closed shadow roots. One tab at a
+time: a tab the flow opens is followed with `browser.follow_new_tabs`, otherwise flagged and left.
+
+## Operations and observation a spec turns on
+
+The rule for all three is the one the standing rules taught: what is asked on every step is paid for on every
+step, in tokens and in confidence, so nothing joins the questions unless the spec says so. With none of them set the
+`operation` Choice, the target questions, the state and the observation are what they were (the observation was
+compared field by field against the previous release's on 80 page states of the self-test's fixtures: identical).
+`scripts/ab.py` is how "could it be the default" gets answered: both arms over the same specs, interleaved.
+
+- **Shadow DOM** (`observation.shadow_dom`, `deep` in the scripts). `JS_HELPERS` gets five root-aware helpers:
+  `shadowRoots()` (found once per script run), `qsa()` (the document and every open root), `topAt()` (the hit test,
+  asked again inside each shadow root on the way down: `document.elementFromPoint` stops at the outermost host, and
+  without this a control would read as covered by its own component), `holds()` (ancestry across a root's host) and
+  `textWalk()` (a host's shadow tree is read where the host stands). `OBSERVE_JS`, `FINGERPRINT_JS` and `LINES_JS`
+  declare `deep` before the helpers; with it false every one of those is the document-only call it replaced. The
+  observation marks its fingerprint `deep`, so every re-read (`fingerprint(page, frames, deep)`: the freshness guard,
+  every WAIT) looks in the same places. The settle watches each open root for mutations, `check_assertions` reads
+  the roots' text (`DEEP_BODY_TEXT_JS`), uses a locator for `text_in` and a deep whole-document observation for the
+  element assertions, and the adjudication's lines include the roots'. Not covered: toasts announced inside a shadow
+  root (the announce script watches the document), and loading indicators there.
+- **UPLOAD_FILE** (`files`). `policy.element_operations` turns a `file` element into an upload target (and stops
+  offering it for CLICK); `build_questions` adds `upload_target` and `upload_file` (the files as `{key, name}`,
+  never a path), as `type_target` and `type_value` ride with TYPE_TEXT, and the confidence gate reads all three.
+  The observer, asked with `fileInputs`, also offers file inputs that have no box (pass 1b): `set_input_files` needs
+  no click. `valueOf` reads a file input as `(file: <name>)` once it holds one.
+- **HOVER** (`extra_operations`). `hover_target` over the elements whose role can hold a menu
+  (`policy.HOVER_ROLES`); `execute` hovers and leaves the pointer there. A hover that reveals nothing is flagged
+  `NO-EFFECT` like a dead click, and three of them on one page end `stuck`.
 
 ## Frames (opt-in)
 

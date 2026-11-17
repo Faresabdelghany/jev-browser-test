@@ -110,16 +110,20 @@ explain.
   `{"no_failed_requests": true}` make a clean console and network part of the pass (no uncaught exception; no 5xx
   and no failed request): add them when "it says Saved" is not enough.
 - **checks** — atomic progress statements, one fact each; an outcome's `requires` can lean on them.
-- **setup** — deterministic Playwright steps for preconditions. Prefer `wait_for` to `wait`. It is also where the
-  interactions Jev is not offered go: `upload`, `hover` (then `click` the menu item), `drag`, and any step inside an
-  iframe (`"frame": "<the iframe's selector>"`) or a web component (selectors reach into shadow DOM).
+- **setup** — deterministic Playwright steps for preconditions. Prefer `wait_for` to `wait`. It also scripts what is
+  not under test: `upload`, `hover` (then `click` the menu item), `drag`, and any step inside an iframe (`"frame":
+  "<the iframe's selector>"`) or a web component (selectors reach into shadow DOM).
 - **teardown** — the same steps, run after the verdict whatever it was: delete what the run created (name it with
   `${RUN_STAMP}`), log out. A failing teardown step is reported and never changes the result.
-- **iframes, new tabs, phones** — when what Jev must use sits in an iframe (a card form, an embedded widget), list
-  the frame: `"observation": {"frames": ["iframe#card-frame"]}`. A flow that continues in a tab it opens wants
-  `"browser": {"follow_new_tabs": true}`; a phone layout, `"browser": {"device": "iPhone 13"}` (or `--device`).
-  `scaffold.py` takes `--frame`, `--follow-new-tabs`, `--device` and `--teardown`. A stalled run on a page with an
-  unlisted iframe or shadow-DOM controls says so under its step table.
+- **iframes, web components, uploads, hover menus** — off until the spec asks, one line each, and then Jev drives
+  them: `"observation": {"frames": ["iframe#card-frame"]}` (a card form, an embedded widget), `"observation":
+  {"shadow_dom": true}` (controls inside web components), `"files": {"cv": "fixtures/cv.pdf"}` (Jev may attach a
+  file to a file field; name the upload in the goal), `"extra_operations": ["HOVER"]` (a menu that only opens on
+  hover; say so in the goal). Ask only for what the flow needs: each is more for Jev to choose from on every step.
+- **new tabs, phones** — `"browser": {"follow_new_tabs": true}` when the flow continues in a tab it opens;
+  `"browser": {"device": "iPhone 13"}` (or `--device`) for a phone layout. `scaffold.py` has a flag for each of
+  these (`--frame`, `--shadow-dom`, `--file`, `--hover`, `--follow-new-tabs`, `--device`, `--teardown`). A stalled
+  run on a page with an unlisted iframe, shadow-DOM controls or an unused file field says so under its step table.
 - **long pages and type-aheads** — a link far down a long page wants the goal to say where to scroll; a type-ahead
   wants a `suggestion_not_found` bug outcome. `references/spec-format.md` (Writing the goal and data) has both
   recipes: read them before writing a spec for a long form or an autocomplete.
@@ -264,6 +268,9 @@ and the waiting:
 - Name the visible end state in the goal and the outcomes; a vague goal buys WAITs and wandering steps.
 - Use `wait_for {selector|url}` instead of `wait {ms}` in `setup`.
 - Do not add repeats to be sure: one run is evidence, three to five measure stability, more is load on the host.
+- A regression suite that is green most days can run with `--run-arg=--evidence=failures`: a pass whose assertions
+  hold is then not asked for its evidence line (one request fewer per pass; the assertions' `actual` values are the
+  proof), and anything red still gets its line. Not for a ticket or a first run, which want the page's own words.
 
 ## Troubleshooting
 
@@ -277,7 +284,8 @@ keys or two same-named elements wants keys named like the app's labels, or a `no
 - `scripts/scaffold.py` (URL + goal + data → a valid spec to edit), `run_test.py` (one spec → `result.json` +
   `trace.json`), `run_suite.py` (specs × repeats → `results.json` + `results.md`), `report.py` (a run →
   `report.html`), `spec.py` (validation), `summarize_trace.py`, `selftest.py` (offline check, with
-  `selftest_capabilities.py`), `unit_tests.py`, `bench.py` (N repeats, medians), `junit.py`, and the pieces
+  `selftest_capabilities.py`), `unit_tests.py`, `bench.py` (N repeats, medians), `ab.py` (the specs with and without
+  an option, interleaved), `junit.py`, and the pieces
   `observe.py`, `policy.py`, `rules.py`, `jev_client.py` (read
   `references/runner-design.md` before changing them).
 - `references/spec-format.md` (every field), `troubleshooting.md` (symptom → fix), `suites.md` (agreement, flakiness,

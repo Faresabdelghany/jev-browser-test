@@ -19,6 +19,9 @@ RESERVED_QUESTIONS = {
     "type_target",
     "type_value",
     "select_target",
+    "hover_target",
+    "upload_target",
+    "upload_file",
     "outcome",
     "blocked_reason",
     "stuck_reason",
@@ -73,6 +76,7 @@ SETUP_FIELDS = {
     "upload": ["selector", "path"],  # an <input type=file>; `path` is a file path or a list of them, relative to the working directory
     "drag": ["selector", "to"],      # drag `selector` onto the element `to` selects
 }
+EXTRA_OPERATIONS = ("HOVER",)  # operations a spec turns on with `extra_operations` (policy.py offers them only then)
 SECRET_MIN_LEN = 6  # a shorter secret is masked wherever it occurs and rewrites unrelated page text: a warning, not a problem
 ENV_RE = re.compile(r"\$\{([A-Z0-9_]+)\}")
 DOTENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -99,6 +103,13 @@ DEFAULTS = {
     "notes": "",
     "data": {},
     "secrets": [],
+    # Files Jev may attach, by name: {"cv": "fixtures/cv.pdf"} (paths relative to the directory the run starts in,
+    # ${ENV} allowed). Declaring any offers the operation UPLOAD_FILE wherever the page has a file field, hidden ones
+    # included; Jev picks the field and the name, the runner sets the file. Empty: file fields are not upload targets.
+    "files": {},
+    # Operations beyond the standing set, offered only when listed: "HOVER" (move the pointer over an element to open
+    # a menu that only shows on hover). Off by default because every operation offered is a choice on every step.
+    "extra_operations": [],
     "setup": [],
     # Scripted steps after the verdict, whatever it was (delete the record the flow created, log out): the same
     # actions as `setup`. Best effort: a failing step is recorded (trace.teardown, result.teardown) and never changes
@@ -119,6 +130,12 @@ DEFAULTS = {
     # request); otherwise, and always with "recheck", the runner pauses settle_ms, observes again and asks Jev once
     # more (the evidence questions ride in that request). Measured on the demo login: "assert" saves ~0.5 s a pass.
     "confirm": "assert",
+    # When the evidence line is asked. "always": for every declared outcome (the page's own words in result.evidence.line).
+    # "failures": not for a pass whose assertions all hold. The assertions are then the proof, each with the value found,
+    # and the request that would have fetched the line is not made: one Jev request fewer on every such pass (one of
+    # five on the demo login), which is what a regression suite pays for most. A pass with no assertions, and every
+    # outcome that is not a pass, still gets its line.
+    "evidence": "always",
     # Attach the standing rules (scripts/rules.py) to every question. Measured on the demo site they lowered
     # decision confidence in every wording tried (docs/superpowers/measurements/2026-09-22-track1-ab-*.json),
     # so they are opt-in for apps where Jev repeats no-op actions or needs the untrusted-page-text guard.
@@ -165,7 +182,9 @@ DEFAULTS = {
     # screenshots "key": only terminal and flagged steps (plus final.png); true = every step; false = none.
     # frames: CSS selectors of <iframe>s whose controls Jev may use as well (a payment form, an embedded widget): their
     # elements join the table after the page's own, marked with the frame. Empty = the main frame only, as before.
-    "observation": {"max_elements": 200, "max_text_chars": 2000, "screenshots": "key", "frames": []},  # lever F5: was 4000
+    # shadow_dom: also observe inside open shadow roots (web components): their controls join the table, their text the
+    # state, and assertions and evidence lines look there too. False: the document's own tree only, as before.
+    "observation": {"max_elements": 200, "max_text_chars": 2000, "screenshots": "key", "frames": [], "shadow_dom": False},  # lever F5: was 4000
 }
 
 
@@ -386,6 +405,14 @@ def validate(spec: dict) -> list[str]:
     for s in spec.get("secrets", []):
         if s not in data:
             errors.append(f"'secrets' names '{s}' which is not a key in 'data'")
+    files = spec.get("files", {})
+    if not isinstance(files, dict) or any(not isinstance(v, str) or not v.strip() for v in files.values()):
+        errors.append("'files' must be an object mapping file_name -> path of a file to attach")
+    elif any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k) for k in files):
+        errors.append("'files' keys must be simple identifiers (letters, digits, underscore): Jev picks a file by its key")
+    extra = spec.get("extra_operations", [])
+    if not isinstance(extra, list) or any(op not in EXTRA_OPERATIONS for op in extra):
+        errors.append(f"'extra_operations' must be a list with some of {list(EXTRA_OPERATIONS)}")
 
     for list_name in ("setup", "teardown"):
         steps = spec.get(list_name, [])
@@ -444,12 +471,16 @@ def validate(spec: dict) -> list[str]:
     fr = o.get("frames", [])
     if not (isinstance(fr, list) and all(isinstance(f, str) and f.strip() for f in fr) and len(fr) <= 5):
         errors.append("'observation.frames' must be a list of at most 5 CSS selectors, one per <iframe> whose controls Jev may use")
+    if not isinstance(o.get("shadow_dom", False), bool):
+        errors.append("'observation.shadow_dom' must be true or false")
     ss = o.get("screenshots", "key")
     if not (ss is True or ss is False or ss == "key"):
         errors.append("'observation.screenshots' must be true, false or \"key\"")
     for k in ("auto_done", "fail_fast", "rules"):
         if not isinstance(spec.get(k, False), bool):
             errors.append(f"'{k}' must be true or false")
+    if spec.get("evidence", "always") not in ("always", "failures"):
+        errors.append("'evidence' must be \"always\" (every outcome gets its evidence line) or \"failures\" (a pass whose assertions hold is not asked for one)")
     if spec.get("confirm", "assert") not in ("assert", "recheck"):
         errors.append("'confirm' must be \"assert\" (a pass whose assertions all hold is confirmed at once) or \"recheck\" (settle, observe again, ask Jev)")
     expect = spec.get("expect")
@@ -601,6 +632,10 @@ def main(argv: list[str]) -> int:
     if spec["assert"]:
         print(f"  assert: {len(spec['assert'])} assertion(s) on the final page")
     print(f"  data keys: {list(spec['data'])}  secrets: {spec['secrets']}")
+    if spec["files"]:
+        print(f"  files: {list(spec['files'])}" + "".join(f"\n    warning: {k}: no such file from here: {v}" for k, v in spec["files"].items() if not os.path.isfile(v)))
+    if spec["extra_operations"] or spec["observation"]["shadow_dom"]:
+        print(f"  extra operations: {spec['extra_operations']}  shadow_dom: {spec['observation']['shadow_dom']}")
     if spec.get("run_stamp"):
         print(f"  run stamp: {spec['run_stamp']} (this validation's example; every run makes its own ${{RUN_STAMP}}, export RUN_STAMP to pin one)")
     print(f"  budget: {spec['budget']}")

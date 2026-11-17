@@ -2611,6 +2611,166 @@ class SummaryFlagTests(unittest.TestCase):
         self.assertEqual(_hidden_controls_hint(listed), [])  # every frame on the page is already observed
 
 
+class JevDrivenTests(unittest.TestCase):
+    """HOVER, UPLOAD_FILE and shadow DOM (0.5.0): offered only when the spec asks, and then asked the way the others are."""
+
+    ELEMENTS = [
+        {"idx": 0, "role": "link", "name": "Products"},
+        {"idx": 1, "role": "textbox", "name": "Search"},
+        {"idx": 2, "role": "file", "name": "Resume", "context": "accepts .pdf"},
+        {"idx": 3, "role": "file", "name": "Choose photo", "hidden": True, "value": "(file: me.png)"},
+        {"idx": 4, "role": "checkbox", "name": "Terms", "checked": False},
+        {"idx": 5, "role": "button", "name": "Old", "disabled": True},
+    ]
+
+    def spec(self, **over) -> dict:
+        base = {"id": "t", "start_url": "http://x/", "goal": "Do it, so that it is done.", "data": {"q": "shoes"},
+                "outcomes": {"done": {"when": "The page says it is done", "verdict": "pass"}}}
+        return _merge(_merge(DEFAULTS, base), over)
+
+    def obs(self) -> dict:
+        return {"elements": [dict(e) for e in self.ELEMENTS], "url": "http://x/", "title": "T", "visible_text": "hello", "truncated": 0}
+
+    def test_a_spec_that_does_not_ask_is_asked_what_it_always_was(self) -> None:
+        questions, meta = build_questions(self.spec(), self.obs(), None)
+        self.assertEqual(meta["operations"], ["CLICK", "TYPE_TEXT", "WAIT", "DONE", "BLOCKED"])
+        self.assertEqual(set(questions), {"operation", "click_target", "type_target", "type_value", "outcome"})
+        self.assertEqual(meta["offered"]["click_target"], ["0", "2", "3", "4"])  # a file field is a clickable, as before
+        state = build_state(self.spec(), self.obs(), 1, [])
+        self.assertNotIn("available_files", state)
+        self.assertEqual([e["operations"] for e in state["elements"]], [["CLICK"], ["TYPE_TEXT"], ["CLICK"], ["CLICK"], ["CLICK"], []])
+
+    def test_hover_is_offered_for_what_can_hold_a_menu(self) -> None:
+        spec = self.spec(extra_operations=["HOVER"])
+        questions, meta = build_questions(spec, self.obs(), None)
+        self.assertEqual(meta["operations"], ["CLICK", "HOVER", "TYPE_TEXT", "WAIT", "DONE", "BLOCKED"])
+        self.assertEqual(meta["offered"]["hover_target"], ["0"])  # the link; not the checkbox, the file fields or the disabled button
+        self.assertIn("without clicking", questions["operation"]["criteria"]["HOVER"])
+        self.assertEqual(element_operations(spec, self.ELEMENTS[0]), ["CLICK", "HOVER"])
+        answers = {"hover_target": {"type": "choice", "choice": "0", "confidence": 0.9, "probabilities": {"0": 1.0}}}
+        target = resolve_target("HOVER", answers, self.obs(), meta)
+        self.assertEqual((target["element"], target["question"], target["label"]), (0, "hover_target", '[0] link "Products"'))
+
+    def test_files_turn_file_fields_into_upload_targets(self) -> None:
+        spec = self.spec(files={"cv": "/secret/path/to/cv.pdf", "photo": "me.png"})
+        questions, meta = build_questions(spec, self.obs(), None)
+        self.assertEqual(meta["operations"], ["CLICK", "TYPE_TEXT", "UPLOAD_FILE", "WAIT", "DONE", "BLOCKED"])
+        self.assertEqual(meta["offered"]["upload_target"], ["2", "3"])
+        self.assertEqual(meta["offered"]["click_target"], ["0", "4"])  # clicking a file field would open a dialog nobody can answer
+        self.assertEqual(questions["upload_file"]["criteria"], {"cv": {"key": "cv", "name": "cv.pdf"}, "photo": {"key": "photo", "name": "me.png"}})
+        self.assertEqual(questions["upload_target"]["criteria"]["3"]["current_value"], "(file: me.png)")
+        state = build_state(spec, self.obs(), 1, [])
+        self.assertEqual(state["available_files"], [{"key": "cv", "name": "cv.pdf"}, {"key": "photo", "name": "me.png"}])
+        self.assertNotIn("/secret/path", json.dumps([state, questions]))  # the path stays on the machine
+        answers = {"upload_target": {"type": "choice", "choice": "3", "confidence": 0.9, "probabilities": {"3": 0.9, "2": 0.1}}}
+        target = resolve_target("UPLOAD_FILE", answers, self.obs(), meta)
+        self.assertEqual(target["label"], '[3] file "Choose photo" value="(file: me.png)" (hidden file field)')
+
+    def test_no_file_field_no_upload_operation(self) -> None:
+        obs = self.obs()
+        obs["elements"] = [e for e in obs["elements"] if e["role"] != "file"]
+        _, meta = build_questions(self.spec(files={"cv": "cv.pdf"}), obs, None)
+        self.assertNotIn("UPLOAD_FILE", meta["operations"])
+
+    def test_spec_validation(self) -> None:
+        from spec import validate
+        self.assertEqual(validate(self.spec(files={"cv": "a.pdf"}, extra_operations=["HOVER"], observation={"shadow_dom": True})), [])
+        self.assertTrue(any("'files' keys" in p for p in validate(self.spec(files={"my cv": "a.pdf"}))))
+        self.assertTrue(any("'files' must be" in p for p in validate(self.spec(files={"cv": ""}))))
+        self.assertTrue(any("extra_operations" in p for p in validate(self.spec(extra_operations=["FLY"]))))
+        self.assertTrue(any("shadow_dom" in p for p in validate(self.spec(observation={"shadow_dom": "yes"}))))
+        got = validate(self.spec(checks={"hover_target": "The menu is open on the page"}, outcomes={}, done_when=["hover_target"]))
+        self.assertTrue(any("reserved question name" in p for p in got), got)
+
+    def test_evidence_setting(self) -> None:
+        from spec import validate
+        self.assertEqual(self.spec()["evidence"], "always")
+        self.assertEqual(validate(self.spec(evidence="failures")), [])
+        self.assertTrue(any("'evidence' must be" in p for p in validate(self.spec(evidence="never"))))
+
+    def test_the_new_targets_are_guarded_and_flagged_like_the_old(self) -> None:
+        from observe import TARGET_OPERATIONS, compare_fingerprint
+        from run_test import NO_EFFECT_ACTIONS
+        self.assertTrue({"HOVER", "UPLOAD_FILE"} <= TARGET_OPERATIONS and {"HOVER", "UPLOAD_FILE"} <= NO_EFFECT_ACTIONS)
+        tup = [True, True, "", None, False, "abc"]
+        before = {"url": "u", "nodes": {"3": tup, "4": tup}}
+        self.assertIsNone(compare_fingerprint(before, {"url": "u", "nodes": {"3": tup, "4": [True, True, "x", None, False, "abc"]}}, "HOVER", 3))
+        self.assertEqual(compare_fingerprint(before, {"url": "u", "nodes": {"4": tup}}, "UPLOAD_FILE", 3), "target [3] is no longer on the page")
+
+    def test_the_scripts_take_the_deep_flag(self) -> None:
+        from observe import FINGERPRINT_JS, LINES_JS, OBSERVE_JS
+        self.assertTrue(OBSERVE_JS.startswith("(args) => {\n  const deep = !!args.shadowDom;"))
+        self.assertTrue(FINGERPRINT_JS.startswith("(deepArg) => {\n  const deep = !!deepArg;"))
+        self.assertIn("typeof arg === 'number' ? arg : arg.maxLines", LINES_JS)  # an older caller's bare number still works
+        for script in (OBSERVE_JS, FINGERPRINT_JS, LINES_JS):
+            self.assertIn("if (!deep) return document.querySelectorAll(sel);", script)  # without the flag: the document-only query
+
+
+class ABTests(unittest.TestCase):
+    def run_rec(self, outcome="ok", exit_code=0, status="passed", confs=(0.9, 0.95), requests=5, wall=5000) -> dict:
+        return {"outcome": outcome, "exit_code": exit_code, "status": status, "step_confidences": list(confs), "requests": requests,
+                "input_tokens": 1000, "wall_ms": wall, "low_confidence_steps": 0}
+
+    def test_ending_and_arm_summary(self) -> None:
+        from ab import arm_summary, ending
+        self.assertEqual(ending(self.run_rec()), "ok")
+        self.assertEqual(ending(self.run_rec("undetermined", 1, "stuck")), "undetermined:stuck")
+        self.assertEqual(ending(self.run_rec(None, 2, "error")), "environment")
+        s = arm_summary([self.run_rec(), self.run_rec(confs=(0.5, 0.7)), self.run_rec(None, 2, "error", confs=())])
+        self.assertEqual((s["runs"], s["observed"], s["green"], s["endings"]), (3, 2, 2, {"ok": 2}))
+        self.assertEqual((s["decision_confidence"], s["min_decision_confidence"]), (0.8, 0.5))  # pooled over every step
+
+    def test_compare(self) -> None:
+        from ab import arm_summary, compare
+        same = arm_summary([self.run_rec()] * 3)
+        self.assertEqual(compare(same, same), {"moved": None, "confidence_delta": 0.0, "confidence_fell": False, "compared": True})
+        broke = arm_summary([self.run_rec("undetermined", 1, "low_confidence", confs=(0.4, 0.45))] * 3)
+        c = compare(same, broke)
+        self.assertEqual((c["moved"], c["confidence_fell"]), ("all", True))
+        mixed = arm_summary([self.run_rec(), self.run_rec("undetermined", 1, "stuck"), self.run_rec()])
+        self.assertEqual(compare(same, mixed)["moved"], "some")
+        softer = arm_summary([self.run_rec(confs=(0.8, 0.82))] * 3)
+        c = compare(same, softer)
+        self.assertEqual((c["moved"], c["confidence_fell"]), (None, True))  # the same ending, a visibly less certain way there
+        nothing = arm_summary([self.run_rec(None, 2, "error", confs=())] * 2)
+        self.assertEqual(compare(same, nothing), {"moved": None, "confidence_delta": None, "confidence_fell": False, "compared": False})
+
+    def test_main_interleaves_the_arms_and_reports(self) -> None:
+        import ab
+        calls: list[tuple[str, list[str]]] = []
+
+        def fake_run_once(spec_path, out_dir, python, run_args):
+            calls.append((os.path.basename(out_dir), list(run_args)))
+            hover = "--hover" in run_args
+            return self.run_rec("undetermined" if hover else "ok", 1 if hover else 0, "low_confidence" if hover else "passed",
+                                confs=(0.45,) if hover else (0.9,))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_path = os.path.join(tmp, "login.json")
+            with open(spec_path, "w", encoding="utf-8") as f:
+                json.dump({"id": "login"}, f)
+            out = os.path.join(tmp, "out")
+            with mock.patch.object(ab, "run_once", fake_run_once), mock.patch("builtins.print"):
+                self.assertEqual(ab.main(["ab.py", spec_path, "--b-arg=--hover", "--repeat", "2", "--out", out]), 1)
+                self.assertEqual(ab.main(["ab.py", spec_path, "--out", out]), 2)             # nothing to compare
+                self.assertEqual(ab.main(["ab.py", os.path.join(tmp, "nope.json"), "--b-arg=--hover"]), 2)
+            self.assertEqual(calls, [("a01", []), ("b01", ["--hover"]), ("a02", []), ("b02", ["--hover"])])
+            with open(os.path.join(out, "ab.json"), encoding="utf-8") as f:
+                report = json.load(f)
+            self.assertEqual(report["summary"], {"moved_all": 1, "moved_some": 0, "confidence_fell": 1, "not_compared": 0})
+            with open(os.path.join(out, "ab.md"), encoding="utf-8") as f:
+                text = f.read()
+            self.assertIn("| login | ok x2 | undetermined:low_confidence x2 | **yes, every run** | 0.90 | 0.45 | -0.450 ⚠ |", text)
+            self.assertIn("Not safe to make the default", text)
+
+    def test_a_clean_comparison_says_so(self) -> None:
+        import ab
+        same = ab.arm_summary([self.run_rec()] * 2)
+        specs = {"login": {"a": same, "b": same, "compare": ab.compare(same, same)}}
+        text = ab.render({"timestamp": "t", "repeat": 2, "b_args": ["--shadow-dom"], "specs": specs, "summary": ab.summarize(specs)})
+        self.assertIn("No spec moved and no confidence fell", text)
+
+
 class _FixedRand:
     def __init__(self, chars: str) -> None:
         self.chars = list(chars)

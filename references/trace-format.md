@@ -21,7 +21,8 @@ evidence, the file Claude reads first. The trace is the *evidence* behind it; th
   "evidence": { "line": "Your password is invalid!",            // the page line Jev selected in the adjudication request (verbatim), or null
                 "present": 0.94,                                // the adjudication's Noul over the outcome statement
                 "screenshot": "steps/005.png",                  // the sighting step's picture (forced for non-pass outcomes), else steps/final.png
-                "checks": { "logged_in": 0.03, "login_error": 0.81 } },   // the checks at the sighting step
+                "checks": { "logged_in": 0.03, "login_error": 0.81 } },   // the checks at the sighting step; with spec evidence "failures", a pass whose
+                                                                // assertions held has line null and "skipped": why the line was not asked
   "assertions": [ { "url_matches": "**/login", "ok": true, "actual": "https://.../login" } ],   // every assertion with what was found
   "outcomes_seen_earlier": [],                                  // non-terminal sightings: non-pass ones (fail_fast: false) and pass sightings that vanished on their recheck ({.., "unconfirmed": true})
   "story": [ "1 TYPE_TEXT [0] textbox \"Username\" <- username", "2 TYPE_TEXT [1] textbox \"Password\" <- password", "3 CLICK [2] button \"Login\"" ],
@@ -214,6 +215,7 @@ environment failure (or a spec file is missing / two files share an id).
       "target": { "question": "click_target", "choice": "3", "element": 3, "label": "[3] button \"Add to cart\"",
                   "confidence": 0.88, "top_probabilities": { "3": 0.86, "4": 0.11 } },
       "type_value": { "choice": "search_query", "confidence": 0.95, "top_probabilities": {...} },   // TYPE_TEXT only
+      "upload_file": { "choice": "cv", "confidence": 0.95, "top_probabilities": {...} },             // UPLOAD_FILE only: which of the spec's `files`; executed then carries "file_key" and "file" (the name)
       "checks": { "cart_has_item": 0.02, "error_visible": 0.01 },   // evaluated on the page BEFORE the action
       "outcome": { "choice": "none_yet", "confidence": 0.9, "probabilities": { "item_added": 0.03, "app_error": 0.02, "none_yet": 0.95 } },  // the outcome Choice (only when an outcome has a `when`)
       "blocked_reason": { "choice": "missing_data_value", ... },   // only on the terminal step of blocked / stuck / low_confidence (a follow-up request) and on the final look

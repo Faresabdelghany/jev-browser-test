@@ -17,6 +17,17 @@ server on 127.0.0.1. One scenario per capability:
   G. loading indicators: a spinner that covers nothing earns the extra undecided looks, and only those
   H. shadow DOM: controls inside a web component are counted for the hint; a scripted step reaches them
   I. JUnit: a pass, a bug and an environment failure map to no child, <failure> and <error>
+
+and for the three interactions Jev drives itself since 0.5.0, each off until the spec asks:
+
+  J. shadow DOM (`observation.shadow_dom`): the controls and the text inside open shadow roots, nested ones included,
+     reach the table and the state; Jev types and clicks there; the evidence line and the assertions read there too
+  K. uploads (`files`): UPLOAD_FILE is offered for a visible file field and for one the page hides; Jev picks the
+     field and the file; without `files` nothing changes
+  L. hover (`extra_operations: ["HOVER"]`): Jev opens a hover-only menu and clicks the item it reveals; without it
+     the operation is never offered
+  M. `evidence: "failures"`: a pass whose assertions hold costs one request fewer and says why it has no line; a bug,
+     a pass without assertions and a pass whose assertions fail still get theirs
 """
 from __future__ import annotations
 
@@ -41,6 +52,8 @@ class ScriptedJev:
 
         ("click", "Save")                 click the first offered element whose description mentions "Save"
         ("type", "Card number", "card")   type data value `card` into the field described "Card number"
+        ("hover", "Products")             move the pointer over the element described "Products" (needs HOVER offered)
+        ("upload", "Resume", "cv")        attach the file named `cv` to the file field described "Resume"
         ("wait",)                         choose WAIT
         ("undecided",)                    choose WAIT at confidence 0.3 (the runner refuses to act on it)
     A move is played once (`once=True`, the default for click and type) and then skipped. When nothing applies the
@@ -99,6 +112,8 @@ class ScriptedJev:
         ops = questions["operation"]["criteria"]
         clicks = questions.get("click_target", {}).get("criteria", {})
         types = questions.get("type_target", {}).get("criteria", {})
+        hovers = questions.get("hover_target", {}).get("criteria", {})
+        uploads = questions.get("upload_target", {}).get("criteria", {})
         if self.undecided_while and self.undecided_while in text:
             answers["operation"] = self._choice("WAIT", ops, conf=0.3)
             return {"answers": answers, "usage": usage, "model": "scripted-jev", "latency_ms": 1}
@@ -116,6 +131,17 @@ class ScriptedJev:
                 answers["operation"] = self._choice("TYPE_TEXT", ops)
                 answers["type_target"] = self._choice(self._find(types, move[1]), types, 0.95)
                 answers["type_value"] = self._choice(move[2], questions["type_value"]["criteria"], 0.95)
+                break
+            if kind == "hover" and "HOVER" in ops and self._find(hovers, move[1]):
+                self.played.add(i)
+                answers["operation"] = self._choice("HOVER", ops)
+                answers["hover_target"] = self._choice(self._find(hovers, move[1]), hovers, 0.95)
+                break
+            if kind == "upload" and "UPLOAD_FILE" in ops and self._find(uploads, move[1]):
+                self.played.add(i)
+                answers["operation"] = self._choice("UPLOAD_FILE", ops)
+                answers["upload_target"] = self._choice(self._find(uploads, move[1]), uploads, 0.95)
+                answers["upload_file"] = self._choice(move[2], questions["upload_file"]["criteria"], 0.95)
                 break
             if kind == "wait" and "WAIT" in ops:
                 self.played.add(i)
@@ -232,7 +258,57 @@ SHADOW_PAGE = """<!doctype html><html><head><title>Shadow</title></head><body>
   root.getElementById('inner-save').addEventListener('click', () => { document.getElementById('msg').textContent = 'Saved successfully'; });
 </script></body></html>"""
 
-ROUTES = {"/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE,
+# A profile form built as web components: the field and its label in one open shadow root, the Save button in a
+# second root nested inside it, and the confirmation written into the outer root. Nothing a user needs is in the
+# document's own tree except the heading.
+SHADOW_APP_PAGE = """<!doctype html><html><head><title>Shadow app</title></head><body>
+<h1>Profile</h1><profile-card id="card"></profile-card>
+<script>
+  customElements.define('save-button', class extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({mode: 'open'});
+      root.innerHTML = '<style>button{padding:6px}</style><button id="go" type="button">Save profile</button>';
+      root.getElementById('go').addEventListener('click', () => this.dispatchEvent(new CustomEvent('save', {bubbles: true, composed: true})));
+    }
+  });
+  customElements.define('profile-card', class extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({mode: 'open'});
+      root.innerHTML = '<style>p{margin:8px 0}</style><label for="nick">Nickname</label> <input id="nick">' +
+                       '<save-button></save-button><p id="out"></p>';
+      root.addEventListener('save', () => { root.getElementById('out').textContent = 'Saved successfully: ' + root.getElementById('nick').value; });
+    }
+  });
+</script></body></html>"""
+
+# Two file fields: one in plain sight with a label, one the page hides behind a styled label (display: none), the
+# usual "Choose photo" button. Submit confirms only when both hold a file.
+UPLOAD_PAGE = """<!doctype html><html><head><title>Upload</title><style>.btn{display:inline-block;padding:6px;border:1px solid #888;cursor:pointer}</style></head><body>
+<h1>Application</h1>
+<p><label for="cv">Resume</label> <input type="file" id="cv" accept=".txt,.pdf"></p>
+<p><label for="photo" class="btn">Choose photo</label><input type="file" id="photo" name="photo" style="display:none"></p>
+<button id="submit" type="button">Submit application</button>
+<p id="log"></p><p id="msg"></p>
+<script>
+  for (const id of ['cv', 'photo']) document.getElementById(id).addEventListener('change', e => {
+    document.getElementById('log').textContent += ' ' + id + '=' + e.target.files[0].name; });
+  document.getElementById('submit').addEventListener('click', () => {
+    const ok = document.getElementById('cv').files.length && document.getElementById('photo').files.length;
+    document.getElementById('msg').textContent = ok ? 'Saved successfully' : 'Both files are required'; });
+</script></body></html>"""
+
+# A navigation bar whose submenu exists only while the pointer is over its parent item (CSS :hover, no script).
+HOVER_PAGE = """<!doctype html><html><head><title>Hover menu</title><style>
+  nav ul{list-style:none;margin:0;padding:0} nav > ul > li{display:inline-block;position:relative;padding:8px}
+  .sub{display:none;position:absolute;left:0;top:100%;background:#fff;border:1px solid #888;padding:8px;width:160px}
+  #products:hover .sub{display:block}
+</style></head><body>
+<nav><ul><li id="products"><a href="#products">Products</a><ul class="sub">
+  <li><a href="#pricing" id="pricing" onclick="document.getElementById('msg').textContent='Saved successfully'">Pricing</a></li>
+  <li><a href="#docs">Documentation</a></li></ul></li><li><a href="#about">About</a></li></ul></nav>
+<h1>Welcome</h1><p id="msg"></p></body></html>"""
+
+ROUTES = {"/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE,
           "/device": DEVICE_PAGE, "/tabs": TABS_PAGE, "/receipt": RECEIPT_PAGE, "/spinner": SPINNER_PAGE, "/shadow": SHADOW_PAGE}
 
 
@@ -484,6 +560,114 @@ def run_checks(tmp: str | None = None) -> list[str]:
     kinds = {c["name"]: (c["kind"], c["type"]) for c in suite_cases(report)}
     if kinds != {"a": ("pass", None), "b": ("failure", "flaky"), "c": ("error", "environment")}:
         failures.append(f"I: suite verdicts should map to pass / failure(flaky) / error(environment): {kinds}")
+    # J. shadow DOM, driven by Jev -------------------------------------------------------------------------------------------
+    deep = make_spec(base + "/shadow-app", goal="Set the nickname and save the profile, so that the page says it was saved.",
+                     data={"nickname": "Ada"}, observation={"shadow_dom": True},
+                     **{"assert": [{"text_contains": "Saved successfully: Ada"}, {"text_in": {"selector": "#out", "equals": "Saved successfully: Ada"}},
+                                   {"field_value": {"label": "Nickname", "equals": "Ada"}}, {"element_present": {"role": "button", "name": "Save profile"}}]})
+    jev = ScriptedJev([("type", "Nickname", "nickname"), ("click", "Save profile")], SAVED)
+    trace, out = go("shadow-driven", deep, jev)
+    first = trace["steps"][0]
+    table = {(e["role"], e.get("name")) for e in first["elements"]}
+    if trace["status"] != "passed":
+        failures.append(f"J: typing and clicking inside (nested) shadow roots should pass: {trace['status']} {trace.get('error')} {trace['result']['assertions']}")
+    if not {("textbox", "Nickname"), ("button", "Save profile")} <= table:
+        failures.append(f"J: the field (named by its label in the same root) and the button in the nested root should be offered: {sorted(table)}")
+    if first.get("covered_controls") or first.get("shadow_hosts"):
+        failures.append(f"J: a control inside a shadow root is not covered by its own host, and no hint is due: {first.get('covered_controls')} {first.get('shadow_hosts')}")
+    page_states = [st for st in jev.seen_states if "visible_text" in st]  # the evidence request's state has lines instead
+    if "Nickname" not in page_states[0]["visible_text"] or "Saved successfully: Ada" not in page_states[-1]["visible_text"]:
+        failures.append("J: the text inside shadow roots should reach Jev's state")
+    if trace["result"]["evidence"]["line"] != "Saved successfully: Ada":
+        failures.append(f"J: the evidence line should be quoted from inside the shadow root: {trace['result']['evidence']}")
+    acted = [s["executed"] for s in trace["steps"] if s.get("executed", {}).get("action") in ("TYPE_TEXT", "CLICK")]
+    if len(acted) != 2 or not all(a["ok"] for a in acted) or any(s.get("stale") for s in trace["steps"]):
+        failures.append(f"J: both actions should land, with no stale decision (the fingerprint re-reads the shadow nodes): {acted}")
+    shallow = make_spec(base + "/shadow-app", goal=deep["goal"], data=deep["data"], budget={"max_steps": 3, "max_seconds": 30})
+    trace, out = go("shadow-off", shallow, ScriptedJev([("type", "Nickname", "nickname"), ("click", "Save profile"), ("undecided",)], SAVED))
+    if trace["status"] == "passed" or any(e.get("name") in ("Nickname", "Save profile") for s in trace["steps"] for e in s["elements"]) \
+            or "shadow DOM" not in flags_of(trace, out):
+        failures.append(f"J: without observation.shadow_dom the shadow controls are not offered and the stalled run says so: {trace['status']}")
+
+    # K. uploads, driven by Jev ------------------------------------------------------------------------------------------------
+    photo = os.path.join(tmp, "photo-sample.png")
+    with open(photo, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n")
+    apply = make_spec(base + "/upload", goal="Attach the resume and the photo and submit, so that the page says it was saved.",
+                      files={"resume": upload, "photo": photo},
+                      **{"assert": [{"text_in": {"selector": "#log", "contains": "cv=cv-sample.txt"}}, {"text_in": {"selector": "#log", "contains": "photo=photo-sample.png"}}]})
+    jev = ScriptedJev([("upload", "Resume", "resume"), ("upload", "photo", "photo"), ("click", "Submit application")], SAVED)
+    trace, out = go("upload-driven", apply, jev)
+    first = trace["steps"][0]
+    fields = {e.get("name"): e for e in first["elements"] if e["role"] == "file"}
+    if trace["status"] != "passed":
+        failures.append(f"K: attaching two files and submitting should pass: {trace['status']} {trace.get('error')} {trace['result']['assertions']} {trace['result']['story']}")
+    if set(fields) != {"Resume", "Choose photo"} or not fields.get("Choose photo", {}).get("hidden") or fields.get("Resume", {}).get("hidden"):
+        failures.append(f"K: both file fields should be offered, the hidden one marked so and named by its label: {fields}")
+    if "UPLOAD_FILE" not in first["offered_operations"] or jev.seen_states[0].get("available_files") != [
+            {"key": "resume", "name": "cv-sample.txt"}, {"key": "photo", "name": "photo-sample.png"}]:
+        failures.append(f"K: UPLOAD_FILE and the files (key and name, never the path) should be offered: {first['offered_operations']} {jev.seen_states[0].get('available_files')}")
+    if tmp in json.dumps(jev.seen_states):
+        failures.append("K: a file's path must not reach Jev's state")
+    ups = [s for s in trace["steps"] if (s.get("executed") or {}).get("action") == "UPLOAD_FILE"]
+    if [(u["executed"].get("file_key"), u["executed"].get("file"), u["executed"]["ok"]) for u in ups] != [
+            ("resume", "cv-sample.txt", True), ("photo", "photo-sample.png", True)]:
+        failures.append(f"K: the two uploads should be recorded with the file's key and name: {[u['executed'] for u in ups]}")
+    after = {e.get("name"): e.get("value") for e in trace["steps"][2]["elements"] if e["role"] == "file"}
+    if after != {"Resume": "(file: cv-sample.txt)", "Choose photo": "(file: photo-sample.png)"}:
+        failures.append(f"K: an attached file should show as the field's content: {after}")
+    story = trace["result"]["story"]
+    if len(story) < 2 or not story[0].endswith("<- file resume") or not story[1].endswith("<- file photo"):
+        failures.append(f"K: the story should name the file attached at each upload: {story}")
+    plain = make_spec(base + "/upload", goal=apply["goal"], budget={"max_steps": 2, "max_seconds": 30})
+    trace, out = go("upload-off", plain, ScriptedJev([("undecided",)], SAVED))
+    first = trace["steps"][0]
+    if "UPLOAD_FILE" in first["offered_operations"] or [e.get("name") for e in first["elements"] if e["role"] == "file"] != ["Resume"]:
+        failures.append(f"K: without `files` no upload is offered and the hidden field stays out of the table: {first['offered_operations']}")
+
+    # L. hover, driven by Jev ----------------------------------------------------------------------------------------------------
+    menu = make_spec(base + "/hover", goal="Open Products and choose Pricing, so that the page says it was saved.", extra_operations=["HOVER"])
+    jev = ScriptedJev([("hover", "Products"), ("click", "Pricing")], SAVED)
+    trace, out = go("hover-driven", menu, jev)
+    ops = [(s.get("executed") or {}).get("action") for s in trace["steps"]]
+    if trace["status"] != "passed" or ops[:2] != ["HOVER", "CLICK"]:
+        failures.append(f"L: hovering the menu and clicking the item it reveals should pass: {trace['status']} {ops} {trace.get('error')}")
+    if any(e.get("name") == "Pricing" for e in trace["steps"][0]["elements"]) or not any(e.get("name") == "Pricing" for e in trace["steps"][1]["elements"]):
+        failures.append("L: the submenu item should be offered only after the hover")
+    if trace["steps"][0].get("page_changed") is not True:
+        failures.append("L: the hover changed what Jev sees, so it is not a no-effect action")
+    still = make_spec(base + "/hover", goal=menu["goal"], budget={"max_steps": 2, "max_seconds": 30})
+    trace, out = go("hover-off", still, ScriptedJev([("hover", "Products"), ("click", "Pricing"), ("undecided",)], SAVED))
+    if any("HOVER" in s["offered_operations"] for s in trace["steps"]) or "hover_target" in json.dumps(trace["steps"][0].get("target") or {}):
+        failures.append("L: without extra_operations HOVER is never offered")
+    # M. evidence: "failures" ---------------------------------------------------------------------------------------------------
+    counts = {}
+    for mode in ("always", "failures"):
+        jev = ScriptedJev([("click", "Save")], SAVED)
+        trace, out = go(f"evidence-{mode}", make_spec(base + "/app", evidence=mode, **{"assert": [{"text_contains": "Saved successfully"}]}), jev)
+        counts[mode] = (trace["status"], jev.requests, trace["result"]["evidence"].get("line"), trace["result"]["evidence"].get("skipped"))
+    if counts["always"][:3] != ("passed", 3, "Saved successfully") or counts["always"][3] is not None:
+        failures.append(f"M: by default a pass gets its evidence line in one more request: {counts['always']}")
+    if counts["failures"][:3] != ("passed", 2, None) or not counts["failures"][3]:
+        failures.append(f"M: with evidence 'failures' a pass whose assertions hold makes one request fewer and says why it has no line: {counts['failures']}")
+    if "line not asked" not in flags_of(trace, out):
+        failures.append("M: the summary should say the line was not asked")
+    jev = ScriptedJev([("click", "Save")], SAVED)
+    trace, out = go("evidence-no-assert", make_spec(base + "/app", evidence="failures"), jev)
+    if trace["status"] != "passed" or trace["result"]["evidence"]["line"] != "Saved successfully":
+        failures.append(f"M: a pass with no assertions has nothing else to prove it and keeps its line: {trace['status']} {trace['result']['evidence']}")
+    jev = ScriptedJev([("click", "Save")], SAVED)
+    wrong = make_spec(base + "/app", evidence="failures", confirm="recheck", **{"assert": [{"url_matches": "**/somewhere-else"}]})
+    trace, out = go("evidence-assert-fails", wrong, jev)
+    if trace["status"] != "assert_failed" or trace["result"]["evidence"]["line"] != "Saved successfully":
+        failures.append(f"M: a pass whose assertions fail is a failure and gets its line: {trace['status']} {trace['result']['evidence']}")
+    bug = make_spec(base + "/app", evidence="failures", outcomes={"saved": {"when": "The page says 'Never shown here'", "verdict": "pass"},
+                                                                 "said_saved": {"when": "The page says 'Saved successfully'", "verdict": "bug", "requires_action": True}},
+                    **{"assert": [{"text_contains": "Saved"}]})
+    jev = ScriptedJev([("click", "Save")], {"said_saved": "Saved successfully"})
+    trace, out = go("evidence-bug", bug, jev)
+    if (trace["outcome"], trace["result"]["evidence"]["line"]) != ("said_saved", "Saved successfully"):
+        failures.append(f"M: an outcome that is not a pass always gets its line: {trace['outcome']} {trace['result']['evidence']}")
     return failures
 
 
