@@ -126,6 +126,8 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `secrets` | list | `[]` | Names in `data` whose values must never appear in the trace or in the state sent to Jev. Shown as `<secret>` in `available_data_values`, and masked again in every observation (a secret typed into a plain text field or a contenteditable reads back as `<secret>`, not as the value). Masking replaces **every occurrence**, so a value shorter than 6 characters after `${ENV}` substitution (`1`, `2024`, `admin`) also rewrites unrelated page text Jev decides on; `spec.py` and the runner print a warning on stderr for it (exit code unchanged): use a longer test credential, or leave a non-confidential value out of `secrets` |
 | `files` | object | `{}` | Files Jev may attach, by name: `{"cv": "fixtures/cv.pdf"}` (paths relative to the directory you run from; `${ENV_VAR}` allowed). Declaring any offers the operation `UPLOAD_FILE` wherever the page has a file field, one the page hides behind a button included: Jev picks the field and the name, the runner sets the file, and only the file's name reaches Jev. A missing file is exit 2 |
 | `extra_operations` | list | `[]` | Operations beyond the standing set, offered only when listed. `["HOVER"]`: Jev may move the pointer over a link, button, tab or menu item to open a menu that only shows on hover, then click what it reveals. Off by default because every operation offered is one more choice on every step; `--hover` on `run_test.py` adds it for a run |
+| `login` | list | `[]` | Scripted steps that only establish who is logged in (the same actions as `setup`, run before it). Kept apart from `setup` so that a run can reuse the session an earlier run saved: see "Sessions and the HTTP cache" below. A spec that tests the login has none |
+| `session` | bool \| `"never"` \| object | `false` | `true` (or `{"reuse": true, "max_age_s": 43200, "dir": ".jev/sessions"}`): start from the session saved by an earlier run with the same `login` on the same site and skip the `login` steps; save this run's when it had to log in. `--reuse-sessions` on `run_test.py`, `--sessions` on `run_suite.py`. `"never"` keeps a spec out even then. Ignored without a `login` block and when attached to a running browser |
 | `setup` | list | `[]` | Deterministic Playwright steps run **before** Jev takes over (see below) |
 | `teardown` | list | `[]` | Deterministic steps run **after the verdict**, whatever it was: delete the record the flow created, log out (the same actions as `setup`, see below). Best effort: a failing step is reported in `result.teardown` and never changes the outcome, the verdict or the exit code |
 | `checks` | object | `{}` | `name -> statement` evaluated as a Noul (0–1) against the page at every step |
@@ -163,6 +165,7 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `browser.action_timeout_ms` | int | 8000 | Playwright timeout per click/fill |
 | `browser.navigation_timeout_ms` | int | 30000 | Timeout for loading the start URL and for `setup` `goto`s. A start page that does not load in time is not a flow outcome: the run ends `error` with `result.reason.phase: "navigation"`, exit 2, and a suite lists it as an environment failure |
 | `browser.storage_state` | path | null | Playwright storage state file (cookies/localStorage) for pre-authenticated sessions |
+| `browser.http_cache` | bool | `false` | Keep the browser's HTTP cache between runs: the browser runs on a profile under `browser.http_cache_dir` (default `.jev/http-cache`) from which everything but the cache folders is removed before each launch. No cookie and no stored state carries over. `--http-cache`. Ignored when attached to a running browser |
 | `browser.channel` | string | null | e.g. `"chrome"` to use an installed Chrome instead of bundled Chromium |
 | `browser.cdp_url` | URL | null | Attach to a browser that is already running instead of launching one (see below). `storage_state`, `headless` and `channel` are ignored when attached |
 | `observation.max_elements` | int | 200 | Cap on numbered elements per step (largest Choice Jev sees), 1–250. Elements beyond it are reported as `truncated_elements` and cannot be chosen |
@@ -227,6 +230,48 @@ Any step with a `selector` may also carry **`frame`**: the CSS selector of the `
 ```json
 { "action": "fill", "frame": "iframe#card-frame", "selector": "input[name=cardnumber]", "value": "${TEST_CARD}" }
 ```
+
+## Sessions and the HTTP cache
+
+Two things a run can take over from an earlier one, both off unless asked for, both kept under `.jev/` (which
+ignores itself for git).
+
+**A logged-in session.** Put the steps that only log in under `login`:
+
+```json
+"login": [
+  {"action": "fill", "selector": "#user-name", "value": "standard_user"},
+  {"action": "fill", "selector": "#password", "value": "${SHOP_PASSWORD}"},
+  {"action": "click", "selector": "#login-button"},
+  {"action": "wait_for", "url": "**/inventory.html"}
+],
+"setup": [ ... what this spec needs beyond being logged in ... ]
+```
+
+Without `--reuse-sessions` nothing changes: `login` runs, then `setup`. With it, the first run that logs in saves the
+browser's storage state (cookies and localStorage) and the page the login ended on to `.jev/sessions/<key>.json`;
+every later run of a spec with **the same `login` on the same site** starts from that state and skips the steps
+(`result.session.reused`, `login: skipped` in the summary, `timing.login_ms` about 0). The key is the site's origin,
+the login steps as executed (another account is another session) and the device; the file name is a keyed hash and
+says nothing about the credentials, and the file holds what a logged-in browser holds, never what was typed. It is
+as sensitive as that browser: keep `.jev/` out of anything you share.
+
+A saved session is checked before it counts. The run opens the page the login ended on (or, when `setup` begins
+with a `goto`, that page, so it is not loaded twice); it must answer at its own URL shape (an application that sends
+an expired session to its login page fails this) and show whatever the login's `wait_for` steps waited for. A
+session that fails is deleted and the run logs in as if there had been none (`result.session.expired`). Sessions
+older than `session.max_age_s` (12 h) are not tried.
+
+Do not give a `login` block to a spec that tests logging in, logging out or permissions of another account: the
+flow under test would be skipped, or would end the session the other specs are using (they recover by logging in
+again, at the cost of the time saved). `"session": "never"` opts a spec out by name.
+
+**The HTTP cache.** `--http-cache` (`browser.http_cache`) runs the browser on a profile directory from which, before
+every launch, everything except the HTTP and code caches is deleted. What a run inherits is what the browser would
+have cached anyway, under the server's own freshness rules, and nothing else: cookies, localStorage and service
+workers start empty every time. Parallel runs take separate slots, each warm after its first use. The run then
+loads the application as a returning visitor does; one that ships new code under an old URL with a long `max-age`
+is tested the way that visitor would see it, so leave the cache off when a first visit is what you mean to test.
 
 ## Teardown steps
 

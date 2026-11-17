@@ -215,6 +215,33 @@ about half a second off a three-field checkout form, nothing off the two forms w
 at the suggestion list, and the extra questions cost about 9% more input tokens there). It stays opt-in for that
 reason: the saving is one request per plain extra field, and a first run should not pay for questions it cannot use.
 
+## Sessions and the HTTP cache (`scripts/session.py`)
+
+Both answer the same observation from the 0.7.0 baseline: of 198 s for the 22 examples, 23 s is page loads and
+27 s is setup, most of it four identical OrangeHRM logins and the pages they load.
+
+**Sessions.** A spec names its login steps (`login`), the runner keys a saved session by the site's origin, those
+steps as executed and the device, and `context.storage_state()` after the login is what is saved, with the URL the
+login ended on. Reuse is always checked on a real page (same URL shape, the login's `wait_for` selectors present)
+before anything else runs, because a stale session that is trusted fails every spec in the suite in a way that
+looks like the application's. The file name is an HMAC under a random per-directory key: a name derived from the
+login steps alone could be tested against guesses of the password. The run never writes the typed values anywhere;
+the session file holds cookies, which is the point of it and the reason `.jev/` ignores itself.
+
+**The cache.** Playwright's contexts are incognito: their HTTP cache dies with them. A persistent profile keeps it,
+and also keeps everything else, which a test must not inherit. So the profile is cut back to `Default/Cache` and
+`Default/Code Cache` before every launch (`strip_profile`): the browser starts with no cookies, no storage and no
+service worker, as clean as a throwaway profile, and with the cache the last run left. A profile is one browser at
+a time; `CacheSlot` hands out `slot-0`, `slot-1`, ... by lock file. A saved session on a cache profile is put back
+by hand (`add_cookies` and an init script for localStorage), since such a context takes no `storage_state`.
+
+Measured (2026-11-17, `jev-1.14.0`, 3 runs an arm, dev-docs `measurements/`, section "0.11.0"). Sessions, the four
+OrangeHRM specs with a `login`: the time before the first step (page load, login, setup) 33.7 → 21.9 s over the four,
+of which the logins were 11.1 s; the four shop specs 4.7 → 2.9 s (a 0.6 s login each). The HTTP cache: page loads
+over the 17 public specs 19.0 → 7.7 s and their wall-clock 82.7 → 69.5 s; on OrangeHRM page loads 10.3 → 4.5 s and
+wall-clock 111.9 → 108.2 s, inside that demo's noise. The same verdicts throughout, apart from the pages that are
+random and the shared demo's own id collisions, which fell in both arms over the day.
+
 ## Replay: a saved path is a second source of decisions
 
 `run()` has one loop, and replay does not add a second: on each step, before the request is built, a run with a
