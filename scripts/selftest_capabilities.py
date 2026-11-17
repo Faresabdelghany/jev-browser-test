@@ -1073,6 +1073,14 @@ def run_checks(tmp: str | None = None) -> list[str]:
     trace, out, sess = session_run("session-never", login_spec(session={"reuse": False, "never": True, "dir": sess_dir}))
     if (trace["status"], site.logins, "session" in trace["result"]) != ("passed", 4, False):
         failures.append(f"R: a spec that opts out logs in every time and reports no session: {trace['status']} logins={site.logins}")
+    # a setup that begins with a goto: the reused session opens that page at once, and it is not loaded twice
+    before = len(site.hits)
+    trace, out, sess = session_run("session-goto", login_spec(setup=[{"action": "goto", "url": base + "/home?tab=2"},
+                                                                    {"action": "wait_for", "selector": "#do"}]))
+    homes = [h for h in site.hits[before:] if h.startswith("/home")]
+    if (trace["status"], site.logins, sess.get("reused"), homes, [(st["action"], st.get("by")) for st in trace["setup"]]) != \
+            ("passed", 4, True, ["/home?tab=2"], [("goto", "session"), ("wait_for", None)]):
+        failures.append(f"R: with a setup that starts with a goto the session is checked on that page, loaded once: {trace['status']} {sess} {homes} {trace['setup']}")
     # the HTTP cache: the script once, the stored state never
     for i in (1, 2):
         spec = make_spec(base + "/cache-app", **{"id": "http-cache", "goal": "Open the page, so that it says saved.",

@@ -7,9 +7,9 @@ was on to `.jev/sessions/<key>.json`, and every later run of a spec with the **s
 from that state on that page and skips the `login` steps. The key is a keyed hash of the site's origin, the login
 steps as this run would execute them (so another account is another session) and the device: the file name says
 nothing about the credentials, and the file holds what the browser holds after a login, never what was typed. A
-saved session is checked before it is used: the page it was saved on must answer at the same URL shape (an
-application that sends an expired session to its login page fails this) and show what the login's `wait_for`
-steps waited for; a session that fails the check is deleted and the run logs in as if there had been none. A spec
+saved session is checked before it is used: the page it was saved on (or, when the spec's `setup` begins with a
+`goto`, that page, which is then not loaded twice) must answer at the same URL shape (an application that sends an
+expired session to its login page fails this) and show what the login's `wait_for` steps waited for; a session that fails the check is deleted and the run logs in as if there had been none. A spec
 that tests the login itself keeps it in the flow (or in `setup`) and has no `login` block; `"session": "never"`
 keeps a spec with one out of reuse even under `--reuse-sessions`.
 

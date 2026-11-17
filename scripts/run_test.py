@@ -285,12 +285,15 @@ def step_locator(page, step: dict, selector: str | None = None):
     return scope.locator(selector or step["selector"]).first
 
 
-def run_steps(page, spec: dict, steps: list[dict], results: list[dict], name: str = "setup", net: NetWatch | None = None) -> list[dict]:
+def run_steps(page, spec: dict, steps: list[dict], results: list[dict], name: str = "setup", net: NetWatch | None = None,
+              start: int = 0) -> list[dict]:
     """Deterministic Playwright steps, no Jev: `setup` before the flow (login, cookie banner, fixtures, and the
     interactions Jev is not offered: a file upload, a hover menu, a drag) and `teardown` after the verdict. Records
     land in `results` as they run (pass the trace's list, so a failing step is recorded even though this raises)."""
     timeout = spec["browser"]["action_timeout_ms"]
     for i, step in enumerate(steps):
+        if i < start:  # already done (a reused session opened the page the first `goto` names)
+            continue
         act = step["action"]
         rec = {"n": i, "action": act, "selector": step.get("selector"), "ok": True, "error": None}
         if step.get("frame"):
@@ -348,9 +351,9 @@ def run_steps(page, spec: dict, steps: list[dict], results: list[dict], name: st
     return results
 
 
-def run_setup(page, spec: dict, results: list[dict] | None = None, net: NetWatch | None = None) -> list[dict]:
-    """The spec's `setup` steps (see run_steps)."""
-    return run_steps(page, spec, spec["setup"], [] if results is None else results, "setup", net)
+def run_setup(page, spec: dict, results: list[dict] | None = None, net: NetWatch | None = None, start: int = 0) -> list[dict]:
+    """The spec's `setup` steps (see run_steps), from step `start`."""
+    return run_steps(page, spec, spec["setup"], [] if results is None else results, "setup", net, start)
 
 
 def run_teardown(page, spec: dict, results: list[dict], net: NetWatch | None = None) -> dict:
@@ -1591,13 +1594,17 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
             phase = "navigation"
             try:
                 nav_timeout = spec["browser"]["navigation_timeout_ms"]
+                setup_from = 0
                 if session is not None:
-                    # The page the login ended on, with the saved cookies and storage. The session counts only if that
-                    # page answers as itself and shows what the login waited for; otherwise it is thrown away and the
-                    # run logs in like any other.
-                    page.goto(session["url"], wait_until="domcontentloaded", timeout=nav_timeout)
+                    # The page the login ended on, with the saved cookies and storage; or, when the setup's first step is
+                    # a `goto`, that page at once (the post-login page would only be loaded to be left). The session counts
+                    # only if the page answers as itself and shows what the login waited for; otherwise it is thrown away
+                    # and the run logs in like any other.
+                    first = spec["setup"][0] if spec["setup"] and spec["setup"][0].get("action") == "goto" else None
+                    opened = first["url"] if first else session["url"]
+                    page.goto(opened, wait_until="domcontentloaded", timeout=nav_timeout)
                     settle(page, spec, net=net, since=action_started)
-                    stale = page_mismatch(session["url"], page.url)
+                    stale = page_mismatch(opened, page.url)
                     for st in ([] if stale else spec["login"]):
                         if st["action"] == "wait_for" and st.get("selector"):
                             try:
@@ -1617,6 +1624,10 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                             pass
                     else:
                         session_info["reused"] = True
+                        if first:
+                            setup_from = 1
+                            trace["setup"].append({"n": 0, "action": "goto", "selector": None, "ok": True, "error": None, "url": first["url"],
+                                                   "by": "session"})  # opened while the saved session was checked
                 if session is None:
                     page.goto(spec["start_url"], wait_until="domcontentloaded", timeout=nav_timeout)
                     settle(page, spec, net=net, since=action_started)
@@ -1632,7 +1643,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                             except Exception as e:  # noqa: BLE001 - the run goes on logged in; the next one logs in again
                                 session_info["save_error"] = f"{type(e).__name__}: {str(e)[:120]}"
                     t_lap = lap("login_ms", t_lap)
-                run_setup(page, spec, trace["setup"], net)  # records into trace["setup"] as it goes, so a failed step is kept
+                run_setup(page, spec, trace["setup"], net, setup_from)  # records into trace["setup"] as it goes, so a failed step is kept
                 t_lap = lap("setup_ms", t_lap)
                 last_action_end = action_started = time.perf_counter()
             except Exception:
