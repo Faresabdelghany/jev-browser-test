@@ -320,7 +320,14 @@ HOVER_PAGE = """<!doctype html><html><head><title>Hover menu</title><style>
   <li><a href="#docs">Documentation</a></li></ul></li><li><a href="#about">About</a></li></ul></nav>
 <h1>Welcome</h1><p id="msg"></p></body></html>"""
 
-ROUTES = {"/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
+# The same menu opened the way jQuery UI opens one: by a script, 300 ms after the pointer arrives (its default delay).
+HOVER_DELAY_PAGE = HOVER_PAGE.replace("#products:hover .sub{display:block}", "").replace("</body>", """<script>
+const li = document.getElementById('products'), sub = li.querySelector('.sub'); let t;
+li.addEventListener('mouseenter', () => { t = setTimeout(() => { sub.style.display = 'block'; }, 300); });
+li.addEventListener('mouseleave', () => { clearTimeout(t); sub.style.display = 'none'; });
+</script></body>""")
+
+ROUTES = {"/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
           "/device": DEVICE_PAGE, "/tabs": TABS_PAGE, "/receipt": RECEIPT_PAGE, "/spinner": SPINNER_PAGE, "/shadow": SHADOW_PAGE}
 
 
@@ -664,6 +671,13 @@ def run_checks(tmp: str | None = None) -> list[str]:
         failures.append("L: the submenu item should be offered only after the hover")
     if trace["steps"][0].get("page_changed") is not True:
         failures.append("L: the hover changed what Jev sees, so it is not a no-effect action")
+    slow = make_spec(base + "/hover-delay", goal=menu["goal"], extra_operations=["HOVER"])
+    trace, out = go("hover-delayed", slow, ScriptedJev([("hover", "Products"), ("click", "Pricing")], SAVED))
+    hovered = [s for s in trace["steps"] if (s.get("executed") or {}).get("action") == "HOVER"]
+    if trace["status"] != "passed" or not hovered or (hovered[0]["executed"].get("reveal") or {}).get("ended") != "changed" \
+            or hovered[0].get("no_effect") or hovered[0].get("page_changed") is not True:
+        failures.append(f"L: a menu that opens 300 ms after the hover is waited for, not flagged NO-EFFECT: {trace['status']} "
+                        f"{[h['executed'].get('reveal') for h in hovered]}")
     still = make_spec(base + "/hover", goal=menu["goal"], budget={"max_steps": 2, "max_seconds": 30})
     trace, out = go("hover-off", still, ScriptedJev([("hover", "Products"), ("click", "Pricing"), ("undecided",)], SAVED))
     if any("HOVER" in s["offered_operations"] for s in trace["steps"]) or "hover_target" in json.dumps(trace["steps"][0].get("target") or {}):

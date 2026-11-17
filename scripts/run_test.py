@@ -461,6 +461,9 @@ def deferral_limit(th: dict) -> int:
     while the loader was still up."""
     return th["max_low_confidence_steps"] + BUSY_EXTRA_LOOKS
 WAIT_POLL_MS = 100  # a WAIT re-reads the page's fingerprint this often and ends as soon as the page has changed
+HOVER_REVEAL_MS = 800  # a hover menu may open after a delay (jQuery UI's default is 300 ms, hover-intent scripts 100-500):
+# after a HOVER the runner waits up to this long for the page to change, ending the moment it does. Live, 0.5.0: the
+# settle went quiet at ~110 ms, the jQuery UI submenu opened at 300, and every hover was flagged NO-EFFECT
 NO_EFFECT_ACTIONS = {"CLICK", "TYPE_TEXT", "SELECT", "PRESS_ENTER", "HOVER", "UPLOAD_FILE"}  # an executed one of these that changed nothing is flagged
 NAVIGATION_PENDING_MARKER = "waiting for scheduled navigations to finish"  # Playwright's call log after "click action done"
 
@@ -606,6 +609,7 @@ def execute(page, spec: dict, operation: str, target: dict | None, value_key: st
             # the pointer stays where it is put: the menu it opens is on the next observation, and a click on one of its
             # items moves the pointer there without leaving the menu
             loc.hover(timeout=timeout)
+            res["reveal"] = wait_for_change(page, before, HOVER_REVEAL_MS)  # {"ended": "changed" | "timeout" | ..., "ms"}
         elif operation == "UPLOAD_FILE":
             files = spec.get("files") or {}
             if not value_key or value_key not in files:
