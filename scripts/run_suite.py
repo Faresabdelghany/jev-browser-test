@@ -403,7 +403,7 @@ def render_markdown(report: dict) -> str:
 
 def run_suite(spec_paths: list[str], repeat: int, workers: int, out_root: str, run_args: list[str],
               python: str = sys.executable, runner: str = RUN_TEST, label: str = "", replay: bool = False,
-              per_host: int | None = None, host_overrides: list[tuple[str, int]] | None = None) -> dict:
+              per_host: int | None = None, host_overrides: list[tuple[str, int]] | None = None, quiet: bool = False) -> dict:
     """Run the pool, aggregate, write results.json + results.md, return the report. `per_host` (default: `workers`,
     so a caller that names only `workers` gets the pool it always got) and `host_overrides` bound how many runs one
     host sees at once (host_limits)."""
@@ -429,7 +429,8 @@ def run_suite(spec_paths: list[str], repeat: int, workers: int, out_root: str, r
         rec = {"run": i, **rec}
         shown = f"environment failure (exit {rec.get('exit_code')})" if rec.get("environment_failure") else \
             f"{rec.get('outcome')} ({rec.get('verdict') or rec.get('status')})"
-        print(f"{sid} {i}/{repeat}: {shown} {rec['wall_ms']} ms", flush=True)
+        if not quiet:  # rerun.py prints its own few lines and nothing else
+            print(f"{sid} {i}/{repeat}: {shown} {rec['wall_ms']} ms", flush=True)
         return sid, i, rec
 
     done, peaks = run_pool(jobs, workers, lambda job: hosts[job[0]], limits, work)
