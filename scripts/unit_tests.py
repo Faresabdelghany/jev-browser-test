@@ -3352,7 +3352,9 @@ class ReplayTests(unittest.TestCase):
             for extra, over in ((["--replay"], {}), (["--replay", "--replay-verify", "assert", "--replay-dir", "d"], {"replay": True})):
                 with open(file, "w", encoding="utf-8") as f:
                     json.dump({**body, **over}, f)
+                # (a stand-in for Playwright: main() refuses to start without it, and these tests run where it is not installed)
                 with mock.patch.object(run_test, "JevClient"), mock.patch.object(run_test, "summarize", lambda *a: ""), \
+                        mock.patch.dict("sys.modules", {"playwright": mock.MagicMock()}), \
                         mock.patch.object(run_test, "run", lambda spec, jev, out, screenshots=None: seen.append(spec) or {"pass": True}):
                     run_test.main(["run_test.py", file, "--out", os.path.join(tmp, "o"), *extra])
         self.assertFalse(seen[0]["replay"]["enabled"])
