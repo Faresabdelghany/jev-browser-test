@@ -1166,3 +1166,38 @@ filter chip's "×" button and an icon-named button that render a moment earlier 
 page recorded under its loading layer being waited for until the budget ran out (`hrm-add-employee` 17.7 → 21.7 s
 with replay). The fingerprint now counts only word-named controls outside table rows, and the wait for the ending
 ends when the assertions hold.
+
+## 0.9.0 (2026-11-17, evening): one request per form
+
+Step 2: `--batch-fields` (`scripts/policy.py` `build_fill_questions` / `plan_batch`, the batch in `run_test.py`).
+First runs only, as asked. `ab.py --b-arg=--batch-fields --repeat 5` on the eight examples whose flow fills more
+than one text field (`2026-11-17-batch-ab-public`, `-hrm`), step 2's branch at `22dfde0`'s code, `jev-1.14.0`.
+
+| spec | ended in (A, B) | requests | input tokens | wall |
+|---|---|---:|---:|---:|
+| `shop-checkout` | order_complete 5/5, 5/5 | 10 → 8 | 24,991 → 20,744 | 5.6 → 5.1 s |
+| `shop-checkout-problem-account` | form_error 5/5, 5/5 | 9 → 7 | 23,457 → 19,232 | 5.3 → 5.4 s |
+| `shop-checkout-error-account` | blocked 5/5, 5/5 | 10 → 8 | 26,266 → 21,868 | 6.2 → 5.4 s |
+| `web-form-submit` | form_submitted 5/5, 5/5 | 9 → 7 | 23,844 → 20,383 | 5.0 → 4.0 s |
+| `login-logout` | logged_out 5/5, 5/5 | 6 → 5 | 9,770 → 8,756 | 5.0 → 4.6 s |
+| `hrm-add-employee` | employee_saved 5/5; 3/5, employee_id_taken 1, low_confidence 1 | 12 → 10 | 54,743 → 46,835 | 23.1 → 19.0 s |
+| `hrm-pim-add-employee-list` | employee_listed 5/5, 5/5 | 18 → 17 | 102,186 → 103,366 | 20.2 → 19.8 s |
+| `hrm-admin-add-user` | user_listed 5/5, 5/5 | 20 → 21 | 108,822 → 118,820 | 29.0 → 31.2 s |
+| sum of medians | | 94 → 83 | 374,079 → 360,004 | 99.5 → 94.4 s |
+
+What the batches did (from the B traces): on the checkout form Jev typed First Name and assigned Last Name (0.99)
+and Zip/Postal Code (1.0) in the same request, both typed with no request; on the web form Text input, then Textarea
+(0.97), with the three other empty fields `leave_empty` at 1.0; on OrangeHRM's Add Employee, First Name then Last
+Name (0.80 to 0.99), the sidebar's Search box and Middle Name `leave_empty` at 0.96 to 1.0. On Add User the plan
+after the employee type-ahead was Username, Password, Confirm Password, and the batch ended at once ("a layer or a
+loading list appeared over the form": the suggestions, which must be clicked first); the second plan typed Password
+and ended on Confirm Password ("the page's text changed": the strength line). No batch typed a wrong value.
+
+`hrm-add-employee` moved in some runs, so it was run alone, ten an arm (`-hrm-add-employee-x10`): employee_saved 8,
+low_confidence 1, employee_id_taken 1 without the option; employee_saved 9, low_confidence 1 with it. The
+low-confidence runs are the first-field decision that has been shaky under `jev-1.14.0` all day (TYPE_TEXT First
+Name at 0.33 to 0.42 three times), with no batch planned in them; `employee_id_taken` is the shared demo handing the
+same next id to two visitors.
+
+Decision: opt-in. One request per plain extra field is a real gain and a small one (half a second of 5.6 on the
+checkout), and on forms that react it costs tokens and saves nothing.
