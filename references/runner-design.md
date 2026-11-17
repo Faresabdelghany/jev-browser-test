@@ -484,6 +484,39 @@ the step records `wait_streak` and `executed.wait_ms`), so a loader that runs fo
 (a 5 s loader: 10 → 8) at the price of the last pause's overshoot (+1.0 s there; block F of the measurements
 README). Runner-inserted WAITs never back off.
 
+### Network-aware settle (`browser.settle: "network"`)
+
+The DOM-quiet window does two jobs: it waits for the page to finish painting what it has, and, by being long
+enough, it hopes to outlast the request whose answer the page is waiting for. The second job is a guess (OrangeHRM's
+specs raise `quiet_ms` to 200 for it, and pay 200 ms on every keystroke-only step), so the opt-in mode does it
+directly. `NetWatch` listens to the browser's own request events (nothing is injected into the page) and keeps the
+requests in flight; `settle()` then waits for the DOM to be quiet for `network_quiet_ms` (50), then for the requests
+**started since the action began** to finish, then for the DOM again (what the responses rendered), at most four
+rounds, all inside `settle_ms`.
+
+- Which requests count: `xhr`, `fetch`, `script`, `stylesheet`. Images, fonts and media arrive after the page can be
+  read; a WebSocket and an EventSource never finish; a frame's document is the frame's.
+- What is ignored: anything started before the action (a long poll, a stream: "the requests the action started" is
+  meant literally), and URLs that are analytics or monitoring by name (`NET_IGNORED_RE`).
+- A request that outlasts the cap ends the settle at the cap, as a page that never goes quiet does:
+  `settle.ended: "cap"` with `settle.network.left`.
+- What it cannot know: a request that has not started yet (a debounced type-ahead). That is the `options` wait's
+  job, unchanged.
+
+Measured (2026-11-17, `jev-1.14.0`, 5 runs an arm, dev-docs `measurements/`, section "0.10.0"). On the 17 public
+examples: the same verdicts, the browser's time per action 153 → 102 ms (median over 340 actions), decisions made
+stale by a page still moving 6 → 0, wall-clock 83.6 → 78.5 s. On OrangeHRM: per action 249 → 100 ms, stale 8 → 0,
+undecided steps 46 → 24, requests 82 → 67, and **wall-clock unchanged** (109 → 118 s, inside that demo's noise):
+the application's responses take what they take, and the waiting only moves from Jev's WAITs and refused decisions
+into the settle. That is why it is opt-in: it buys fewer requests and steadier decisions everywhere, and time only
+on pages that answer fast.
+
+Tried and dropped: with the watcher saying "nothing in flight", an undecided step waited 300 ms instead of
+`settle_ms` x 1, 2, 4 before Jev was asked again. On OrangeHRM that turned `hrm-add-employee`'s shaky first-field
+decision from 1 undetermined run in 5 into 3 in 5 (three identical undecided looks inside a second, on a form whose
+last field value arrives by a request that has not started yet) and saved nothing overall (124.7 vs 125.4 s). The
+long wait is not waste there; it is the time the page needs for something the runner cannot see coming.
+
 ## Rules
 
 `scripts/rules.py` holds standing rules Jev can get with every question as structured `instructions`

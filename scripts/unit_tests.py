@@ -3645,6 +3645,7 @@ class NetworkSettleTests(unittest.TestCase):
                 json.dump(base, f)
             for extra in ([], ["--settle", "network"]):
                 with mock.patch.object(run_test, "JevClient"), mock.patch.object(run_test, "summarize", lambda *a: ""), \
+                        mock.patch.dict("sys.modules", {"playwright": mock.MagicMock()}), \
                         mock.patch.object(run_test, "run", lambda spec, jev, out, screenshots=None: seen.append(spec) or {"pass": True}):
                     run_test.main(["run_test.py", file, "--out", os.path.join(tmp, "o"), *extra])
         self.assertEqual([s["browser"]["settle"] for s in seen], ["dom", "network"])

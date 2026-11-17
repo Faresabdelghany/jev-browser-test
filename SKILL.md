@@ -288,6 +288,11 @@ and the waiting:
 - Give the spec assertions: a pass then confirms itself in code, saving a pause, an observation and a request.
 - Name the visible end state in the goal and the outcomes; a vague goal buys WAITs and wandering steps.
 - Use `wait_for {selector|url}` instead of `wait {ms}` in `setup`.
+- `--settle network` (`"browser": {"settle": "network"}`): after an action the runner waits for the requests the
+  action started and a short quiet window, instead of a longer quiet window that hopes to outlast them. Steps that
+  fetch nothing (typing) settle in about 100 ms instead of 150 to 250, decisions stop going stale under a page that
+  is still loading, and Jev is asked less often on a slow application. It does not make a slow application answer
+  faster: measured wall-clock fell 6% on fast public pages and not at all on a slow admin app.
 - A form of several plain text fields can be filled on one request: `"batch_fields": true` in the spec (or
   `--batch-fields`). The request that types the first field also assigns the others their values, and the runner
   types those without asking again, stopping the moment the page reacts (a message, a new field, a list of
