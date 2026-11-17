@@ -2,8 +2,11 @@
 
     python scripts/ab.py specs/examples/*.json --b-arg=--hover --repeat 3
     python scripts/ab.py specs/examples/*.json --b-arg=--no-shadow-dom --b-arg=--hover --repeat 5 --out runs/ab/both
+    python scripts/ab.py specs/examples/*.json --a-runner ../before/scripts/run_test.py --repeat 5   # two versions of the runner
 
-Arm A runs every spec as it is; arm B runs it with the `--b-arg` options added to `run_test.py`. The question this
+Arm A runs every spec as it is; arm B runs it with the `--b-arg` options added to `run_test.py`. With `--a-runner`
+arm A is another checkout's `run_test.py` (`git worktree add ../before <commit>`), arm B this one's: the same
+comparison for a change to the runner itself, before it is merged. The question this
 answers is the one the standing rules were measured with: an option that is offered on every step is a choice on
 every step, and a choice Jev does not need can still pull its confidence apart. So the report compares, per spec,
 what each arm ended in, the median decision confidence over every step, the Jev requests and the wall-clock.
@@ -93,9 +96,11 @@ def _num(v, digits: int = 2) -> str:
 
 
 def render(report: dict) -> str:
-    lines = [f"# A/B: {' '.join(report['b_args'])}", "",
-             f"{len(report['specs'])} spec(s) x {report['repeat']} repeat(s) per arm, interleaved; arm A as the spec is, arm B with "
-             f"`{' '.join(report['b_args'])}`. {report['timestamp']}", "",
+    b_args, a_runner = " ".join(report["b_args"]), report.get("a_runner")
+    arm_a = f"arm A with the runner at `{a_runner}`" if a_runner else "arm A as the spec is"
+    arm_b = (f"arm B with `{b_args}`" if b_args else "arm B with this checkout's runner") + (" on this checkout's runner" if a_runner and b_args else "")
+    lines = [f"# A/B: {b_args or 'two versions of the runner'}", "",
+             f"{len(report['specs'])} spec(s) x {report['repeat']} repeat(s) per arm, interleaved; {arm_a}, {arm_b}. {report['timestamp']}", "",
              "| spec | A ended in | B ended in | moved | confidence A | B | delta | requests A / B | wall A / B (s) |",
              "|---|---|---|---|---:|---:|---:|---:|---:|"]
     for spec_id, sp in report["specs"].items():
@@ -109,14 +114,15 @@ def render(report: dict) -> str:
     lines += ["", f"**{s['moved_all']} spec(s) ended differently in every run, {s['moved_some']} in some runs, {s['confidence_fell']} lost more than "
                   f"{CONFIDENCE_DROP} of median decision confidence, {s['not_compared']} could not be compared.**", ""]
     if s["moved_all"] or s["moved_some"] or s["confidence_fell"]:
-        lines.append("Not safe to make the default as measured. A spec that moved in every run is the option's doing; one that moved in some "
+        lines.append(("Not the same as measured: read each moved spec before merging the change. " if a_runner else "Not safe to make the default as measured. ")
+                     + "A spec that moved in every run is the " + ("change's" if a_runner else "option's") + " doing; one that moved in some "
                      "runs wants more repeats (run it alone with `--repeat 10`) before it means anything. Open the two arms' traces of a "
                      "moved spec side by side: the step where the operations differ is where to look.")
     elif s["not_compared"]:
         lines.append("No spec moved among those compared, but some never observed a page in one arm (the host, the key or the spec): rerun those.")
     else:
-        lines.append("No spec moved and no confidence fell: over these specs the option changed nothing Jev did. That is evidence for making it "
-                     "the default, as strong as the specs are varied and the repeats many.")
+        lines.append("No spec moved and no confidence fell: over these specs the " + ("change" if a_runner else "option") + " changed nothing Jev did. That is evidence for "
+                     + ("merging it" if a_runner else "making it the default") + ", as strong as the specs are varied and the repeats many.")
     return "\n".join(lines) + "\n"
 
 
@@ -135,12 +141,18 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--b-arg", action="append", default=[], metavar="ARG",
                     help="a run_test.py option arm B adds, e.g. --b-arg=--hover (repeatable; required)")
     ap.add_argument("--a-arg", action="append", default=[], metavar="ARG", help="an option arm A adds (default: none, the spec as it is)")
+    ap.add_argument("--a-runner", metavar="RUN_TEST_PY",
+                    help="arm A runs this run_test.py (another checkout's) instead of this one's: compares two versions of the runner; "
+                         "--b-arg is then optional")
     ap.add_argument("--repeat", type=int, default=3, help="runs per spec per arm (default 3; 5 or more before deciding anything)")
     ap.add_argument("--out", help="output directory (default runs/ab/<timestamp>)")
     ap.add_argument("--python", default=sys.executable)
     args = ap.parse_args(argv[1:])
-    if not args.b_arg:
-        print("nothing to compare: give arm B at least one option, e.g. --b-arg=--hover", file=sys.stderr)
+    if not args.b_arg and not args.a_runner:
+        print("nothing to compare: give arm B at least one option, e.g. --b-arg=--hover, or arm A another runner with --a-runner", file=sys.stderr)
+        return 2
+    if args.a_runner and not os.path.isfile(args.a_runner):
+        print(f"--a-runner: no such file: {args.a_runner}", file=sys.stderr)
         return 2
     if args.repeat < 1:
         print("--repeat must be >= 1", file=sys.stderr)
@@ -156,14 +168,15 @@ def main(argv: list[str]) -> int:
         runs: dict[str, list[dict]] = {"a": [], "b": []}
         for i in range(1, args.repeat + 1):
             for arm, extra in (("a", args.a_arg), ("b", args.b_arg)):  # interleaved: both arms see the same hour
-                rec = run_once(path, os.path.join(out_root, spec_id, f"{arm}{i:02d}"), args.python, list(extra))
+                other = {"runner": os.path.abspath(args.a_runner)} if arm == "a" and args.a_runner else {}
+                rec = run_once(path, os.path.join(out_root, spec_id, f"{arm}{i:02d}"), args.python, list(extra), **other)
                 runs[arm].append(rec)
                 print(f"{spec_id} {arm.upper()}{i}: {ending(rec)}  conf {_num(rec.get('decision_confidence'))}  "
                       f"{_num(rec.get('requests'), 0)} requests  {(rec.get('wall_ms') or 0) / 1000:.1f} s", file=sys.stderr)
         a, b = arm_summary(runs["a"]), arm_summary(runs["b"])
         specs[spec_id] = {"spec": path, "a": a, "b": b, "compare": compare(a, b), "runs": runs}
     report = {"timestamp": datetime.now().isoformat(timespec="seconds"), "repeat": args.repeat, "a_args": args.a_arg,
-              "b_args": args.b_arg, "specs": specs, "summary": summarize(specs)}
+              "b_args": args.b_arg, "a_runner": args.a_runner, "specs": specs, "summary": summarize(specs)}
     os.makedirs(out_root, exist_ok=True)
     with open(os.path.join(out_root, "ab.json"), "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)

@@ -290,7 +290,7 @@ keys or two same-named elements wants keys named like the app's labels, or a `no
   `trace.json`), `run_suite.py` (specs × repeats → `results.json` + `results.md`), `report.py` (a run →
   `report.html`), `spec.py` (validation), `summarize_trace.py`, `selftest.py` (offline check, with
   `selftest_capabilities.py`), `unit_tests.py`, `bench.py` (N repeats, medians), `ab.py` (the specs with and without
-  an option, interleaved), `junit.py`, and the pieces
+  an option, or on two versions of the runner, interleaved), `junit.py`, and the pieces
   `observe.py`, `policy.py`, `rules.py`, `jev_client.py` (read
   `references/runner-design.md` before changing them).
 - `references/spec-format.md` (every field), `troubleshooting.md` (symptom → fix), `suites.md` (agreement, flakiness,

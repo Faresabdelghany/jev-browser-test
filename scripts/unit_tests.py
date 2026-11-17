@@ -3056,6 +3056,44 @@ class ABTests(unittest.TestCase):
             self.assertIn("| login | ok x2 | undetermined:low_confidence x2 | **yes, every run** | 0.90 | 0.45 | -0.450 ⚠ |", text)
             self.assertIn("Not safe to make the default", text)
 
+    def test_a_runner_puts_another_checkout_in_arm_a(self) -> None:
+        import ab
+        calls: list[tuple[str, list[str], str | None]] = []
+
+        def fake_run_once(spec_path, out_dir, python, run_args, runner=None):
+            calls.append((os.path.basename(out_dir), list(run_args), runner))
+            return self.run_rec("ok", 0, "passed", confs=(0.6,) if runner else (0.9,))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_path, before = os.path.join(tmp, "login.json"), os.path.join(tmp, "before_run_test.py")
+            for path in (spec_path, before):
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump({"id": "login"}, f)
+            out = os.path.join(tmp, "out")
+            with mock.patch.object(ab, "run_once", fake_run_once), mock.patch("builtins.print"):
+                self.assertEqual(ab.main(["ab.py", spec_path, "--a-runner", before, "--repeat", "2", "--out", out]), 0)   # no --b-arg needed
+                self.assertEqual(ab.main(["ab.py", spec_path, "--a-runner", os.path.join(tmp, "nope.py")]), 2)
+            self.assertEqual(calls, [("a01", [], os.path.abspath(before)), ("b01", [], None), ("a02", [], os.path.abspath(before)), ("b02", [], None)])
+            with open(os.path.join(out, "ab.md"), encoding="utf-8") as f:
+                text = f.read()
+            self.assertIn("# A/B: two versions of the runner", text)
+            self.assertIn(f"arm A with the runner at `{before}`, arm B with this checkout's runner", text)
+            self.assertIn("| login | ok x2 | ok x2 | no | 0.60 | 0.90 | +0.300 |", text)
+            self.assertIn("evidence for merging it", text)
+
+    def test_run_once_runs_the_runner_it_is_given(self) -> None:
+        import bench
+        seen: list[list[str]] = []
+
+        class _Proc:
+            returncode, stdout, stderr = 2, "", "no trace"
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(bench.subprocess, "run", lambda cmd, **kw: seen.append(cmd) or _Proc()):
+            bench.run_once("s.json", os.path.join(tmp, "o1"), "py", ["--hover"])
+            bench.run_once("s.json", os.path.join(tmp, "o2"), "py", [], runner="/before/scripts/run_test.py")
+        self.assertEqual(seen[0][:3] + seen[0][-1:], ["py", bench.RUN_TEST, "s.json", "--hover"])
+        self.assertEqual(seen[1][:3], ["py", "/before/scripts/run_test.py", "s.json"])
+
     def test_a_clean_comparison_says_so(self) -> None:
         import ab
         same = ab.arm_summary([self.run_rec()] * 2)
