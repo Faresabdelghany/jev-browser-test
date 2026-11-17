@@ -3,6 +3,72 @@
 Notable changes to the jev-browser-test skill. Versions follow [semantic versioning](https://semver.org); the version
 is the one in `.claude-plugin/plugin.json`, and merging a new one to `main` tags and releases it.
 
+## [0.13.0] - 2026-11-17
+
+Step 6 of the speed work: **one command for running specs again**, and the six steps measured together.
+
+### Added
+- **`scripts/rerun.py`**: `python scripts/rerun.py specs/` (spec files, folders of them, or an earlier suite's
+  folder). Every spec once, with each spec's saved path (replay), a saved login for specs that share one, and four
+  runs at a time inside the per-host limits. It prints a few lines and sets the exit code: `GREEN: N of N specs in
+  T s ... Nothing to read.`, or one line per spec that is not green (verdict, outcome, the page's line, its run
+  folder), then what changed since the last rerun of the same specs (remembered under `.jev/reruns/`) and what the
+  replay did. The same lines are in `summary.md` beside `results.json` and `results.md`. A run that ends red after
+  saved steps is run again without the path, so a red is always a run in which Jev chose every step.
+  `--http-cache`, `--run-arg=--settle=network`, `--replay-verify assert`, `--no-replay`, `--no-sessions`,
+  `--workers`, `--per-host`, `--host-limit`, `--repeat`.
+- **SKILL.md sends a rerun there and tells Claude to stop reading**: for "run the suite again" the command's output
+  is everything; a `result.json` is opened only for a spec that is not green, a trace only if that does not settle
+  it.
+- **Replay resumes after a handover when Jev's own decision is the saved step** (`result.replay.resumed`,
+  `REPLAY-RESUMED`). A page that differs from the recording in something that does not change what to do (a widget
+  that loaded earlier this time, one more button) used to hand the whole rest of the run to Jev; now Jev decides that
+  step, and if it executes the saved operation on the control the path describes, the path goes on. Jev may take up
+  to three other actions first (a banner to dismiss) before the path is given up for the run.
+
+### Fixed
+- After the last saved step the assertions were read from the live page a moment after the observation was taken:
+  a loader that ended in between left Jev looking at "Loading..." while the assertions held, and the run handed over
+  for nothing. The page is now settled and observed again once the assertions hold.
+
+### Measured: the six steps together
+Live `jev-1.14.0`, the 22 examples; "before" is 0.7.0, "rerun" is `rerun.py` with its defaults (replay and saved
+sessions), "every option" adds `--http-cache --run-arg=--settle=network`. Ranges are the runs of two passes an hour
+apart; the OrangeHRM demo alone moved a suite by up to 40 s between them.
+
+| | before (0.7.0) | rerun | rerun, every option |
+|---|---:|---:|---:|
+| A simple flow again (`login-logout`) | 4.6 s, 6 requests | 3.5 s, 1 request | 2.3 s |
+| `shop-checkout` again | 5.2 s, 10 requests | 2.9 s, 1 request | 2.0 s |
+| `shop-checkout`, first run | 5.2 s, 10 requests | unchanged (the options are off) | 3.9 s, 8 requests with `--batch-fields --settle network --http-cache` |
+| An OrangeHRM flow again (`hrm-pim-add-employee-list`) | 20.3 s, 18 requests | 14.7 s, 1 request | 13.8 s |
+| Browser time per action on a fast page (median) | 146 ms | 151 ms | 103 ms |
+| All 22 on one worker | 198 s | 136 to 159 s | 127 to 134 s (112 and 144 s with `--replay-verify assert`) |
+| All 22 at the highest setting that respects the hosts | 135 s (2 workers, then the hrm specs on 1) | 71 to 81 s on 8 workers (116 s once, the demo's slow stretch) | 69 to 83 s (63 and 71 s with assert) |
+| Jev requests for the suite | 194 | 44 to 49 | 26 to 30 with assert |
+| Jev input tokens for the suite | 676k | 137k to 165k | 65k to 73k with assert |
+| ... of which the specs that walked their path and passed | | 74k to 84k (one deciding request each) | 0 to 8k with assert |
+| A new test through Claude (one agent, the sort-bug ticket) | 220 s, 104k tokens (the skill at 0.6.0, iteration 4) | 178 s, 130k tokens | |
+| A rerun through Claude (one agent, eight specs) | 55.6 s, 74k tokens, 7 tool calls | 28.7 s, 68k tokens, 4 tool calls | |
+
+The two rows through Claude are one agent run each. A rerun is twice as fast and reads one file where it read
+five; its tokens barely move, because about 60k of either run is what an agent spends before it does anything
+(its own instructions, and SKILL.md read whole). A new test took less time and **more tokens** than in September's
+iteration: SKILL.md and the references grew with these six steps, and an agent writing a spec reads them. Nothing
+in this release makes writing a new test cheaper for Claude.
+
+**Targets, plainly.**
+- *198 s to about 110 s on one worker: missed.* A rerun of the 22 takes 136 to 159 s on one worker, 127 to 134 s
+  with the cache and the network settle as well. One run reached 112 s, with every option on and the assertions
+  deciding the endings. What is left is the OrangeHRM specs (59 to 92 s for the five, most of it the application
+  answering), browser launches and page loads; the requests are gone (194 → 45).
+- *`shop-checkout` again in about 3 s: met.* 2.9 s with the rerun defaults, 2.0 s with every option.
+- *Jev tokens near zero on green reruns: met only with `--replay-verify assert`* (0 to 8k for the specs that pass on
+  their path). By default the ending of a replayed run is Jev's to decide, one request a spec, and that is 74k to
+  84k tokens for 16 to 18 specs: an eighth of what the suite cost, not zero. The specs that do not end in a pass
+  (two documented bugs, two expected-red, the random page that rolls its failure) are Jev's from the first step every
+  time, 60k to 70k tokens whatever the options.
+
 ## [0.12.0] - 2026-11-17
 
 Step 5 of the speed work: **parallel runs with a limit per host**.

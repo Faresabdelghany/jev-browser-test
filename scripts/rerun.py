@@ -11,7 +11,7 @@ blocks), and as many runs at once as `--workers` allows while no host sees more 
 red here is always a run in which Jev chose every step. The suite's `results.json` and `results.md` are written as
 by `run_suite.py`, and `summary.md` beside them holds what this command prints:
 
-    GREEN: 22 of 22 specs in 48 s (4 workers, 24 Jev requests). Nothing to read.
+    GREEN: 8 of 8 specs in 7 s (4 workers, 17 Jev requests). Nothing to read.
 
 or, when something is not green, one line per such spec with its verdict, its outcome, the page's own line and the
 run folder to open, and after them what changed since the last rerun of the same specs:

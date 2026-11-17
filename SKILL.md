@@ -294,7 +294,7 @@ step.
 **Read its output and nothing else.** It prints a few lines and sets the exit code (0: every spec green):
 
 ```
-GREEN: 8 of 8 specs in 14 s (4 workers, 17 Jev requests). Nothing to read.
+GREEN: 8 of 8 specs in 7 s (4 workers, 17 Jev requests). Nothing to read.
 Same verdicts as the last rerun (2026-11-17 15:02).
 ```
 
