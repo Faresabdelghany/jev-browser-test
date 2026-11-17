@@ -3,6 +3,52 @@
 Notable changes to the jev-browser-test skill. Versions follow [semantic versioning](https://semver.org); the version
 is the one in `.claude-plugin/plugin.json`, and merging a new one to `main` tags and releases it.
 
+## [0.7.0] - 2026-11-17
+
+Three follow-ups from the first live day (0.5.1, 0.6.0), each measured against the live Jev API (`jev-1.14.0`; the
+numbers are on the `dev-docs` branch, `docs/superpowers/measurements/README.md`, section "0.7.0").
+
+### Added
+- **Date placeholders.** `${DATE}` is the day of the run; terms after it apply left to right (`+30d`, `-7d`,
+  `+wed`, `+workday`, and the same with `-`) and an optional `:format` spells the date the way the application
+  wants it (`yyyy` `yy` `mm` `m` `dd` `d` `mmmm` `mmm` `dddd` `ddd`): `${DATE+2d+workday:yyyy-dd-mm}`. Anywhere in
+  the spec, like `${RUN_STAMP}`. `+workday` reads the new **`calendar`** field: `workweek` (Monday to Friday unless
+  given) and `holidays` (`"12-25"` every year, `"2026-12-28"` one year). `RUN_DATE=yyyy-mm-dd` in the environment
+  pins the day; `spec.py` prints what each placeholder becomes; the trace has `spec.run_date` and `spec.dates`. A
+  placeholder that cannot be read is a spec problem (exit 2), never text for the page. `${DATE}` is no longer read
+  from an environment variable of that name; `${DATE_FROM}` and every other name still are.
+- **`ab.py --a-runner <another checkout's run_test.py>`**: the A/B for two versions of the runner, so a change to
+  the observer is measured the way an option is.
+- **`reason.hints`** in `result.json`: for a stalled run, where the last page keeps controls the spec did not let
+  the observer look at (an `<iframe>` not in `observation.frames`, shadow DOM turned off, a file field without
+  `files`). The sentences the summary already printed as `hint:`.
+
+### Fixed
+- **`hrm-leave-assign` no longer goes red when its date has passed.** It typed a literal date, and a leave on a
+  day that has passed is listed as Taken, not Scheduled: the first literal made the spec red in October, its
+  replacement would have on 17 December. The date is now `${DATE+2d+workday:yyyy-dd-mm}` with the demo's sixteen
+  holidays in `calendar`. Live: passes today (twice) and with `RUN_DATE=2026-12-17`. A first version, thirty days
+  ahead, failed when pinned to 17 December: the leave fell in January and the demo's Leave List shows the current
+  leave year only. Two days ahead leaves the last two to four days of December as days the spec cannot pass.
+- **Shadow DOM: a control whose caption is drawn from another tree is named by it.** At 0.6.0 the Polymer shop's
+  product links and MDN's Copy, Reset and Log in buttons reached Jev as `link ""` and `button ""`: `innerText`
+  reads neither a nested shadow root (`<a><shop-list-item></a>`) nor a slot (`<button><slot></slot></button>`
+  inside `<mdn-button>Copy</mdn-button>`). The name now follows the tree as it is rendered. What sits inside a
+  link across a shadow boundary is the link, not entries of its own (the shop's list page: 17 entries with 7
+  unnamed, now 10 with none; MDN: 13 unnamed, now 1), and a button is not counted as covered by a caption element
+  slotted into it. A control whose content is all in its own tree is named as before: on the example specs' 15
+  start pages the observation is identical before and after. A/B against the previous runner, interleaved: a flow
+  that needs MDN's Copy button **1/5 before, 5/5 after** (confidence 0.35 / 0.89, 5 / 3 requests); the Polymer shop
+  purchase 5/5 both; MDN's table-of-contents flow 15/15 both. The cost that was measured: on MDN Jev's confidence
+  on the looks after the goal is reached fell (0.60 to 0.47 over 10 runs an arm, the click itself 0.99 in both),
+  and on the shop the first click's target confidence fell from 0.97 to 0.80-0.85, because the category's image
+  link now carries the same name as its Shop Now link. No ending, request count or action moved.
+- **A stalled run that could not find its control on a partly unobserved page suggests `test_issue`, not `bug`.**
+  Live, the Polymer shop with shadow DOM off: `low_confidence`, `control_not_on_page`, suggested verdict `bug`,
+  beside a hint that named the option. With `reason.hints` present and `control_not_on_page` as the deciding
+  reason the suggestion is now `test_issue` (`reason.suggestion_from: "hints"`). Every other reason keeps its
+  suggestion: most pages have an `<iframe>` somewhere.
+
 ## [0.6.0] - 2026-11-17
 
 The defaults for 0.5.0's three Jev-driven options, decided from live A/B runs (the protocol and every number are on

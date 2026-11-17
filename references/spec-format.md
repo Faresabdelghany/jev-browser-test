@@ -262,7 +262,9 @@ precondition and not the thing under test.
   rest of the page, and Jev types and clicks there; `"observation": {"shadow_dom": false}` turns it off. Measured
   before the default changed: on the 22 example specs it changed nothing (no example page has a shadow root), on the
   Polymer shop it was the difference between a stall and a pass, and on MDN, whose page content sits in web
-  components, a light-DOM flow passed 5/5 with it and 0/5 without. Closed shadow roots stay closed to everyone.
+  components, a light-DOM flow passed 5/5 with it and 0/5 without. Since 0.7.0 a control
+  whose caption is drawn from another tree (a custom element inside a link, a component's `<button><slot></slot></button>`)
+  is named by that caption. Closed shadow roots stay closed to everyone.
   Scripted alternative: selectors pierce open shadow roots (`{"action": "click", "selector": "my-widget button"}`).
 - **File uploads.** `"files": {"cv": "fixtures/cv.pdf"}`: wherever the page has a file field, Jev may choose
   `UPLOAD_FILE`, a field and one of the names. The file is set on the field directly, with no click and no system
