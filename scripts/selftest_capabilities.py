@@ -543,7 +543,7 @@ def run_checks(tmp: str | None = None) -> list[str]:
         failures.append(f"G: a page with no indicator keeps the three-look limit: {trace['status']} {len(trace['steps'])} steps")
 
     # H. shadow DOM --------------------------------------------------------------------------------------------------------
-    shadow = make_spec(base + "/shadow", budget={"max_steps": 3, "max_seconds": 30})
+    shadow = make_spec(base + "/shadow", budget={"max_steps": 3, "max_seconds": 30}, observation={"shadow_dom": False})
     trace, out = go("shadow-hint", shadow, ScriptedJev([("undecided",)], SAVED))
     if trace["steps"][-1].get("shadow_hosts") != 1 or "shadow DOM" not in flags_of(trace, out):
         failures.append(f"H: a stalled run on a page with controls in shadow DOM should say so: {trace['steps'][-1].get('shadow_hosts')}")
@@ -606,7 +606,12 @@ def run_checks(tmp: str | None = None) -> list[str]:
     acted = [s["executed"] for s in trace["steps"] if s.get("executed", {}).get("action") in ("TYPE_TEXT", "CLICK")]
     if len(acted) != 2 or not all(a["ok"] for a in acted) or any(s.get("stale") for s in trace["steps"]):
         failures.append(f"J: both actions should land, with no stale decision (the fingerprint re-reads the shadow nodes): {acted}")
-    shallow = make_spec(base + "/shadow-app", goal=deep["goal"], data=deep["data"], budget={"max_steps": 3, "max_seconds": 30})
+    shallow = make_spec(base + "/shadow-app", goal=deep["goal"], data=deep["data"], budget={"max_steps": 3, "max_seconds": 30},
+                        observation={"shadow_dom": False})
+    by_default = make_spec(base + "/shadow-app", goal=deep["goal"], data=deep["data"], **{"assert": deep["assert"]})  # 0.6.0: on unless a spec turns it off
+    trace, out = go("shadow-default", by_default, ScriptedJev([("type", "Nickname", "nickname"), ("click", "Save profile")], SAVED))
+    if trace["status"] != "passed":
+        failures.append(f"J: shadow DOM is observed by default (0.6.0): {trace['status']} {trace.get('error')}")
     trace, out = go("shadow-off", shallow, ScriptedJev([("type", "Nickname", "nickname"), ("click", "Save profile"), ("undecided",)], SAVED))
     if trace["status"] == "passed" or any(e.get("name") in ("Nickname", "Save profile") for s in trace["steps"] for e in s["elements"]) \
             or "shadow DOM" not in flags_of(trace, out):

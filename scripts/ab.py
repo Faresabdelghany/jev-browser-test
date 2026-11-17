@@ -1,7 +1,7 @@
 """A/B a runner option over a set of specs: does turning it on change what the specs that do not need it end in?
 
     python scripts/ab.py specs/examples/*.json --b-arg=--hover --repeat 3
-    python scripts/ab.py specs/examples/*.json --b-arg=--shadow-dom --b-arg=--hover --repeat 5 --out runs/ab/both
+    python scripts/ab.py specs/examples/*.json --b-arg=--no-shadow-dom --b-arg=--hover --repeat 5 --out runs/ab/both
 
 Arm A runs every spec as it is; arm B runs it with the `--b-arg` options added to `run_test.py`. The question this
 answers is the one the standing rules were measured with: an option that is offered on every step is a choice on

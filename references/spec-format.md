@@ -161,7 +161,7 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `observation.max_elements` | int | 200 | Cap on numbered elements per step (largest Choice Jev sees), 1–250. Elements beyond it are reported as `truncated_elements` and cannot be chosen |
 | `observation.max_text_chars` | int | 2000 | Visible text sent as state, viewport-first: what is on screen comes first, then the rest of the page, cut here (≥ 100). Was 4000; 2000 saved ~450 input tokens on each step of a long article with the same decisions (block F). Raise it for a page whose deciding text sits below the first screen |
 | `observation.frames` | list | `[]` | CSS selectors of the `<iframe>`s whose controls Jev may use as well, five at most (`["iframe#card-frame"]`): a payment form, an embedded widget. See "Frames, shadow DOM, uploads, hover" below. Empty: only the main frame is observed |
-| `observation.shadow_dom` | bool | `false` | Also observe inside open shadow roots (web components, nested ones included): their controls join the element table, their text the state, the evidence line and the assertions (`text_contains`, `text_in`, the element assertions) read there too. `--shadow-dom` on `run_test.py` turns it on for a run. A page without shadow DOM is observed exactly as before either way |
+| `observation.shadow_dom` | bool | `true` | Also observe inside open shadow roots (web components, nested ones included): their controls join the element table, their text the state, the evidence line and the assertions (`text_contains`, `text_in`, the element assertions) read there too. On by default since 0.6.0; `false` (or `--no-shadow-dom` on `run_test.py`) observes the document's own tree only. A page without shadow DOM is observed exactly the same either way |
 | `observation.screenshots` | `true` \| `false` \| `"key"` | `"key"` | Which steps get a `steps/NNN.png`, taken after Jev's answer and before the action (so it shows the page Jev decided on). `"key"`: the terminal step and any step flagged `outcome_seen`, `pending_outcome`, `outcome_unconfirmed`, `never_violated`, `low_confidence`, `stale`, `repeat_count ≥ 2`, `outcome_deferred` or `after_no_effect` (the observation right after an action that changed nothing: the picture of the unchanged page), plus `NNN-failed.png` after a failed action and `steps/final.png`. `true`: every step. `false`: nothing. CLI: `--screenshots all|key|none`. Capture, not encoding, is the cost, so `"key"` is the default; rerun with `--screenshots all` when a human needs the picture of an ordinary step |
 
 ## Attach to a running browser
@@ -244,8 +244,8 @@ much as the flow, give it its own spec instead: a teardown cannot be red.
 
 ## Frames, shadow DOM, uploads, hover
 
-What the observer offers Jev by itself is the main frame's visible controls. Each of the following is one more
-line in the spec, and Jev then drives it; all of them can be scripted in `setup` instead when they are a
+What the observer offers Jev by itself is the main frame's visible controls, including those inside open shadow
+roots. Each of the following is one more line in the spec, and Jev then drives it; all of them can be scripted in `setup` instead when they are a
 precondition and not the thing under test.
 
 - **`<iframe>`s.** List the frame in `observation.frames` and its controls join the element table after the
@@ -256,8 +256,11 @@ precondition and not the thing under test.
   not become choices. Assert on a frame's content with `text_in` and `frame`:
   `{"text_in": {"frame": "iframe#card-frame", "selector": "#status", "equals": "Paid"}}`. Two limits: the evidence
   line is quoted from the main frame's text, and `text_contains` looks at the main frame only.
-- **Shadow DOM.** `"observation": {"shadow_dom": true}`: the controls and the text inside open shadow roots are
-  observed like the rest of the page, and Jev types and clicks there. Closed shadow roots stay closed to everyone.
+- **Shadow DOM.** On by default (0.6.0): the controls and the text inside open shadow roots are observed like the
+  rest of the page, and Jev types and clicks there; `"observation": {"shadow_dom": false}` turns it off. Measured
+  before the default changed: on the 22 example specs it changed nothing (no example page has a shadow root), on the
+  Polymer shop it was the difference between a stall and a pass, and on MDN, whose page content sits in web
+  components, a light-DOM flow passed 5/5 with it and 0/5 without. Closed shadow roots stay closed to everyone.
   Scripted alternative: selectors pierce open shadow roots (`{"action": "click", "selector": "my-widget button"}`).
 - **File uploads.** `"files": {"cv": "fixtures/cv.pdf"}`: wherever the page has a file field, Jev may choose
   `UPLOAD_FILE`, a field and one of the names. The file is set on the field directly, with no click and no system
@@ -276,10 +279,11 @@ A run that stalls (`stuck`, `blocked`, `low_confidence`, `budget_exhausted`) on 
 `<iframe>`, with controls inside shadow DOM, or with a file field and no `files`, says so under its step table,
 with which of these to reach for.
 
-All three Jev-driven options are off unless the spec asks, so a spec that does not ask is sent the questions it
-always was. Whether one of them could be on for every spec is a measurement, not an opinion: `scripts/ab.py
-specs/*.json --b-arg=--hover` (or `--shadow-dom`) runs every spec with and without it, interleaved, and reports
-whether any ending moved or any decision got less certain.
+Frames, uploads and hover are off unless the spec asks, so a spec that does not ask is sent the questions it always
+was; shadow DOM is on unless the spec turns it off. Whether an option could be on for every spec is a measurement,
+not an opinion: `scripts/ab.py specs/*.json --b-arg=--hover` (or `--no-shadow-dom`) runs every spec with and without
+it, interleaved, and reports whether any ending moved or any decision got less certain. The 2026-11-17 measurements
+behind each default are on the `dev-docs` branch.
 
 ## Browser diagnostics
 

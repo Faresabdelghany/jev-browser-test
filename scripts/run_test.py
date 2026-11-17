@@ -1981,7 +1981,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--evidence", choices=("always", "failures"),
                     help="failures = do not ask for the evidence line of a pass whose assertions hold (one request fewer per pass); overrides the spec")
     ap.add_argument("--hover", action="store_true", help="offer the HOVER operation (adds it to the spec's extra_operations)")
-    ap.add_argument("--shadow-dom", action="store_true", help="observe inside open shadow roots too (observation.shadow_dom)")
+    deep = ap.add_mutually_exclusive_group()
+    deep.add_argument("--shadow-dom", action="store_true", help="observe inside open shadow roots (observation.shadow_dom; the default)")
+    deep.add_argument("--no-shadow-dom", action="store_true", help="observe the document's own tree only (observation.shadow_dom false)")
     ap.add_argument("--junit", metavar="FILE", help="also write the result as a JUnit XML report (one test case) for a CI dashboard")
     args = ap.parse_args(argv[1:])
 
@@ -1995,8 +1997,8 @@ def main(argv: list[str]) -> int:
             spec["evidence"] = args.evidence
         if args.hover and "HOVER" not in spec["extra_operations"]:
             spec["extra_operations"] = [*spec["extra_operations"], "HOVER"]
-        if args.shadow_dom:
-            spec["observation"]["shadow_dom"] = True
+        if args.shadow_dom or args.no_shadow_dom:
+            spec["observation"]["shadow_dom"] = bool(args.shadow_dom)
         missing_files = [f"{k}: {v}" for k, v in spec["files"].items() if not os.path.isfile(v)]
         if missing_files:
             raise ValueError("Spec problems:\n  - files: no such file (paths are relative to " + os.getcwd() + "): " + ", ".join(missing_files))

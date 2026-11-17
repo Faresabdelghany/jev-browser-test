@@ -115,15 +115,17 @@ explain.
   "<the iframe's selector>"`) or a web component (selectors reach into shadow DOM).
 - **teardown** — the same steps, run after the verdict whatever it was: delete what the run created (name it with
   `${RUN_STAMP}`), log out. A failing teardown step is reported and never changes the result.
-- **iframes, web components, uploads, hover menus** — off until the spec asks, one line each, and then Jev drives
-  them: `"observation": {"frames": ["iframe#card-frame"]}` (a card form, an embedded widget), `"observation":
-  {"shadow_dom": true}` (controls inside web components), `"files": {"cv": "fixtures/cv.pdf"}` (Jev may attach a
+- **web components** — observed by default: the controls and text inside open shadow roots are part of the page
+  Jev sees (`"observation": {"shadow_dom": false}` or `--no-shadow-dom` turns that off).
+- **iframes, uploads, hover menus** — off until the spec asks, one line each, and then Jev drives
+  them: `"observation": {"frames": ["iframe#card-frame"]}` (a card form, an embedded widget), `"files": {"cv": "fixtures/cv.pdf"}` (Jev may attach a
   file to a file field; name the upload in the goal), `"extra_operations": ["HOVER"]` (a menu that only opens on
   hover; say so in the goal). Ask only for what the flow needs: each is more for Jev to choose from on every step.
 - **new tabs, phones** — `"browser": {"follow_new_tabs": true}` when the flow continues in a tab it opens;
   `"browser": {"device": "iPhone 13"}` (or `--device`) for a phone layout. `scaffold.py` has a flag for each of
-  these (`--frame`, `--shadow-dom`, `--file`, `--hover`, `--follow-new-tabs`, `--device`, `--teardown`). A stalled
-  run on a page with an unlisted iframe, shadow-DOM controls or an unused file field says so under its step table.
+  these (`--frame`, `--file`, `--hover`, `--follow-new-tabs`, `--device`, `--teardown`, `--no-shadow-dom`). A stalled
+  run on a page with an unlisted iframe, shadow-DOM controls it was told not to see or an unused file field says so
+  under its step table.
 - **long pages and type-aheads** — a link far down a long page wants the goal to say where to scroll; a type-ahead
   wants a `suggestion_not_found` bug outcome. `references/spec-format.md` (Writing the goal and data) has both
   recipes: read them before writing a spec for a long form or an autocomplete.
