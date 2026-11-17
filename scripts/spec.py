@@ -323,6 +323,12 @@ DEFAULTS = {
         "viewport": [1280, 800],
         "settle_ms": 400,   # cap on the event-based settle after every action
         "quiet_ms": 100,    # the DOM must stay unchanged this long (and 2 animation frames) before observing
+        # How the runner knows the page has settled after an action. "dom": the DOM quiet for quiet_ms. "network": the
+        # requests the action started (XHR, fetch, a route's script and stylesheet; not analytics, not connections that
+        # were already open) have finished and the DOM has been quiet for network_quiet_ms, inside the same cap. The
+        # quiet window can then be short, because it no longer stands in for "the responses have arrived".
+        "settle": "dom",
+        "network_quiet_ms": 50,
         "action_timeout_ms": 8000,
         "navigation_timeout_ms": 30000,  # the start URL and setup `goto`s: a slow shared host is not a flow outcome
         "storage_state": None,
@@ -608,6 +614,11 @@ def validate(spec: dict) -> list[str]:
         errors.append("'browser.settle_ms' must be an integer between 0 and 10000 (the cap on the post-action settle)")
     elif not (isinstance(quiet_ms, int) and not isinstance(quiet_ms, bool) and 0 <= quiet_ms <= settle_ms):
         errors.append("'browser.quiet_ms' must be an integer between 0 and browser.settle_ms")
+    if br.get("settle", "dom") not in ("dom", "network"):
+        errors.append("'browser.settle' must be \"dom\" (quiet for quiet_ms) or \"network\" (the action's requests finished and quiet for network_quiet_ms)")
+    nq = br.get("network_quiet_ms", 50)
+    if not (isinstance(nq, int) and not isinstance(nq, bool) and 0 <= nq <= 10000):
+        errors.append("'browser.network_quiet_ms' must be an integer number of milliseconds between 0 and 10000")
     device = br.get("device")
     if device is not None and not (isinstance(device, str) and device.strip()):
         errors.append("'browser.device' must be a Playwright device name such as \"iPhone 13\" or \"Pixel 7\"")

@@ -35,6 +35,12 @@ and for the spec language:
      offered and types, the assertion written with the same placeholder reads it back, and the trace says what each
      placeholder became; RUN_DATE in the environment moves the day
 
+and for the settle (`browser.settle: "network"`, off until the spec or --settle network asks):
+
+  Q. network-aware settle: after a click that fetches its answer the settle waits for the response, so the next look
+     already shows it; a connection opened before the action and an analytics call are not waited for; a request that
+     outlasts the cap ends the settle at the cap and says what was left; the default settle is what it was
+
 and for one request per form (`batch_fields`, off until the spec or --batch-fields asks):
 
   P. form batch: the request that types a form's first field assigns the others their values, and they are typed with
@@ -58,6 +64,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -450,6 +457,22 @@ function wire() {{ const b = document.getElementById('save'); if (b) b.onclick =
 
 # A sign-up form of three fields. ?react= makes the page answer the typing of the last name: `field` reveals a fourth
 # field, `message` a line of text, `list` a list of suggestions.
+# Save fetches its answer from a slow endpoint (?ms=, default 400) and only then writes the message. ?poll=1 opens a
+# request at load that never answers within a run; ?track=1 also sends a slow analytics call on the click.
+NET_PAGE = """<!doctype html><html><head><title>Slow save</title></head><body>
+<h1>Profile</h1>
+<button id="save" type="button">Save</button>
+<p id="msg"></p>
+<script>
+const q = new URLSearchParams(location.search);
+if (q.get('poll')) fetch('/api/slow?ms=20000').catch(() => {});
+document.getElementById('save').onclick = () => {
+  if (q.get('track')) fetch('/collect?event=save&ms=3000').catch(() => {});
+  fetch('/api/slow?ms=' + (q.get('ms') || 400)).then(() => { document.getElementById('msg').textContent = 'Saved successfully'; });
+};
+</script>
+</body></html>"""
+
 BATCH_FORM_PAGE = """<!doctype html><html><head><title>Sign up</title></head><body>
 <h1>Sign up</h1>
 <label>First name <input id="first"></label>
@@ -472,7 +495,7 @@ $('save').onclick = () => { $('msg').textContent = ($('first').value && $('last'
 </script>
 </body></html>"""
 
-ROUTES = {"/batch-form": BATCH_FORM_PAGE, "/replay-form": REPLAY_FORM_PAGE, "/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
+ROUTES = {"/net": NET_PAGE, "/batch-form": BATCH_FORM_PAGE, "/replay-form": REPLAY_FORM_PAGE, "/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
           "/device": DEVICE_PAGE, "/tabs": TABS_PAGE, "/receipt": RECEIPT_PAGE, "/spinner": SPINNER_PAGE, "/shadow": SHADOW_PAGE,
           "/shadow-names": SHADOW_NAMES_PAGE}
 
@@ -490,6 +513,10 @@ class _Site(http.server.BaseHTTPRequestHandler):
         if path == "/api/save":
             status, body, ctype = (500, '{"error": "boom"}', "application/json") if "fail=1" in self.path else (200, '{"ok": true}', "application/json")
         elif path == "/api/deleted":
+            status, body, ctype = 200, "{}", "application/json"
+        elif path in ("/api/slow", "/collect"):
+            ms = next((int(part[3:]) for part in self.path.split("?", 1)[-1].split("&") if part.startswith("ms=") and part[3:].isdigit()), 0)
+            time.sleep(ms / 1000)  # each request has its own thread (ThreadingHTTPServer)
             status, body, ctype = 200, "{}", "application/json"
         elif path == "/favicon.ico":
             status, body, ctype = 204, "", "image/x-icon"
@@ -950,6 +977,33 @@ def run_checks(tmp: str | None = None) -> list[str]:
             os.environ["RUN_DATE"] = old_run_date
     if (later["run_date"], later["data"]["day"]) != ("2026-12-17", "2027-20-01"):
         failures.append(f"N: RUN_DATE in the environment is the day the dates count from: {later['run_date']} {later['data']['day']}")
+    # Q. network-aware settle ----------------------------------------------------------------------------------------------------
+    def net_spec(query: str = "", **browser) -> dict:
+        return make_spec(base + "/net" + query, **{"id": "net-settle", "assert": [{"text_contains": "Saved successfully"}],
+                                                   "browser": {"settle_ms": 2000, "quiet_ms": 50, **browser}})
+
+    def click_step(trace: dict) -> dict:
+        return next(st for st in trace["steps"] if (st.get("executed") or {}).get("action") == "CLICK")
+
+    trace, out = go("net-dom", net_spec(), ScriptedJev([("click", "Save"), ("wait",), ("wait",)], SAVED))
+    st = click_step(trace)["settle"]
+    if trace["status"] != "passed" or "network" in st or st["ms"] > 300 or trace["steps"][1].get("outcome", {}).get("choice") == "saved":
+        failures.append(f"Q: the default settle does not wait for the response (the look after the click is too early): {st}")
+    trace, out = go("net-network", net_spec(settle="network"), ScriptedJev([("click", "Save")], SAVED))
+    st = click_step(trace)["settle"]
+    if (trace["status"], st.get("ended"), (st.get("network") or {}).get("requests"), len(trace["steps"])) != ("passed", "network", 1, 2):
+        failures.append(f"Q: with settle network the look after the click already shows the answer: {trace['status']} {st} steps={len(trace['steps'])}")
+    if not 300 <= st["ms"] <= 1200 or "left" in st["network"]:
+        failures.append(f"Q: the settle lasted as long as the request, not as long as the cap: {st}")
+    trace, out = go("net-ignored", net_spec("?poll=1&track=1", settle="network"), ScriptedJev([("click", "Save")], SAVED))
+    st = click_step(trace)["settle"]
+    if (trace["status"], (st.get("network") or {}).get("requests"), len(trace["steps"])) != ("passed", 1, 2) or st["ms"] > 1200:
+        failures.append(f"Q: a connection opened before the action and an analytics call are not waited for: {trace['status']} {st}")
+    trace, out = go("net-cap", net_spec("?ms=3000", settle="network", settle_ms=600), ScriptedJev([("click", "Save"), ("wait",), ("wait",), ("wait",)], SAVED))
+    st = click_step(trace)["settle"]
+    if (st.get("ended"), (st.get("network") or {}).get("left")) != ("cap", 1) or not 550 <= st["ms"] <= 1000:
+        failures.append(f"Q: a request that outlasts the cap ends the settle at the cap and is reported: {st}")
+
     # P. one request per form ------------------------------------------------------------------------------------------------------
     form_moves = [("type", "First name", "first"), ("type", "Last name", "last"), ("type", "Email", "email"), ("click", "Save")]
     form_fills = {"First name": "first", "Last name": "last", "Email": "email"}
