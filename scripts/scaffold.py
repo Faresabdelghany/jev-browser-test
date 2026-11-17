@@ -27,7 +27,7 @@ import re
 import sys
 from datetime import date
 
-from spec import DEFAULTS, RUN_STAMP_VAR, _merge, substitute_env, utf8_stdio, validate
+from spec import DEFAULTS, RUN_STAMP_VAR, _merge, substitute_dates, substitute_env, utf8_stdio, validate
 
 SETUP_SYNTAX = {
     "fill": ("selector", "value"),
@@ -242,13 +242,15 @@ def build(args: argparse.Namespace) -> dict:
 
 def check(spec: dict) -> list[str]:
     """spec.validate over the merged spec, with every `${VAR}` stood in for (they resolve at run time)."""
+    date_problems: list[str] = []
     merged = _merge(DEFAULTS, spec)
+    merged = substitute_dates(merged, date.today(), date_problems, None, merged["calendar"])  # `${DATE...}`: today's example
     missing: list[str] = []
     resolved = substitute_env(merged, missing, {RUN_STAMP_VAR: "stamp000"})
     if missing:
         stand_ins = {name: f"value_of_{name}" for name in missing}
         resolved = substitute_env(merged, [], {RUN_STAMP_VAR: "stamp000", **stand_ins})
-    return validate(resolved)
+    return validate(resolved) + [f"date placeholder {p}" for p in date_problems]
 
 
 def summary(spec: dict) -> str:

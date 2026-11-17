@@ -28,6 +28,7 @@ evidence, the file Claude reads first. The trace is the *evidence* behind it; th
   "story": [ "1 TYPE_TEXT [0] textbox \"Username\" <- username", "2 TYPE_TEXT [1] textbox \"Password\" <- password", "3 CLICK [2] button \"Login\"" ],
   "announcements": [ { "step": 6, "text": "Successfully Saved", "kind": "live", "tone": "success" } ],   // every toast / live message of the run, with the step whose observation it preceded
   "run_stamp": "tj4x2ka7",                                       // what ${RUN_STAMP} became in this run (the data it created carries it); null when the spec has none
+                                                                 // (dates: trace.spec.run_date is the day ${DATE...} counted from, trace.spec.dates what each placeholder became; null without one)
   "status": "passed", "duration_ms": 6200,
   "usage": { "jev_requests": 5, "input_tokens": 9774, "output_tokens": 1741, "model": "jev-1.13.0", "reconnects": 0 },
   "trace": "runs/smoke-login-badpw/20260922-101500/trace.json",

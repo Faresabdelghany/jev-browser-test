@@ -92,7 +92,10 @@ explain.
   value the app **keeps** (a username, a last name, a title, an id) gets **`${RUN_STAMP}`** in it
   (`"username": "jev${RUN_STAMP}"`): the runner substitutes a fresh eight-character stamp every run and repeat,
   so nothing collides with what an earlier run created, and `result.run_stamp` says which value it was. Export
-  `RUN_STAMP=<value>` to rerun a spec against, or clean up after, one particular run's data.
+  `RUN_STAMP=<value>` to rerun a spec against, or clean up after, one particular run's data. A **date** the flow
+  types is a placeholder too, never a literal that rots: `${DATE+2d+workday:yyyy-dd-mm}` is two days after the run,
+  moved on to a working day (the spec's `calendar` lists the app's holidays), in the format after the colon
+  (`spec-format.md` has the terms; `spec.py` prints what each becomes today).
 - **outcomes** — the endings you accept back: the acceptance criteria as `pass`, the wrong behaviour you test for
   (or the ticket reports) as `bug`, a CAPTCHA or approval step as `needs_human`. A negative test declares the
   rejection as `pass` and the success as `bug`, with a `note`. Write each `when` as **one visible fact per

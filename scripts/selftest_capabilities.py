@@ -28,9 +28,16 @@ and for the three interactions Jev drives itself since 0.5.0, each off until the
      the operation is never offered
   M. `evidence: "failures"`: a pass whose assertions hold costs one request fewer and says why it has no line; a bug,
      a pass without assertions and a pass whose assertions fail still get theirs
+
+and for the spec language:
+
+  N. `${DATE...}`: a spec file with a date placeholder is loaded for a given day, the date it names is what Jev is
+     offered and types, the assertion written with the same placeholder reads it back, and the trace says what each
+     placeholder became; RUN_DATE in the environment moves the day
 """
 from __future__ import annotations
 
+import datetime
 import http.server
 import json
 import os
@@ -760,6 +767,41 @@ def run_checks(tmp: str | None = None) -> list[str]:
     trace, out = go("evidence-bug", bug, jev)
     if (trace["outcome"], trace["result"]["evidence"]["line"]) != ("said_saved", "Saved successfully"):
         failures.append(f"M: an outcome that is not a pass always gets its line: {trace['outcome']} {trace['result']['evidence']}")
+
+    # N. ${DATE...} -----------------------------------------------------------------------------------------------------------
+    # The spec is a file, loaded the way run_test.py loads it. Tuesday 17 November 2026 + 30 days is a Thursday; on to
+    # Wednesday is 23 December, and the page wants yyyy-dd-mm (live: the OrangeHRM demo's date fields).
+    from spec import load_spec
+    dated_path = os.path.join(tmp, "dated.json")
+    with open(dated_path, "w", encoding="utf-8") as f:
+        json.dump({"id": "dated", "start_url": base + "/app",
+                   "goal": "Type the given date into Name and save, so that the page says it was saved.",
+                   "notes": "The given date is ${DATE+30d+wed:dddd d mmmm yyyy}.",
+                   "data": {"day": "${DATE+30d+wed:yyyy-dd-mm}"},
+                   "outcomes": {"saved": {"when": "The page says 'Saved successfully'", "verdict": "pass"}},
+                   "assert": [{"field_value": {"label": "Name", "equals": "${DATE+30d+wed:yyyy-dd-mm}"}}],
+                   "budget": {"max_steps": 8, "max_seconds": 60}, "browser": {"settle_ms": 300, "quiet_ms": 50, "action_timeout_ms": 3000}}, f)
+    dated = load_spec(dated_path, today=datetime.date(2026, 11, 17))
+    jev = ScriptedJev([("type", "Name", "day"), ("click", "Save")], SAVED)
+    trace, out = go("dates", dated, jev)
+    offered = [v.get("value") for st in jev.seen_states for v in st.get("available_data_values") or [] if v.get("key") == "day"]
+    held = [a for a in trace["result"]["assertions"] if "field_value" in a]
+    if trace["status"] != "passed" or set(offered) != {"2026-23-12"} or not held or not held[0]["ok"] or held[0]["field_value"]["equals"] != "2026-23-12":
+        failures.append(f"N: the date a placeholder names is offered, typed and asserted: {trace['status']} offered={set(offered)} {held}")
+    if trace["spec"].get("run_date") != "2026-11-17" or (trace["spec"].get("dates") or {}).get("${DATE+30d+wed:yyyy-dd-mm}") != "2026-23-12" \
+            or "Wednesday 23 December 2026" not in trace["spec"]["notes"]:
+        failures.append(f"N: the trace's spec says the day it counted from and what each placeholder became: {trace['spec'].get('run_date')} {trace['spec'].get('dates')}")
+    old_run_date = os.environ.get("RUN_DATE")
+    os.environ["RUN_DATE"] = "2026-12-17"  # the day after the literal date this replaced (2026-16-12) would have gone red
+    try:
+        later = load_spec(dated_path)
+    finally:
+        if old_run_date is None:
+            del os.environ["RUN_DATE"]
+        else:
+            os.environ["RUN_DATE"] = old_run_date
+    if (later["run_date"], later["data"]["day"]) != ("2026-12-17", "2027-20-01"):
+        failures.append(f"N: RUN_DATE in the environment is the day the dates count from: {later['run_date']} {later['data']['day']}")
     return failures
 
 
