@@ -391,6 +391,9 @@ OBSERVE_JS = "(args) => {\n  const deep = !!args.shadowDom;\n" + JS_HELPERS + r"
       // a native <datalist> shows its suggestions in browser UI, never as [role=option] nodes, so the
       // settle must not wait for one (run_test.settle)
       datalist: tag === 'input' && el.hasAttribute('list') ? true : undefined,
+      // inside a table row: a control that belongs to a record (its Edit, its checkbox), there as often as there are
+      // records. Not sent to Jev; a saved path's page fingerprint leaves such controls out (replay.page_print)
+      row: el.closest('tr, [role="row"]') ? true : undefined,
       disabled, below: isBelow || undefined,
       x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)
     });

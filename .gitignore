@@ -12,6 +12,8 @@ __pycache__/
 
 # run artifacts: traces contain page text and screenshots of your app
 runs/
+# what the runner keeps between runs (saved paths for --replay): local state; the directory also ignores itself
+.jev/
 # another tool's session artifacts (the playwright-cli skill writes page snapshots here)
 .playwright-cli/
 

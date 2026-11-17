@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import datetime
+import hashlib
 import json
 import os
 import random
@@ -283,6 +284,14 @@ DEFAULTS = {
     # decision confidence in every wording tried (docs/superpowers/measurements/2026-09-22-track1-ab-*.json),
     # so they are opt-in for apps where Jev repeats no-op actions or needs the untrusted-page-text guard.
     "rules": False,
+    # Replay (scripts/replay.py): remember the path of a passing run and walk it again without asking Jev. Off unless
+    # the spec says `"replay": true` (or an object) or the run is started with --replay. `verify`: how the ending of a
+    # fully replayed run is decided. "jev": one request asks which declared outcome the page shows, then the
+    # assertions, as in any run. "assert": a spec with assertions is decided by them alone when they all hold on the
+    # page the recorded run ended on (no request; without assertions it is "jev"). `dir`: where paths are kept
+    # (default .jev/paths, which ignores itself for git). A path holds no typed value, only the keys of `data`.
+    # `"replay": "never"` (never: true) keeps a spec out of replay even when the run is started with --replay.
+    "replay": {"enabled": False, "verify": "jev", "dir": None},
     "budget": {"max_steps": 25, "max_seconds": 240},
     "thresholds": {
         "check_true": 0.8,
@@ -629,6 +638,15 @@ def validate(spec: dict) -> list[str]:
             errors.append(f"'{k}' must be true or false")
     if spec.get("evidence", "always") not in ("always", "failures"):
         errors.append("'evidence' must be \"always\" (every outcome gets its evidence line) or \"failures\" (a pass whose assertions hold is not asked for one)")
+    rp = spec.get("replay", {})
+    if not isinstance(rp, dict) or not isinstance(rp.get("enabled", False), bool) or not isinstance(rp.get("never", False), bool):
+        errors.append("'replay' must be true, false, \"never\" or an object such as {\"enabled\": true, \"verify\": \"assert\"}")
+    else:
+        if rp.get("verify", "jev") not in ("jev", "assert"):
+            errors.append("'replay.verify' must be \"jev\" (Jev is asked which outcome the final page shows) or \"assert\" "
+                          "(a spec with assertions is decided by them alone)")
+        if rp.get("dir") is not None and not (isinstance(rp["dir"], str) and rp["dir"].strip()):
+            errors.append("'replay.dir' must be a directory path (default .jev/paths)")
     if spec.get("confirm", "assert") not in ("assert", "recheck"):
         errors.append("'confirm' must be \"assert\" (a pass whose assertions all hold is confirmed at once) or \"recheck\" (settle, observe again, ask Jev)")
     expect = spec.get("expect")
@@ -742,7 +760,14 @@ def load_spec(path: str, run_stamp: str | None = None, today: datetime.date | No
     the spec's `calendar` (its work week and the application's holidays)."""
     with open(path, encoding="utf-8") as f:
         raw = json.load(f)
+    # the spec as written, before any ${...} becomes this run's value: what a saved path was recorded for (replay.py)
+    source_sha = hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    if isinstance(raw, dict) and isinstance(raw.get("replay"), bool):
+        raw = {**raw, "replay": {"enabled": raw["replay"]}}  # "replay": true is the short form
+    elif isinstance(raw, dict) and raw.get("replay") == "never":
+        raw = {**raw, "replay": {"enabled": False, "never": True}}  # not even when the command line says --replay
     spec = _merge(DEFAULTS, raw)
+    spec["source"] = {"sha256": source_sha}
     used = RUN_STAMP_TOKEN in json.dumps(raw)
     stamp = run_stamp or os.environ.get(RUN_STAMP_VAR) or new_run_stamp()
     date_problems: list[str] = []

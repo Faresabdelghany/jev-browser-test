@@ -39,6 +39,7 @@ from policy import (
     build_state, defer_action, deferred_outcomes, evidence_line_keys, is_field, quoted_pick, read_checks, read_choice,
     read_outcome, recent_announcements, resolve_target, seen_outcomes, suggested_verdict, validate_choice,
 )
+from replay import ATTRS_JS, POLL_MS, REPLAYABLE, STABLE_ATTRS, VERIFY_MODES, Replay, match_final, page_print
 from spec import (DIAGNOSTIC_ASSERTIONS, HEADED_ENV, UNDETERMINED, effective_outcomes, load_dotenv, load_spec, match_expect, resolve_headless,
                   spec_warnings, utf8_stdio, validate)
 from summarize_trace import STALLED_STATUSES, is_action_step, summarize, unobserved_controls
@@ -1157,6 +1158,11 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     secret_values = [spec["data"][k] for k in spec["secrets"] if spec["data"].get(k)]
     diagnostics = Diagnostics(secret_values)  # what the browser says went wrong (exceptions, failed requests, 4xx/5xx)
     teardown_summary: dict | None = None
+    # Replay (replay.py): with `replay` on, a saved path's steps are executed in place of Jev's decisions for as long as
+    # each applies to the page in front of it, and a passing run writes the path it took.
+    rp_cfg = spec.get("replay") or {}
+    rp = Replay(spec, use=rp_cfg.get("use", True)) if rp_cfg.get("enabled") else None
+    last_action_end = time.perf_counter()  # when the last executed action (or the setup) had settled: a path step's wait is counted from here
 
     def record(entry: dict, step: dict, sig: str) -> None:
         """Append a history entry and remember which observation it was decided on, so the next
@@ -1268,10 +1274,11 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         return o.get("when") or " and ".join(spec["checks"][r] for r in o["requires"])
 
     def settle_pass(page, step: dict, obs: dict, seen: dict, action: str, jev, prefetched: dict | None = None,
-                    assertions: list[dict] | None = None) -> None:
+                    assertions: list[dict] | None = None, skip_evidence: str | None = None) -> None:
         """A confirmed pass: run the assertions on this final observation and end passed / assert_failed. With
         `prefetched` (the evidence questions rode in this step's request) the adjudication costs no request; with
-        `assertions` (already evaluated on this page by the confirm-by-assertions path) they are not run again."""
+        `assertions` (already evaluated on this page by the confirm-by-assertions path) they are not run again; with
+        `skip_evidence` (a replayed run decided by its assertions) the evidence line is not asked, and that is why."""
         final["outcome"] = seen
         final["seen_at_step"] = step["n"]
         final.setdefault("first_seen_at_step", step["n"])
@@ -1283,6 +1290,13 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         finish(page, step, "passed" if ok else "assert_failed", {"action": action, "ok": True, "error": None, "confirmed": True})
         if ok and not spec["setup"] and not any("reason" not in h for h in history):
             trace["passed_without_actions"] = True
+        if rp is not None and ok:
+            # the page a replay of this run should end on
+            rp.set_final(obs, int((time.perf_counter() - last_action_end) * 1000), busy=page_busy(obs))
+        if skip_evidence:
+            final["adjudication"] = {"outcome": seen["name"], "statement": outcome_when(seen["name"]), "line": None, "line_id": None,
+                                     "present": None, "confidence": None, "skipped": skip_evidence}
+            return
         if ok and final["assertions"] and prefetched is None and spec.get("evidence") == "failures":
             # The assertions held in code: they are the proof, and the spec said not to spend a request on the line.
             final["adjudication"] = {"outcome": seen["name"], "statement": outcome_when(seen["name"]), "line": None, "line_id": None,
@@ -1457,6 +1471,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 phase = "setup"
                 run_setup(page, spec, trace["setup"])  # records into trace["setup"] as it goes, so a failed step is kept
                 t_lap = lap("setup_ms", t_lap)
+                last_action_end = time.perf_counter()
             except Exception:
                 # Nothing was observed, so the flow was not exercised: a slow or unreachable host (navigation), a setup
                 # selector that did not match (setup). Reported apart from the flow's outcomes: result.reason.phase,
@@ -1464,16 +1479,180 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 trace["failed_before_observation"] = phase
                 raise
 
+            def read_attrs(indices: list[int]) -> dict:
+                """The stable attributes (test ids, id, name) of observed elements of the main frame, by index."""
+                try:
+                    return page.evaluate(ATTRS_JS, {"idx": indices, "deep": deep, "names": list(STABLE_ATTRS)}) if indices else {}
+                except Exception:  # noqa: BLE001 - the page is navigating: nothing to tell the candidates apart by
+                    return {}
+
+            def replay_wait(obs: dict, budget_ms: int, spent_ms: int) -> dict:
+                """Between two looks for a saved step's page: wait for the page to change (at most POLL_MS and what is
+                left of the step's wait), let a change settle, observe again."""
+                waited = wait_for_change(page, obs.get("fingerprint"), max(min(POLL_MS, budget_ms - spent_ms), 1))
+                if waited["ended"] != "timeout":
+                    settle(page, spec)
+                return look()
+
+            def replay_look(obs: dict) -> tuple[dict, dict | None, str | None]:
+                """The next saved step against the page: (observation, decision, None) once it applies, looking again
+                while the page is on its way and the step's wait is not spent, else (observation, None, why not)."""
+                saved = rp.next_step()
+                budget_ms = rp.wait_budget(saved.get("wait_ms"))
+                t0 = time.perf_counter()
+                waited_for = None
+                while True:
+                    decision, why = None, None
+                    if page_busy(obs) and not saved.get("busy"):
+                        why = "the page is still loading (controls under a blank layer, or none yet)"
+                    else:
+                        decision, why = rp.decide(saved, obs, read_attrs)
+                    spent = int((time.perf_counter() - t0) * 1000)
+                    if decision is not None or spent >= budget_ms:
+                        rp.waited_ms += spent
+                        if decision is not None:
+                            decision.update({"saved": saved, "waited_ms": spent, "waited_for": waited_for})
+                        return obs, decision, why
+                    waited_for = why  # what the page was missing on the last look before it fitted
+                    obs = replay_wait(obs, budget_ms, spent)
+
+            def replay_final(obs: dict) -> tuple[dict, list[dict] | None, str | None]:
+                """After the last saved step: wait, as long as the recorded run did and a little more, for the ending to be
+                there to decide. With assertions that is the moment they all hold (what a pass needs anyway, and exact);
+                without, the page the recorded run ended on, no longer loading. Returns (observation, the assertions as
+                last evaluated or None, why this is not the recorded ending or None)."""
+                saved = rp.path.get("final") or {}
+                budget_ms = rp.wait_budget(saved.get("wait_ms"))
+                t0 = time.perf_counter()
+                while True:
+                    checked = None
+                    why = match_final(saved, page_print(obs, rp.tokens))
+                    if why is None and page_busy(obs) and not saved.get("busy"):
+                        why = "the page is still loading (controls under a blank layer, or none yet)"
+                    ready = why is None
+                    if spec["assert"]:
+                        checked = check_assertions(spec, page, obs, secret_values, diagnostics)
+                        ready = all(a["ok"] for a in checked)
+                        why = why or (None if ready else "the assertions do not hold on the page yet")
+                    spent = int((time.perf_counter() - t0) * 1000)
+                    if ready or spent >= budget_ms:
+                        rp.waited_ms += spent
+                        return obs, checked, why
+                    obs = replay_wait(obs, budget_ms, spent)
+
+            def act(n: int, step: dict, obs: dict, sig: str, operation: str, target: dict | None, value_key: str | None,
+                    state_fn, saved: dict | None = None) -> bool:
+                """Execute a decided action and record it: repeat detection, the WAIT backoff, the picture, the action, the
+                settle, a new tab, the history. Shared by Jev's decisions and a saved path's (`saved`: the path step being
+                replayed). `state_fn()` builds Jev's state for the follow-up question of a `stuck` ending. Returns True
+                when the run ends here."""
+                nonlocal page, wait_streak, last_wait_sig, last_operation, last_action_end
+                # Repeat detection: the same action on an unchanged page max_repeat times is `stuck`. A WAIT is
+                # not an action on the page: Jev choosing it again on a page that still says "Loading..." is the
+                # right answer for as long as the page keeps loading (measured live: a 5 s loader ended `stuck`
+                # after 1.5 s with stuck_reason still_loading), so only the budget bounds a streak of WAITs.
+                if operation != "WAIT":
+                    key = (sig, operation, target["choice"] if target and not target.get("missing") else None, value_key)
+                    repeats[key] = repeats.get(key, 0) + 1
+                    step["repeat_count"] = repeats[key]
+                    if repeats[key] >= th["max_repeat"]:
+                        ask_reason(step, state_fn())
+                        finish(page, step, "stuck", dict(STOP))
+                        return True
+
+                # Lever F4: a WAIT chosen again on a page that has not changed since the last WAIT pauses twice as
+                # long as the last one, settle_ms x 1, 2, 4 and then 4 (measured on a 5 s loader: every WAIT is a
+                # full request, six of them at settle_ms cost ten requests a run). The first WAIT on a page, and any
+                # WAIT after the page changed, pause settle_ms as before; a non-WAIT action resets the streak.
+                wait_ms = None
+                if operation == "WAIT":
+                    wait_streak = wait_streak + 1 if sig == last_wait_sig else 0
+                    last_wait_sig = sig
+                    wait_ms = spec["browser"]["settle_ms"] * min(2 ** wait_streak, WAIT_BACKOFF_MAX)
+                    step["wait_streak"] = wait_streak
+                else:
+                    wait_streak, last_wait_sig = 0, None
+
+                # The page Jev decided on, before anything changes it. The last allowed step is terminal
+                # for the budget (the for-else below), so it gets its picture like every terminal step.
+                capture(page, step, terminal=(n == budget["max_steps"]))
+                t_b = time.perf_counter()
+                target_el = next((e for e in obs["elements"] if e["idx"] == (target or {}).get("element")), {})
+                tabs_before = len(popups)
+                path_attrs, path_wait = None, int((t_b - last_action_end) * 1000)
+                if rp is not None and saved is None and target_el and not target_el.get("frame"):
+                    # recorded now, before the action can remove the element: what identifies it across renders
+                    path_attrs = read_attrs([target_el["idx"]]).get(str(target_el["idx"]))
+                executed = execute(page, spec, operation, target, value_key, wait_ms, obs.get("fingerprint"), target_el.get("frame"))
+                if rp is not None and operation in REPLAYABLE:
+                    if executed["ok"]:
+                        option_text = next((o["text"] for o in target_el.get("options") or [] if o["i"] == (target or {}).get("option")), None)
+                        rp.record(operation, obs, target_el or None, path_attrs, value_key, option_text if operation == "SELECT" else None,
+                                  path_wait, busy=page_busy(obs), replayed_from=saved, read_attrs=read_attrs)
+                    elif saved is not None:
+                        step["replay_handback"] = f"the replayed {operation} failed: {executed.get('error')}"
+                        rp.hand_back(n, step["replay_handback"])
+                if not executed["ok"]:
+                    step["screenshot_after_failure"] = shot(page, f"{n:03d}-failed.png", step)
+                step["settle"] = settle(page, spec, after=(operation, None if target_el.get("datalist") else target_el.get("role")))
+                if len(popups) > tabs_before:
+                    # The action opened a new tab (target=_blank, window.open; the popup event arrives during the settle
+                    # above, not with the click). A person's eyes go with it; the run's do when the spec says so
+                    # (browser.follow_new_tabs), and otherwise the step says a tab opened.
+                    newest = popups[-1]
+                    step["new_tab"] = {"followed": False}
+                    try:
+                        step["new_tab"]["url"] = mask_text(newest.url, secret_values)
+                        if spec["browser"]["follow_new_tabs"] and not newest.is_closed():
+                            try:
+                                newest.wait_for_load_state("domcontentloaded", timeout=spec["browser"]["navigation_timeout_ms"])
+                            except Exception:  # noqa: BLE001 - settle() below waits for the document either way
+                                pass
+                            try:
+                                newest.expose_function(ANNOUNCE_FUNCTION, on_announce)
+                            except Exception:  # noqa: BLE001 - announcements from this tab are lost; the page text is not
+                                pass
+                            newest.set_default_timeout(spec["browser"]["action_timeout_ms"])
+                            diagnostics.attach(newest)
+                            page = newest
+                            step["new_tab"] = {"followed": True, "url": mask_text(page.url, secret_values)}
+                            step["settle"] = settle(page, spec)  # the new tab's document, before it is observed
+                    except Exception as e:  # noqa: BLE001 - the tab closed itself again: the run stays where it was
+                        step["new_tab"]["error"] = f"{type(e).__name__}: {str(e)[:120]}"
+                step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
+                step["executed"] = executed
+                record(history_entry(n, operation, target, value_key, executed), step, sig)
+                last_operation = operation if executed["ok"] else None
+                if operation != "WAIT":
+                    last_action_end = time.perf_counter()
+                trace["steps"].append(step)
+                return False
+
             for n in range(1, budget["max_steps"] + 1):
                 if time.perf_counter() - t_start > budget["max_seconds"]:
                     status = "budget_exhausted"
                     break
                 obs = look()
+                replay_decision, replay_why, replay_checked, verify_look = None, None, None, False
+                if rp is not None and rp.active:
+                    # the next saved step, if it applies to this page (given the time the recorded run took to get here)
+                    obs, replay_decision, replay_why = replay_look(obs)
+                    if replay_decision is None:
+                        rp.hand_back(n, replay_why)  # Jev decides this step, on this observation, and every step after it
+                elif rp is not None and rp.at_end:
+                    rp.verify_asked = True
+                    if spec["auto_done"]:
+                        # every saved step was executed: the ending is still to be decided, on the page it left
+                        obs, replay_checked, replay_why = replay_final(obs)
+                        verify_look = True
+                    else:
+                        rp.hand_back(n, "the spec ends on Jev's DONE (auto_done: false)")
                 sig = signature(obs)
                 announced = take_announcements(n, obs)  # what the page said since the last observation (toasts, live messages)
                 note_page_change(sig)  # did the previous action change what Jev sees?
                 step: dict = {
                     "n": n,
+                    "at_ms": int((time.perf_counter() - t_start) * 1000),  # when this page was observed, from the start of the run
                     "url": obs["url"],
                     "title": obs["title"],
                     "signature": sig,
@@ -1498,17 +1677,60 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 if after_no_effect:
                     step["after_no_effect"] = True  # this is the page the previous action failed to change
                 recent_ann = recent_announcements(all_announcements, n)
+                if replay_decision is not None:
+                    # A saved step decides this one: no request. From here on it is an ordinary executed action.
+                    operation, target, value_key = replay_decision["operation"], replay_decision["target"], replay_decision["value_key"]
+                    step.update({"replayed": True, "replay_waited_ms": replay_decision["waited_ms"], "offered_operations": [],
+                                 "latency_ms": {"jev": 0}, "usage": None, "checks": {}, "operation": {"choice": operation, "replayed": True},
+                                 "target": target, "low_confidence": False})
+                    if operation == "TYPE_TEXT":
+                        step["type_value"] = {"choice": value_key, "replayed": True}
+                    if operation == "UPLOAD_FILE":
+                        step["upload_file"] = {"choice": value_key, "replayed": True}
+                    if replay_decision.get("waited_for"):
+                        step["replay_waited_for"] = replay_decision["waited_for"]  # why the saved step did not apply at first
+                    stale_streak, low_streak, last_low_sig = 0, 0, None
+                    if act(n, step, obs, sig, operation, target, value_key,
+                           lambda: build_state(spec, obs, n, history, recent_ann), replay_decision["saved"]):
+                        break
+                    continue
+                if replay_why and not verify_look:
+                    step["replay_handback"] = replay_why  # why the saved path stopped here; Jev decides from this step on
+                if verify_look:
+                    step["replay_verify"] = True  # the look that decides the ending of a replayed run
+                    if replay_why:
+                        step["replay_final_mismatch"] = replay_why
+                    expected = rp.path["outcome"]
+                    if (rp.verify == "assert" and replay_why is None and replay_checked and all(a["ok"] for a in replay_checked)
+                            and (outcomes.get(expected) or {}).get("verdict") == "pass"):
+                        # replay.verify "assert": the page the recorded run ended on, and every assertion holds on it. That
+                        # is the pass; Jev is not asked, and the result says so (confirmed_by, replay.verified_by, evidence).
+                        rp.verified_by = "assertions"
+                        step.update({"offered_operations": [], "latency_ms": {"jev": 0}, "usage": None, "checks": {}, "operation": None})
+                        final["confirmed_by"] = "assertions"
+                        settle_pass(page, step, obs, {"name": expected, "verdict": "pass", "probability": None, "confidence": None},
+                                    "AUTO_DONE", jev, assertions=replay_checked,
+                                    skip_evidence="replayed run decided by its assertions (replay.verify: \"assert\"); Jev was not asked")
+                        break
                 state = build_state(spec, obs, n, history, recent_ann)
                 questions, meta = build_questions(spec, obs, last_operation, outcomes, ask_stuck=last_page_changed is False,
                                                   announcements=recent_ann)
                 offered = meta["offered"]
                 step["offered_operations"] = meta["operations"]
                 merged_adj = None
-                if pending and pending.get("name") and not (spec.get("evidence") == "failures" and spec["assert"]):
+                adj_for = pending.get("name") if pending else None
+                if verify_look:
+                    # One request decides the ending of a replayed run: which declared outcome the page shows, the spec's
+                    # checks and, for the outcome the recorded run ended in, the evidence line. No operation is asked:
+                    # if nothing declared is in sight, the next step is an ordinary one and Jev has the run.
+                    questions = {k: v for k, v in questions.items() if k in spec["checks"] or k == "outcome"}
+                    step["offered_operations"] = []
+                    adj_for = expected if expected in outcomes else None
+                if adj_for and not (spec.get("evidence") == "failures" and spec["assert"]):
                     # (with evidence "failures" and assertions the line is asked only if the pass then fails them)
                     # The confirmation of a pass sighting: ask the evidence questions in the same request (speculative
                     # fan-out), so a confirmed pass needs no adjudication round trip. The Choices point at state.lines.
-                    merged_adj = adjudication_request(page, pending["name"], outcome_when(pending["name"]), secret_values,
+                    merged_adj = adjudication_request(page, adj_for, outcome_when(adj_for), secret_values,
                                                       announced_lines(n), deep)
                     if merged_adj:
                         state["lines"] = merged_adj["state"]["lines"]
@@ -1520,7 +1742,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     step["latency_ms"] = {"jev": latency_of(resp, t_jev)}
                     step["usage"] = resp.get("usage")  # this request's tokens (a retry or the reason follow-up adds to it)
                     answers = resp["answers"]
-                    op_problem = validate_choice(answers.get("operation"), offered["operation"])
+                    op_problem = None if verify_look else validate_choice(answers.get("operation"), offered["operation"])
                     if op_problem:
                         # A malformed or missing operation answer is not a decision. Jev calls are
                         # read-only, so the same state and questions are sent once more before the
@@ -1541,7 +1763,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     break
                 checks = read_checks(answers, spec)
                 step["checks"] = checks
-                op = read_choice(answers, "operation", offered["operation"])  # None iff op_problem
+                op = None if verify_look else read_choice(answers, "operation", offered["operation"])  # None iff op_problem
                 step["operation"] = op
 
                 # The results contract: which declared outcome does this page show?
@@ -1560,6 +1782,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 seen = accepted(seen_outcomes(outcomes, checks, outcome_answer, th["outcome_true"]), step)
                 non_pass = [s for s in seen if s["verdict"] != "pass"]
                 passes = [s for s in seen if s["verdict"] == "pass"]
+                if verify_look and seen:
+                    rp.verified_by = "jev"
                 bad = [n_ for n_ in spec["never"] if checks.get(n_, 0.0) >= th["never_true"]]
                 if bad:
                     step["never_violated"] = bad  # kept for readers of old traces; the outcome below is the verdict
@@ -1645,13 +1869,23 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                         checked = check_assertions(spec, page, obs, secret_values, diagnostics)
                         if all(a["ok"] for a in checked):
                             final["confirmed_by"] = "assertions"
-                            settle_pass(page, step, obs, passes[0], "AUTO_DONE", jev, assertions=checked)
+                            # (a replayed run's deciding look asked the evidence line in the same request: `pre`)
+                            pre = {**merged_adj, "answers": answers} if merged_adj and merged_adj["name"] == passes[0]["name"] else None
+                            settle_pass(page, step, obs, passes[0], "AUTO_DONE", jev, pre, assertions=checked)
                             break
                         step["assertions_pending"] = [a for a in checked if not a["ok"]]  # not yet: the recheck decides
                         step["assertions_checked"] = checked
                     confirm_later(passes[0]["name"], "AUTO_DONE", f"confirming outcome {passes[0]['name']}", "WAIT")
                     continue
 
+                if verify_look:
+                    # After the last saved step the page shows no declared outcome (or one that only counts later): the
+                    # replay is over without an ending, and the next step is an ordinary one, on this page.
+                    why = "after the last saved step the page shows no declared outcome" + (f" ({replay_why})" if replay_why else "")
+                    step["replay_handback"] = why
+                    rp.hand_back(n, why)
+                    park(step, "the saved path ended with no declared outcome in sight; Jev decides from here", None, sig, pause=False)
+                    continue
                 if op is None:
                     error = step["error"] = f"invalid operation answer: {op_problem}"
                     finish(page, step, "error", dict(STOP))
@@ -1793,71 +2027,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     finish(page, step, "blocked", {"action": "BLOCKED", "ok": True, "error": None})
                     break
 
-                # Repeat detection: the same action on an unchanged page max_repeat times is `stuck`. A WAIT is
-                # not an action on the page: Jev choosing it again on a page that still says "Loading..." is the
-                # right answer for as long as the page keeps loading (measured live: a 5 s loader ended `stuck`
-                # after 1.5 s with stuck_reason still_loading), so only the budget bounds a streak of WAITs.
-                if operation != "WAIT":
-                    key = (sig, operation, target["choice"] if target and not target.get("missing") else None, value_key)
-                    repeats[key] = repeats.get(key, 0) + 1
-                    step["repeat_count"] = repeats[key]
-                    if repeats[key] >= th["max_repeat"]:
-                        ask_reason(step, state)
-                        finish(page, step, "stuck", dict(STOP))
-                        break
-
-                # Lever F4: a WAIT chosen again on a page that has not changed since the last WAIT pauses twice as
-                # long as the last one, settle_ms x 1, 2, 4 and then 4 (measured on a 5 s loader: every WAIT is a
-                # full request, six of them at settle_ms cost ten requests a run). The first WAIT on a page, and any
-                # WAIT after the page changed, pause settle_ms as before; a non-WAIT action resets the streak.
-                wait_ms = None
-                if operation == "WAIT":
-                    wait_streak = wait_streak + 1 if sig == last_wait_sig else 0
-                    last_wait_sig = sig
-                    wait_ms = spec["browser"]["settle_ms"] * min(2 ** wait_streak, WAIT_BACKOFF_MAX)
-                    step["wait_streak"] = wait_streak
-                else:
-                    wait_streak, last_wait_sig = 0, None
-
-                # The page Jev decided on, before anything changes it. The last allowed step is terminal
-                # for the budget (the for-else below), so it gets its picture like every terminal step.
-                capture(page, step, terminal=(n == budget["max_steps"]))
-                t_b = time.perf_counter()
-                target_el = next((e for e in obs["elements"] if e["idx"] == (target or {}).get("element")), {})
-                tabs_before = len(popups)
-                executed = execute(page, spec, operation, target, value_key, wait_ms, obs.get("fingerprint"), target_el.get("frame"))
-                if not executed["ok"]:
-                    step["screenshot_after_failure"] = shot(page, f"{n:03d}-failed.png", step)
-                step["settle"] = settle(page, spec, after=(operation, None if target_el.get("datalist") else target_el.get("role")))
-                if len(popups) > tabs_before:
-                    # The action opened a new tab (target=_blank, window.open; the popup event arrives during the settle
-                    # above, not with the click). A person's eyes go with it; the run's do when the spec says so
-                    # (browser.follow_new_tabs), and otherwise the step says a tab opened.
-                    newest = popups[-1]
-                    step["new_tab"] = {"followed": False}
-                    try:
-                        step["new_tab"]["url"] = mask_text(newest.url, secret_values)
-                        if spec["browser"]["follow_new_tabs"] and not newest.is_closed():
-                            try:
-                                newest.wait_for_load_state("domcontentloaded", timeout=spec["browser"]["navigation_timeout_ms"])
-                            except Exception:  # noqa: BLE001 - settle() below waits for the document either way
-                                pass
-                            try:
-                                newest.expose_function(ANNOUNCE_FUNCTION, on_announce)
-                            except Exception:  # noqa: BLE001 - announcements from this tab are lost; the page text is not
-                                pass
-                            newest.set_default_timeout(spec["browser"]["action_timeout_ms"])
-                            diagnostics.attach(newest)
-                            page = newest
-                            step["new_tab"] = {"followed": True, "url": mask_text(page.url, secret_values)}
-                            step["settle"] = settle(page, spec)  # the new tab's document, before it is observed
-                    except Exception as e:  # noqa: BLE001 - the tab closed itself again: the run stays where it was
-                        step["new_tab"]["error"] = f"{type(e).__name__}: {str(e)[:120]}"
-                step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
-                step["executed"] = executed
-                record(history_entry(n, operation, target, value_key, executed), step, sig)
-                last_operation = operation if executed["ok"] else None
-                trace["steps"].append(step)
+                if act(n, step, obs, sig, operation, target, value_key, lambda: state):
+                    break
             else:
                 status = "budget_exhausted"
             t_lap = lap("steps_ms", t_lap)
@@ -1989,6 +2160,9 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         result["expected"] = match_expect(result, spec["expect"])
     trace["expected"] = result.get("expected")
     trace["outcome"], trace["verdict"] = result["outcome"], result["verdict"]
+    if rp is not None:
+        # steps replayed, where Jev took over and why, and whether this run's path was saved (a passing run's is)
+        result["replay"] = trace["replay"] = rp.finish(trace, save=rp_cfg.get("save", True))
     trace["result"] = result
     with open(os.path.join(out_dir, "result.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
@@ -2020,6 +2194,17 @@ def main(argv: list[str]) -> int:
     deep.add_argument("--shadow-dom", action="store_true", help="observe inside open shadow roots (observation.shadow_dom; the default)")
     deep.add_argument("--no-shadow-dom", action="store_true", help="observe the document's own tree only (observation.shadow_dom false)")
     ap.add_argument("--junit", metavar="FILE", help="also write the result as a JUnit XML report (one test case) for a CI dashboard")
+    rpl = ap.add_mutually_exclusive_group()
+    rpl.add_argument("--replay", action="store_true",
+                     help="walk the path saved by this spec's last passing run without asking Jev, for as long as each step still "
+                          "applies to the page, and save the path when this run passes (spec: \"replay\": true)")
+    rpl.add_argument("--no-replay", action="store_true", help="ignore a saved path and the spec's `replay`: every step is Jev's")
+    ap.add_argument("--replay-record", action="store_true",
+                    help="with replay on: do not read the saved path, only write this run's when it passes (record afresh)")
+    ap.add_argument("--replay-verify", choices=VERIFY_MODES,
+                    help="how a fully replayed run's ending is decided: jev = one request asks which outcome the page shows (default); "
+                         "assert = a spec with assertions is decided by them alone")
+    ap.add_argument("--replay-dir", metavar="DIR", help="where saved paths are kept (default .jev/paths; overrides replay.dir)")
     args = ap.parse_args(argv[1:])
 
     load_dotenv()  # ./.env, if present; exported variables win
@@ -2034,6 +2219,14 @@ def main(argv: list[str]) -> int:
             spec["extra_operations"] = [*spec["extra_operations"], "HOVER"]
         if args.shadow_dom or args.no_shadow_dom:
             spec["observation"]["shadow_dom"] = bool(args.shadow_dom)
+        if args.replay or args.no_replay:
+            spec["replay"]["enabled"] = bool(args.replay) and not spec["replay"].get("never")  # "replay": "never" beats --replay
+        if args.replay_record:
+            spec["replay"]["use"] = False
+        if args.replay_verify:
+            spec["replay"]["verify"] = args.replay_verify
+        if args.replay_dir:
+            spec["replay"]["dir"] = args.replay_dir
         missing_files = [f"{k}: {v}" for k, v in spec["files"].items() if not os.path.isfile(v)]
         if missing_files:
             raise ValueError("Spec problems:\n  - files: no such file (paths are relative to " + os.getcwd() + "): " + ", ".join(missing_files))

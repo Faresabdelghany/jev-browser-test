@@ -53,7 +53,7 @@ RUN_TEST = os.path.join(HERE, "run_test.py")
 FLAKY = "flaky"
 EXPECTED = "expected"  # a spec with `expect` whose every run ended in the declared result: green, like pass
 GREEN = ("pass", EXPECTED)
-MEDIAN_FIELDS = ("wall_ms", "duration_ms", "jev_ms", "browser_ms", "requests", "input_tokens", "decision_confidence", "steps")
+MEDIAN_FIELDS = ("wall_ms", "duration_ms", "jev_ms", "browser_ms", "requests", "input_tokens", "decision_confidence", "steps", "replayed_steps")
 ENVIRONMENT_REASON = "every run failed before observing a page (browser, start URL or setup): see environment_failures"
 
 
@@ -120,12 +120,36 @@ def run_once(runner: str, python: str, spec_path: str, out_dir: str, run_args: l
         if result.get("expected") is not None:
             rec["expected"] = result["expected"].get("matched")
             rec["expected_mismatches"] = result["expected"].get("mismatches")
+        if result.get("replay"):
+            rp = result["replay"]
+            rec["replay"] = {k: rp.get(k) for k in ("used", "steps_in_path", "steps_replayed", "handed_back", "verified_by", "saved")}
     else:
         # the runner ran but wrote no readable result (a crash after the first observation): an error run
         rec["status"] = rec.get("status") or "error"
         rec["outcome"] = UNDETERMINED
         rec["error"] = rec.get("error") or tail
     return _relativize(rec, base)
+
+
+def green_run(rec: dict) -> bool:
+    return rec.get("exit_code") == 0
+
+
+def run_with_replay(runner: str, python: str, spec_path: str, out_dir: str, run_args: list[str], base: str | None = None) -> dict:
+    """One run with replay on, and the rule that keeps a saved path from ever being the reason for a red: a run that
+    walked saved steps and did not end green is run again at once without the saved path (`--replay-record`: every
+    step is Jev's, and a pass writes the path afresh). The second run is the run of record; the first is kept under
+    `replay_attempt` (its outcome, verdict, status, wall-clock and result file), and `replay_disagreed` says whether
+    the two ended differently."""
+    rec = run_once(runner, python, spec_path, out_dir, run_args, base)
+    walked = (rec.get("replay") or {}).get("steps_replayed") or 0
+    if green_run(rec) or rec.get("environment_failure") or not walked:
+        return rec
+    again = run_once(runner, python, spec_path, out_dir + "-without-replay", [*run_args, "--replay-record"], base)
+    again["replay_attempt"] = {k: rec.get(k) for k in ("outcome", "verdict", "status", "exit_code", "wall_ms", "result", "out_dir", "replay")}
+    again["replay_disagreed"] = (rec.get("outcome"), rec.get("verdict")) != (again.get("outcome"), again.get("verdict"))
+    again["wall_ms"] = (again.get("wall_ms") or 0) + (rec.get("wall_ms") or 0)  # what this spec cost the suite
+    return again
 
 
 def _relativize(rec: dict, base: str | None) -> dict:
@@ -190,6 +214,14 @@ def aggregate_spec(runs: list[dict]) -> dict:
         "suggested_verdicts": suggestions,
         "medians": {k: _median([r.get(k) for r in observed]) for k in MEDIAN_FIELDS},
         "passes": sum(1 for r in observed if r.get("verdict") == "pass"),
+        # with replay on: runs that walked their saved path to its end, runs where Jev took over before it, and runs
+        # that ended red after saved steps and were run again without the path (run_with_replay)
+        "replay": ({"full": sum(1 for r in observed if (r.get("replay") or {}).get("used") and not (r.get("replay") or {}).get("handed_back")
+                                and not r.get("replay_attempt")),
+                    "handed_back": sum(1 for r in observed if (r.get("replay") or {}).get("handed_back")),
+                    "rerun_without": sum(1 for r in observed if r.get("replay_attempt")),
+                    "disagreed": sum(1 for r in observed if r.get("replay_disagreed"))}
+                   if any(r.get("replay") or r.get("replay_attempt") for r in observed) else None),
         "environment_failures": [{"run": r.get("run"), "exit_code": r.get("exit_code"), "error": r.get("error")} for r in failures],
         "reason": ENVIRONMENT_REASON if runs and not observed else None,
     }
@@ -202,8 +234,13 @@ def suite_verdict(specs: dict) -> dict:
     flaky = sorted(sid for sid, v in verdicts.items() if v == FLAKY)
     undetermined = sorted(sid for sid, v in verdicts.items() if v == UNDETERMINED)
     environment = {sid: len(s["environment_failures"]) for sid, s in specs.items() if s.get("environment_failures")}
-    return {"all_pass": all_pass, "verdicts": verdicts, "flaky": flaky, "undetermined": undetermined,
-            "environment_failures": environment}
+    out = {"all_pass": all_pass, "verdicts": verdicts, "flaky": flaky, "undetermined": undetermined,
+           "environment_failures": environment}
+    replays = {sid: s["replay"] for sid, s in specs.items() if s.get("replay")}
+    if replays:
+        out["replay"] = {k: sum(r[k] for r in replays.values()) for k in ("full", "handed_back", "rerun_without", "disagreed")}
+        out["replay"]["disagreed_specs"] = sorted(sid for sid, r in replays.items() if r["disagreed"])
+    return out
 
 
 def render_markdown(report: dict) -> str:
@@ -217,9 +254,15 @@ def render_markdown(report: dict) -> str:
              + (f" · commit `{report['git_commit']}`" if report.get("git_commit") else "")
              + (f" · **{env_total} environment/setup failure(s)** (the browser, the start URL or a setup step failed before "
                 f"the flow was observed; not counted as outcomes)" if env_total else ""),
-             "",
-             "| spec | verdict | agreement | outcomes | median wall | Jev ms | requests | tokens in | confidence |",
-             "|---|---|---:|---|---:|---:|---:|---:|---:|"]
+             ""]
+    rp = s.get("replay")
+    if rp:
+        lines += [f"Replay: {rp['full']} run(s) walked their saved path to its end, {rp['handed_back']} handed over to Jev on the way"
+                  + (f", {rp['rerun_without']} ended red after saved steps and ran again without the path (that second run is the "
+                     f"result{'; ' + str(rp['disagreed']) + ' ended differently: ' + ', '.join('`' + x + '`' for x in rp['disagreed_specs']) if rp['disagreed'] else ''})"
+                     if rp["rerun_without"] else "") + ".", ""]
+    lines += ["| spec | verdict | agreement | outcomes | median wall | Jev ms | requests | tokens in | confidence |",
+              "|---|---|---:|---|---:|---:|---:|---:|---:|"]
     for sid, sp in report["specs"].items():
         m = sp["medians"]
         failures = sp.get("environment_failures") or []
@@ -241,6 +284,12 @@ def render_markdown(report: dict) -> str:
             outcome = f"{r.get('phase') or 'environment'} failure" if r.get("environment_failure") else r.get("outcome")
             if r.get("expected") is not None:
                 outcome = f"{outcome} ({'expected' if r['expected'] else 'NOT the expected result'})"
+            if r.get("replay_attempt"):
+                outcome = f"{outcome} (without the saved path; with it: {r['replay_attempt'].get('outcome')})"
+            elif (r.get("replay") or {}).get("used"):
+                hb = r["replay"].get("handed_back")
+                outcome = f"{outcome} (replayed {r['replay'].get('steps_replayed')}/{r['replay'].get('steps_in_path')}" + \
+                    (f", Jev from step {hb.get('at_step')}" if hb else "") + ")"
             lines.append(f"| {i} | {outcome} | {r.get('verdict') or '-'} | {r.get('status')} | {r.get('wall_ms')} ms | "
                          f"{r.get('exit_code')} | {evidence} | `{r.get('result') or r.get('out_dir')}` |")
     if s["flaky"] or s["undetermined"]:
@@ -250,7 +299,7 @@ def render_markdown(report: dict) -> str:
 
 
 def run_suite(spec_paths: list[str], repeat: int, workers: int, out_root: str, run_args: list[str],
-              python: str = sys.executable, runner: str = RUN_TEST, label: str = "") -> dict:
+              python: str = sys.executable, runner: str = RUN_TEST, label: str = "", replay: bool = False) -> dict:
     """Run the pool, aggregate, write results.json + results.md, return the report."""
     os.makedirs(out_root, exist_ok=True)
     jobs = []
@@ -265,7 +314,7 @@ def run_suite(spec_paths: list[str], repeat: int, workers: int, out_root: str, r
         spec_path, sid, i, out_dir = job
         t0 = time.perf_counter()
         try:
-            rec = run_once(runner, python, spec_path, out_dir, run_args, base=out_root)
+            rec = (run_with_replay if replay else run_once)(runner, python, spec_path, out_dir, run_args, base=out_root)
         except Exception as e:  # noqa: BLE001 - one run's failure to launch or to be read must not lose the suite
             rec = {"out_dir": _rel(out_dir, out_root), "exit_code": None, "wall_ms": int((time.perf_counter() - t0) * 1000),
                    "outcome": None, "verdict": None, "status": "error", "environment_failure": True,
@@ -291,6 +340,7 @@ def run_suite(spec_paths: list[str], repeat: int, workers: int, out_root: str, r
         "git_commit": _git_commit(),
         "repeat": repeat,
         "workers": workers,
+        "replay": replay,
         "run_args": run_args,
         "elapsed_ms": elapsed_ms,
         "out_dir": out_root,
@@ -319,6 +369,12 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--headed", action="store_true", help="every runner shows its browser window (use --workers 1); beats JEV_HEADED")
     mode.add_argument("--headless", action="store_true", help="every runner hides it; beats JEV_HEADED=1")
     ap.add_argument("--junit", metavar="FILE", help="also write the suite as a JUnit XML report (one test case per spec) for a CI dashboard")
+    ap.add_argument("--replay", action="store_true",
+                    help="every run walks the path its spec's last passing run saved (.jev/paths), asking Jev only where a step no "
+                         "longer applies and about the ending, and saves its own when it passes. A run that ends red after saved "
+                         "steps is run again without the path, and that run is the result")
+    ap.add_argument("--replay-verify", choices=("jev", "assert"),
+                    help="how a fully replayed run's ending is decided (run_test.py --replay-verify)")
     ap.add_argument("--python", default=sys.executable)
     ap.add_argument("--runner", default=RUN_TEST, help=argparse.SUPPRESS)  # the offline tests substitute a fake runner
     args = ap.parse_args(argv[1:])
@@ -339,8 +395,10 @@ def main(argv: list[str]) -> int:
         ids.setdefault(sid, p)
     specs = list(dict.fromkeys(os.path.abspath(p) for p in args.specs))  # the same file twice runs once
     out_root = args.out or os.path.join("runs", "suite", datetime.now().strftime("%Y%m%d-%H%M%S"))
-    run_args = [*args.run_arg, *(["--headed"] if args.headed else []), *(["--headless"] if args.headless else [])]
-    report = run_suite(specs, args.repeat, args.workers, out_root, run_args, args.python, args.runner, args.label)
+    run_args = [*args.run_arg, *(["--headed"] if args.headed else []), *(["--headless"] if args.headless else []),
+                *(["--replay"] if args.replay else []), *(["--replay-verify", args.replay_verify] if args.replay_verify else [])]
+    replay = args.replay or "--replay" in args.run_arg
+    report = run_suite(specs, args.repeat, args.workers, out_root, run_args, args.python, args.runner, args.label, replay)
     print()
     print(render_markdown(report))
     print(f"results: {os.path.join(out_root, 'results.json')}  {os.path.join(out_root, 'results.md')}")
