@@ -21,8 +21,14 @@ page states: identical).
 - **`scripts/ab.py`**: runs a set of specs with and without an option, interleaved so both arms see the same hour of
   a shared host, and reports per spec whether the ending moved and whether decisions got less certain. It is how
   "could this be the default" gets answered.
+- **`evidence: "failures"`** (`--evidence failures`): a pass whose assertions all hold is not asked for its evidence
+  line, which saves one Jev request on every such pass (three requests become two on the simplest flow). Anything
+  red, and a pass with no assertions, still gets its line. Off by default.
+- **A `Live` workflow** (`.github/workflows/live.yml`): runs a plan (`.github/live/plan.sh`) against the real Jev API
+  on GitHub's runners when a `live/<name>` branch is pushed, using the repository secret `TYPESAFE_API_KEY`, and
+  publishes the summaries to the `live-results` branch. Without the secret it runs nothing.
 - `scaffold.py --file KEY=PATH / --hover / --shadow-dom`; a stalled run on a page with an unused file field says so.
-- Offline scenarios J, K, L in `selftest_capabilities.py` and 11 more unit tests (173).
+- Offline scenarios J, K, L, M in `selftest_capabilities.py` and 12 more unit tests (174).
 
 ### Changed
 - With `files` declared, a file field is an upload target and no longer a click target (a click would open a system

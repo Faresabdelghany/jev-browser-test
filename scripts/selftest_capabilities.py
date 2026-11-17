@@ -26,6 +26,8 @@ and for the three interactions Jev drives itself since 0.5.0, each off until the
      field and the file; without `files` nothing changes
   L. hover (`extra_operations: ["HOVER"]`): Jev opens a hover-only menu and clicks the item it reveals; without it
      the operation is never offered
+  M. `evidence: "failures"`: a pass whose assertions hold costs one request fewer and says why it has no line; a bug,
+     a pass without assertions and a pass whose assertions fail still get theirs
 """
 from __future__ import annotations
 
@@ -638,6 +640,34 @@ def run_checks(tmp: str | None = None) -> list[str]:
     trace, out = go("hover-off", still, ScriptedJev([("hover", "Products"), ("click", "Pricing"), ("undecided",)], SAVED))
     if any("HOVER" in s["offered_operations"] for s in trace["steps"]) or "hover_target" in json.dumps(trace["steps"][0].get("target") or {}):
         failures.append("L: without extra_operations HOVER is never offered")
+    # M. evidence: "failures" ---------------------------------------------------------------------------------------------------
+    counts = {}
+    for mode in ("always", "failures"):
+        jev = ScriptedJev([("click", "Save")], SAVED)
+        trace, out = go(f"evidence-{mode}", make_spec(base + "/app", evidence=mode, **{"assert": [{"text_contains": "Saved successfully"}]}), jev)
+        counts[mode] = (trace["status"], jev.requests, trace["result"]["evidence"].get("line"), trace["result"]["evidence"].get("skipped"))
+    if counts["always"][:3] != ("passed", 3, "Saved successfully") or counts["always"][3] is not None:
+        failures.append(f"M: by default a pass gets its evidence line in one more request: {counts['always']}")
+    if counts["failures"][:3] != ("passed", 2, None) or not counts["failures"][3]:
+        failures.append(f"M: with evidence 'failures' a pass whose assertions hold makes one request fewer and says why it has no line: {counts['failures']}")
+    if "line not asked" not in flags_of(trace, out):
+        failures.append("M: the summary should say the line was not asked")
+    jev = ScriptedJev([("click", "Save")], SAVED)
+    trace, out = go("evidence-no-assert", make_spec(base + "/app", evidence="failures"), jev)
+    if trace["status"] != "passed" or trace["result"]["evidence"]["line"] != "Saved successfully":
+        failures.append(f"M: a pass with no assertions has nothing else to prove it and keeps its line: {trace['status']} {trace['result']['evidence']}")
+    jev = ScriptedJev([("click", "Save")], SAVED)
+    wrong = make_spec(base + "/app", evidence="failures", confirm="recheck", **{"assert": [{"url_matches": "**/somewhere-else"}]})
+    trace, out = go("evidence-assert-fails", wrong, jev)
+    if trace["status"] != "assert_failed" or trace["result"]["evidence"]["line"] != "Saved successfully":
+        failures.append(f"M: a pass whose assertions fail is a failure and gets its line: {trace['status']} {trace['result']['evidence']}")
+    bug = make_spec(base + "/app", evidence="failures", outcomes={"saved": {"when": "The page says 'Never shown here'", "verdict": "pass"},
+                                                                 "said_saved": {"when": "The page says 'Saved successfully'", "verdict": "bug", "requires_action": True}},
+                    **{"assert": [{"text_contains": "Saved"}]})
+    jev = ScriptedJev([("click", "Save")], {"said_saved": "Saved successfully"})
+    trace, out = go("evidence-bug", bug, jev)
+    if (trace["outcome"], trace["result"]["evidence"]["line"]) != ("said_saved", "Saved successfully"):
+        failures.append(f"M: an outcome that is not a pass always gets its line: {trace['outcome']} {trace['result']['evidence']}")
     return failures
 
 

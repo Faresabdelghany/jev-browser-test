@@ -141,6 +141,9 @@ CI runs both on every push and pull request. The design notes, session handoffs,
 evals live on the [`dev-docs`](https://github.com/Faresabdelghany/jev-browser-test/tree/dev-docs) branch, so that an
 install carries only the skill; check it out beside the code with
 `git fetch origin dev-docs && git worktree add dev origin/dev-docs -B dev-docs` (`dev/` is git-ignored here).
+`.github/workflows/live.yml` runs a plan against the real Jev API on GitHub's runners when a `live/<name>` branch is
+pushed (it needs the repository secret `TYPESAFE_API_KEY`) and publishes the results to the `live-results` branch;
+`scripts/ab.py` compares a set of specs with and without a runner option.
 To release, bump `version` in `.claude-plugin/plugin.json` and `marketplace.json` and add its section to
 [`CHANGELOG.md`](CHANGELOG.md): merging to `main` tags `v<version>` and publishes the release.
 

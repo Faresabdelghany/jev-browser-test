@@ -268,6 +268,9 @@ and the waiting:
 - Name the visible end state in the goal and the outcomes; a vague goal buys WAITs and wandering steps.
 - Use `wait_for {selector|url}` instead of `wait {ms}` in `setup`.
 - Do not add repeats to be sure: one run is evidence, three to five measure stability, more is load on the host.
+- A regression suite that is green most days can run with `--run-arg=--evidence=failures`: a pass whose assertions
+  hold is then not asked for its evidence line (one request fewer per pass; the assertions' `actual` values are the
+  proof), and anything red still gets its line. Not for a ticket or a first run, which want the page's own words.
 
 ## Troubleshooting
 

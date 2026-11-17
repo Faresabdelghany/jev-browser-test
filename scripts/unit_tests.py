@@ -2682,6 +2682,12 @@ class JevDrivenTests(unittest.TestCase):
         got = validate(self.spec(checks={"hover_target": "The menu is open on the page"}, outcomes={}, done_when=["hover_target"]))
         self.assertTrue(any("reserved question name" in p for p in got), got)
 
+    def test_evidence_setting(self) -> None:
+        from spec import validate
+        self.assertEqual(self.spec()["evidence"], "always")
+        self.assertEqual(validate(self.spec(evidence="failures")), [])
+        self.assertTrue(any("'evidence' must be" in p for p in validate(self.spec(evidence="never"))))
+
     def test_the_new_targets_are_guarded_and_flagged_like_the_old(self) -> None:
         from observe import TARGET_OPERATIONS, compare_fingerprint
         from run_test import NO_EFFECT_ACTIONS

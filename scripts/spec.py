@@ -130,6 +130,12 @@ DEFAULTS = {
     # request); otherwise, and always with "recheck", the runner pauses settle_ms, observes again and asks Jev once
     # more (the evidence questions ride in that request). Measured on the demo login: "assert" saves ~0.5 s a pass.
     "confirm": "assert",
+    # When the evidence line is asked. "always": for every declared outcome (the page's own words in result.evidence.line).
+    # "failures": not for a pass whose assertions all hold. The assertions are then the proof, each with the value found,
+    # and the request that would have fetched the line is not made: one Jev request fewer on every such pass (one of
+    # five on the demo login), which is what a regression suite pays for most. A pass with no assertions, and every
+    # outcome that is not a pass, still gets its line.
+    "evidence": "always",
     # Attach the standing rules (scripts/rules.py) to every question. Measured on the demo site they lowered
     # decision confidence in every wording tried (docs/superpowers/measurements/2026-09-22-track1-ab-*.json),
     # so they are opt-in for apps where Jev repeats no-op actions or needs the untrusted-page-text guard.
@@ -473,6 +479,8 @@ def validate(spec: dict) -> list[str]:
     for k in ("auto_done", "fail_fast", "rules"):
         if not isinstance(spec.get(k, False), bool):
             errors.append(f"'{k}' must be true or false")
+    if spec.get("evidence", "always") not in ("always", "failures"):
+        errors.append("'evidence' must be \"always\" (every outcome gets its evidence line) or \"failures\" (a pass whose assertions hold is not asked for one)")
     if spec.get("confirm", "assert") not in ("assert", "recheck"):
         errors.append("'confirm' must be \"assert\" (a pass whose assertions all hold is confirmed at once) or \"recheck\" (settle, observe again, ask Jev)")
     expect = spec.get("expect")

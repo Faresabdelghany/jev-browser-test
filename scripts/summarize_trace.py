@@ -160,6 +160,8 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
         lines.append(head)
         if (result.get("evidence") or {}).get("line"):
             lines.append(f"  evidence: \"{result['evidence']['line']}\"")
+        elif (result.get("evidence") or {}).get("skipped"):
+            lines.append("  evidence: line not asked (evidence: \"failures\"); the assertions below are the proof")
         if result.get("note"):
             lines.append(f"  note: {result['note']}")
     if trace.get("expected") is not None:

@@ -990,6 +990,8 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
             "present": (final.get("adjudication") or {}).get("present"),
             "screenshot": (seen_step or {}).get("screenshot") or (trace.get("final") or {}).get("screenshot"),
             "checks": (seen_step or terminal).get("checks", {}),
+            # only when the line was not asked (spec evidence "failures", a pass whose assertions hold): why
+            **({"skipped": final["adjudication"]["skipped"]} if (final.get("adjudication") or {}).get("skipped") else {}),
         },
         "assertions": final.get("assertions") or [],
         # every non-pass sighting that is not the result itself (the confirming step's included), and every pass
@@ -1251,6 +1253,12 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         finish(page, step, "passed" if ok else "assert_failed", {"action": action, "ok": True, "error": None, "confirmed": True})
         if ok and not spec["setup"] and not any("reason" not in h for h in history):
             trace["passed_without_actions"] = True
+        if ok and final["assertions"] and prefetched is None and spec.get("evidence") == "failures":
+            # The assertions held in code: they are the proof, and the spec said not to spend a request on the line.
+            final["adjudication"] = {"outcome": seen["name"], "statement": outcome_when(seen["name"]), "line": None, "line_id": None,
+                                     "present": None, "confidence": None,
+                                     "skipped": "pass confirmed by its assertions; the spec's evidence is \"failures\""}
+            return
         final["adjudication"] = adjudicate(page, jev, seen["name"], outcome_when(seen["name"]), secret_values, prefetched,
                                            announced_lines(step["n"]), deep=deep)
 
@@ -1466,7 +1474,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 offered = meta["offered"]
                 step["offered_operations"] = meta["operations"]
                 merged_adj = None
-                if pending and pending.get("name"):
+                if pending and pending.get("name") and not (spec.get("evidence") == "failures" and spec["assert"]):
+                    # (with evidence "failures" and assertions the line is asked only if the pass then fails them)
                     # The confirmation of a pass sighting: ask the evidence questions in the same request (speculative
                     # fan-out), so a confirmed pass needs no adjudication round trip. The Choices point at state.lines.
                     merged_adj = adjudication_request(page, pending["name"], outcome_when(pending["name"]), secret_values,
@@ -1969,6 +1978,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--model", help="override TYPESAFE_MODEL (default jev-latest)")
     ap.add_argument("--cdp-url", help="attach to a running browser (overrides browser.cdp_url), e.g. http://127.0.0.1:9222")
     ap.add_argument("--device", help="emulate a Playwright device (overrides browser.device), e.g. 'iPhone 13', 'Pixel 7'")
+    ap.add_argument("--evidence", choices=("always", "failures"),
+                    help="failures = do not ask for the evidence line of a pass whose assertions hold (one request fewer per pass); overrides the spec")
     ap.add_argument("--hover", action="store_true", help="offer the HOVER operation (adds it to the spec's extra_operations)")
     ap.add_argument("--shadow-dom", action="store_true", help="observe inside open shadow roots too (observation.shadow_dom)")
     ap.add_argument("--junit", metavar="FILE", help="also write the result as a JUnit XML report (one test case) for a CI dashboard")
@@ -1980,6 +1991,8 @@ def main(argv: list[str]) -> int:
         spec["browser"]["headless"] = resolve_headless(spec["browser"]["headless"], headed=args.headed, headless=args.headless)
         if args.device:
             spec["browser"]["device"] = args.device
+        if args.evidence:
+            spec["evidence"] = args.evidence
         if args.hover and "HOVER" not in spec["extra_operations"]:
             spec["extra_operations"] = [*spec["extra_operations"], "HOVER"]
         if args.shadow_dom:
