@@ -469,6 +469,8 @@ function wire() {{ const b = document.getElementById('save'); if (b) b.onclick =
 # valid cookie back to the form. The handler counts the logins and can forget every session (`sessions`).
 LOGIN_APP_PAGE = """<!doctype html><html><head><title>Sign in</title></head><body>
 <h1>Sign in</h1>
+<script>if (location.search.includes('denied')) { const a = document.createElement('div'); a.setAttribute('role', 'alert');
+  a.textContent = 'Error: you can only open that page when you are signed in'; document.body.appendChild(a); console.error('denied'); }</script>
 <label>User <input id="user"></label> <label>Password <input id="pass" type="password"></label>
 <button id="go" type="button" onclick="location.href='/do-login?user=' + encodeURIComponent(document.getElementById('user').value)">Sign in</button>
 </body></html>"""
@@ -556,7 +558,7 @@ class _Site(http.server.BaseHTTPRequestHandler):
             return
         if path == "/home" and cookie_user not in site.sessions:
             self.send_response(302)
-            self.send_header("Location", "/login-app")
+            self.send_header("Location", "/login-app?denied=1")
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
@@ -1067,6 +1069,9 @@ def run_checks(tmp: str | None = None) -> list[str]:
     trace, out, sess = session_run("session-expired", login_spec())
     if (trace["status"], site.logins, sess.get("reused"), sess.get("expired"), sess.get("saved"), len(trace["login"])) != ("passed", 2, False, True, True, 5):
         failures.append(f"R: a session the application no longer accepts is dropped and the run logs in again: {trace['status']} logins={site.logins} {sess}")
+    if any(st.get("announcements") for st in trace["steps"]) or "diagnostics" in trace or "signed in" in json.dumps(trace["result"]):
+        failures.append(f"R: what the application said to the expired session (its alert, its console error) is not part of the run: "
+                        f"{[st.get('announcements') for st in trace['steps']]} {trace.get('diagnostics')}")
     trace, out, sess = session_run("session-other-account", login_spec("bob"))
     if (trace["status"], site.logins, sess.get("reused"), sess.get("not_reused")) != ("passed", 3, False, "no saved session yet"):
         failures.append(f"R: another account is another session: {trace['status']} logins={site.logins} {sess}")

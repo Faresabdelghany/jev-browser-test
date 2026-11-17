@@ -450,6 +450,14 @@ class Diagnostics:
         page.on("requestfailed", guarded(on_request_failed))
         page.on("response", guarded(on_response))
 
+    def reset(self) -> None:
+        """Forget everything recorded so far: what the browser said while a saved session was being tried and found
+        expired (the application's "log in first" page, its 401 or 404) is about the probe, not about the run."""
+        self.items = {k: [] for k in DIAGNOSTIC_KINDS}
+        self.counts = {k: 0 for k in DIAGNOSTIC_KINDS}
+        self.server_errors = 0
+        self._fresh = []
+
     def take(self, step: int) -> dict:
         """Stamp everything recorded since the last call with `step` and return its counts by kind (empty when nothing
         new): the step's `diagnostics`, flagged in the summary."""
@@ -1622,6 +1630,12 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                             page.evaluate("() => { try { localStorage.clear(); sessionStorage.clear(); } catch (e) {} }")
                         except Exception:  # noqa: BLE001
                             pass
+                        # What the application said to the expired session (an alert "log in first", a 404 for the page)
+                        # was said to the probe. Live: saucedemo's ten-minute cookie had run out, its "You can only access
+                        # '/inventory.html' when you are logged in" reached Jev as an announcement on the first step of the
+                        # run that had just logged in, and Jev ended the run blocked on an application error.
+                        announced_raw.clear()
+                        diagnostics.reset()
                     else:
                         session_info["reused"] = True
                         if first:
