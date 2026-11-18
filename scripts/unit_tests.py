@@ -12,8 +12,10 @@ shapes the runner must refuse to act on.
 from __future__ import annotations
 
 import base64
+import contextlib
 import http.client
 import http.server
+import io
 import json
 import math
 import os
@@ -4055,6 +4057,114 @@ class RerunTests(unittest.TestCase):
                         "--http-cache", "--workers", "8", "--per-host", "8", "--host-limit", "*.example=3"])
             self.assertEqual(seen["run_args"], ["--replay", "--replay-verify", "assert", "--reuse-sessions", "--http-cache"])
             self.assertEqual((seen["workers"], seen["per_host"], seen["host_overrides"]), (8, 8, [("*.example", 3)]))
+
+
+class FirstContactTests(unittest.TestCase):
+    """What the first run against an application the examples had never seen turned up (0.13.1): a dropdown that is a
+    button, a wrong ending read off a page that said it was loading, a scripted sign-in ahead of the page's scripts,
+    a folder given to the suite."""
+
+    def test_a_combobox_that_is_a_button_is_clicked_and_one_that_is_a_field_is_typed_into(self) -> None:
+        from policy import describe_element, is_field
+        spec = {"data": {"q": "x"}, "files": {}, "extra_operations": []}
+        button = _el(4, "combobox", "Period", tag="button", text="Last 30 days")
+        self.assertEqual(element_operations(spec, button), ["CLICK"])
+        self.assertFalse(is_field(button))
+        self.assertEqual(describe_element(spec, button)["text"], "Last 30 days")  # its caption is text, not a typed value
+        self.assertEqual(element_operations(spec, _el(5, "combobox", "Project", tag="div")), ["CLICK"])
+        for field in (_el(6, "combobox", "City", tag="input"), _el(7, "combobox", "Notes", tag="textarea"),
+                      _el(8, "combobox", "Tags", tag="div", editable=True), _el(9, "combobox", "Old trace")):
+            self.assertEqual(element_operations(spec, field), ["TYPE_TEXT"], field)
+            self.assertTrue(is_field(field))
+        self.assertEqual(element_operations(spec, _el(1, "textbox", "Name", tag="div")), ["TYPE_TEXT"])  # only a combobox is read by its tag
+        self.assertEqual(element_operations(spec, _el(2, "combobox", "Period", tag="button", disabled=True) | {"disabled": True}), [])
+
+    def test_a_wrong_ending_is_held_while_the_page_says_it_is_loading_and_no_longer_than_a_navigation(self) -> None:
+        from run_test import hold_outcome
+        self.assertTrue(hold_outcome(False, 1, 0, 30000))     # a "Loading records…" line that covers nothing
+        self.assertTrue(hold_outcome(True, 0, 12000, 30000))  # controls under a blank layer
+        self.assertFalse(hold_outcome(False, 0, 0, 30000))    # a settled page: the outcome is the ending
+        self.assertFalse(hold_outcome(False, 2, 30000, 30000))  # an indicator that never goes away: the outcome stands
+        self.assertFalse(hold_outcome(True, 1, 45001, 45000))
+
+    def test_the_held_step_is_flagged_in_the_step_table(self) -> None:
+        from summarize_trace import _flags
+        self.assertIn("HELD:no_records", _flags({"n": 3, "outcome_held": {"outcome": "no_records", "loading_indicators": 1, "held_ms": 0}}))
+
+    class _Page:
+        def __init__(self, pending: list[list[str]]) -> None:
+            self.pending, self.calls = pending, []
+
+        def evaluate(self, js: str):
+            if "getEntriesByType" in js:
+                self.calls.append("scripts")
+                return self.pending.pop(0) if len(self.pending) > 1 else self.pending[0]
+            self.calls.append("idle")
+            return None
+
+        def wait_for_timeout(self, ms: int) -> None:
+            self.calls.append(f"wait {ms}")
+
+    def test_scripted_steps_wait_for_the_scripts_the_page_names_and_not_for_analytics(self) -> None:
+        import run_test
+        page = self._Page([["https://app.example/_next/static/chunks/main.js"], ["https://app.example/_next/static/chunks/main.js"], []])
+        run_test.wait_for_scripts(page)
+        self.assertEqual(page.calls, ["scripts", "wait 50", "scripts", "wait 50", "scripts", "idle"])
+        page = self._Page([["https://www.googletagmanager.com/gtag/js?id=G-1"]])  # never arrives behind a blocker: not waited for
+        run_test.wait_for_scripts(page)
+        self.assertEqual(page.calls, ["scripts", "idle"])
+        page = self._Page([["https://app.example/never.js"]])
+        with mock.patch.object(run_test, "SCRIPTS_POLL_MS", 1):
+            spent = run_test.wait_for_scripts(page, cap_ms=30)   # a script that never arrives costs the cap and no more
+        self.assertNotIn("idle", page.calls)
+        self.assertLess(spent, 2000)
+
+        class Broken:
+            def evaluate(self, js):
+                raise RuntimeError("Execution context was destroyed")
+        self.assertGreaterEqual(run_test.wait_for_scripts(Broken()), 0)  # a navigating page is the next step's to report
+
+    def test_the_wait_comes_before_the_first_step_that_touches_a_page_and_again_after_a_goto(self) -> None:
+        import run_test
+        page = mock.MagicMock()
+        page.url = "https://app.example/login"
+        spec = {"browser": {"action_timeout_ms": 5000, "navigation_timeout_ms": 30000, "settle_ms": 1, "quiet_ms": 1}, "data": {}}
+        steps = [{"action": "wait_for", "selector": "#email"}, {"action": "fill", "selector": "#email", "value": "a"},
+                 {"action": "fill", "selector": "#pw", "value": "b"}, {"action": "goto", "url": "https://app.example/x"},
+                 {"action": "click", "selector": "#go"}]
+        with mock.patch.object(run_test, "wait_for_scripts", return_value=120) as waited, \
+                mock.patch.object(run_test, "settle"), mock.patch.object(run_test, "fingerprint", return_value={}):
+            done = run_test.run_steps(page, spec, steps, [], "login")
+            self.assertEqual(waited.call_count, 2)
+            self.assertEqual([r.get("scripts_ms") for r in done], [None, 120, None, None, 120])
+            waited.reset_mock()
+            run_test.run_steps(page, spec, [{"action": "click", "selector": "#logout"}], [], "teardown")
+            waited.assert_not_called()  # the verdict's page has long had its scripts
+
+    def test_the_suite_takes_a_folder_for_the_spec_files_in_it(self) -> None:
+        import run_suite
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = os.path.join(tmp, "specs")
+            os.makedirs(os.path.join(folder, "drafts"))
+            for name, body in (("b", {"id": "b", "start_url": "https://shop.example/", "goal": "g"}),
+                               ("a", {"id": "a", "start_url": "https://shop.example/", "goal": "g"}),
+                               ("package", {"name": "not a spec"})):
+                with open(os.path.join(folder, f"{name}.json"), "w", encoding="utf-8") as f:
+                    json.dump(body, f)
+            self.assertTrue(run_suite.reads_as_spec(os.path.join(folder, "a.json")))
+            self.assertFalse(run_suite.reads_as_spec(os.path.join(folder, "package.json")))
+            class Reached(Exception):
+                pass
+
+            def stop(specs, *a, **k):
+                raise Reached(specs)
+            err = io.StringIO()
+            with mock.patch.object(run_suite, "run_suite", side_effect=stop), contextlib.redirect_stderr(err):
+                with self.assertRaises(Reached) as got:
+                    run_suite.main(["run_suite.py", folder, "--out", os.path.join(tmp, "out")])
+                self.assertEqual([os.path.basename(p) for p in got.exception.args[0]], ["a.json", "b.json"])
+                self.assertEqual(run_suite.main(["run_suite.py", os.path.join(folder, "drafts")]), 2)
+            self.assertIn("no spec files in folder", err.getvalue())
 
 
 class _FixedRand:

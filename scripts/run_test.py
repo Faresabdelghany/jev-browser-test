@@ -285,17 +285,58 @@ def step_locator(page, step: dict, selector: str | None = None):
     return scope.locator(selector or step["selector"]).first
 
 
+SCRIPTS_PENDING_JS = """() => {
+  const entries = performance.getEntriesByType('resource');
+  if (entries.length >= 240) return [];  // the browser's buffer (250) may have dropped some: nothing can be told
+  const done = new Set(entries.map(e => e.name));
+  const runs = s => !s.noModule && (!s.type || /^(module|(text|application)\/(java|ecma)script)$/i.test(s.type));
+  return [...document.scripts].filter(s => /^https?:/.test(s.src) && runs(s) && !done.has(s.src)).map(s => s.src);
+}"""
+SCRIPTS_WAIT_MS = 3000  # the longest a scripted step waits for the page's scripts: a script that never arrives is the page's
+SCRIPTS_POLL_MS = 50
+PAGE_STEPS = {"fill", "click", "press", "select", "check", "uncheck", "hover", "upload", "drag"}  # the steps that touch the page
+
+
+def wait_for_scripts(page, cap_ms: int = SCRIPTS_WAIT_MS) -> int:
+    """Wait until every script the document names has arrived (analytics aside, NET_IGNORED_RE) and the page has had an
+    idle moment to run them, at most `cap_ms`; return the milliseconds spent. A server-rendered page shows its form
+    before the code behind the form has loaded: a value filled in then is in the field and not in the application.
+    Live, 0.13.0: a scripted sign-in filled both fields of a server-rendered form at DOM-quiet, clicked Sign in, and
+    the application (hydrated in between) answered "missing email or phone" with both fields visibly filled; one run
+    in ten, with two browsers loading at once. Never raises: a page that cannot be asked is the next step's to report."""
+    t0 = time.perf_counter()
+    try:
+        while (time.perf_counter() - t0) * 1000 < cap_ms:
+            pending = [u for u in page.evaluate(SCRIPTS_PENDING_JS) if not NET_IGNORED_RE.search(u)]
+            if not pending:
+                page.evaluate("() => new Promise(r => window.requestIdleCallback ? requestIdleCallback(() => r(), {timeout: 400})"
+                              " : setTimeout(r, 50))")
+                break
+            page.wait_for_timeout(SCRIPTS_POLL_MS)
+    except Exception:  # noqa: BLE001
+        pass
+    return int((time.perf_counter() - t0) * 1000)
+
+
 def run_steps(page, spec: dict, steps: list[dict], results: list[dict], name: str = "setup", net: NetWatch | None = None,
               start: int = 0) -> list[dict]:
     """Deterministic Playwright steps, no Jev: `setup` before the flow (login, cookie banner, fixtures, and the
     interactions Jev is not offered: a file upload, a hover menu, a drag) and `teardown` after the verdict. Records
     land in `results` as they run (pass the trace's list, so a failing step is recorded even though this raises)."""
     timeout = spec["browser"]["action_timeout_ms"]
+    fresh = name != "teardown"  # a page just opened: its scripts may still be on their way (wait_for_scripts)
     for i, step in enumerate(steps):
         if i < start:  # already done (a reused session opened the page the first `goto` names)
             continue
         act = step["action"]
         rec = {"n": i, "action": act, "selector": step.get("selector"), "ok": True, "error": None}
+        if act == "goto":
+            fresh = True
+        elif fresh and act in PAGE_STEPS:
+            fresh = False
+            waited = wait_for_scripts(page)
+            if waited >= SCRIPTS_POLL_MS:
+                rec["scripts_ms"] = waited  # what this step waited for the page's scripts before it ran
         if step.get("frame"):
             rec["frame"] = step["frame"]
         before = fingerprint(page) if act in ("click", "press", "select") else None  # to tell a slow navigation from a failure
@@ -555,6 +596,16 @@ def loading_indicated(step: dict) -> bool:
     `page_busy`, no action is deferred for it and no confirmation waits on it, because an indicator can be decoration
     that never goes away and those waits are long."""
     return step.get("loading_indicators", 0) > 0
+
+
+def hold_outcome(page_is_loading: bool, indicators: int, held_ms: int, navigation_timeout_ms: int) -> bool:
+    """Is a non-pass outcome seen on this page to be held rather than taken as the ending? While the page says it is
+    loading (controls under a blank layer or an autocomplete's placeholder row, `page_loading`; or an indicator that
+    covers nothing: a spinner, a progress bar, a "Loading records…" line, `observe.loading_indicators`), and for no
+    longer than `navigation_timeout_ms` since the first hold: an indicator that never goes away is decoration or a
+    hang, and either way the outcome then stands. A pass needs no such hold: its assertions and its confirming look
+    are what make it wait."""
+    return (page_is_loading or indicators > 0) and held_ms < navigation_timeout_ms
 
 
 def deferral_limit(th: dict) -> int:
@@ -1236,6 +1287,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     after_no_effect = False  # the last executed action changed nothing: the next step shows that page (a key picture)
     low_streak, last_low_sig = 0, None  # consecutive undecided (low-confidence) steps on one page signature
     defer_streak, last_defer_sig = 0, None  # consecutive deferrals of a marginal action on one page signature under a blank layer
+    hold_since, hold_n = None, 0  # when a non-pass outcome was first held because the page said it was loading; holds since
     announced_raw: list[dict] = []  # messages the page reported through ANNOUNCE_FUNCTION since the last observation
     all_announcements: list[dict] = []  # every announcement of the run, each with the step it preceded
     stale_streak = 0
@@ -2045,10 +2097,32 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     step["never_violated"] = bad  # kept for readers of old traces; the outcome below is the verdict
 
                 if non_pass:
+                    # A wrong ending read off a page that says it is still loading is a reading of the placeholder, not
+                    # of the page: held, with a wait that ends when the page changes, for as long as the page keeps
+                    # saying so and no longer than a navigation may take. Live, 0.13.0: a list showed "Loading records…"
+                    # in its body and "0 records · No matching records" in its footer for ten seconds, and the run ended
+                    # on the spec's "the list says no matching records" bug outcome after eight.
+                    # (Not while a pass is being confirmed: that look is the verdict, and it has had its settle.)
+                    loading_now = 0 if pending else loading_indicators(page, obs["fingerprint"].get("frames"))
+                    hold_ms = 0 if hold_since is None else int((time.perf_counter() - hold_since) * 1000)
+                    if not pending and hold_outcome(page_loading(obs), loading_now, hold_ms, spec["browser"]["navigation_timeout_ms"]):
+                        hold_since = time.perf_counter() if hold_since is None else hold_since
+                        hold_n += 1
+                        step["outcome_held"] = {"outcome": non_pass[0]["name"], "loading_indicators": loading_now, "held_ms": hold_ms}
+                        if loading_now:
+                            step["loading_indicators"] = loading_now
+                        park(step, f"outcome {non_pass[0]['name']} held: the page still says it is loading",
+                             wait_entry(n, "WAIT", "the page still shows a loading indicator; it was given time to finish"), sig,
+                             wait_ms=spec["browser"]["settle_ms"] * min(2 ** (hold_n - 1), WAIT_BACKOFF_MAX),
+                             before=obs.get("fingerprint"))
+                        continue
+                    hold_since, hold_n = None, 0
                     if spec["fail_fast"]:
                         end_with_outcome(page, step, non_pass[0], jev)
                         break
                     step["outcome_seen"] = non_pass[0]["name"]  # recorded; the run goes on
+                else:
+                    hold_since, hold_n = None, 0
 
                 if pending:
                     # A pass was in sight last step (or Jev said DONE); the page has now had a full settle

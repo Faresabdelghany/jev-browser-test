@@ -527,7 +527,52 @@ $('save').onclick = () => { $('msg').textContent = ($('first').value && $('last'
 </script>
 </body></html>"""
 
-ROUTES = {"/login-app": LOGIN_APP_PAGE, "/cache-app": CACHE_APP_PAGE, "/net": NET_PAGE, "/batch-form": BATCH_FORM_PAGE, "/replay-form": REPLAY_FORM_PAGE, "/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
+RECORDS_PAGE = """<!doctype html><html><head><title>Fleet</title></head><body>
+<h1>Fleet</h1><button id="vehicles" type="button">Vehicles</button> <button id="drivers" type="button">Drivers</button>
+<table><tbody id="rows"><tr><td>Truck 7</td><td>Rear loader</td></tr></tbody></table><p id="foot">Showing 1 of 1</p>
+<script>
+  const q = new URLSearchParams(location.search);
+  document.getElementById('drivers').onclick = () => {
+    // the list's body says it is loading while its footer already reads as an empty list
+    document.getElementById('rows').innerHTML = '<tr><td colspan="2"><p>Loading records…</p></td></tr>';
+    document.getElementById('foot').textContent = '0 records · No matching records';
+    if (q.get('forever')) return;
+    setTimeout(() => {
+      if (q.get('empty')) { document.getElementById('rows').innerHTML = ''; return; }
+      document.getElementById('rows').innerHTML = '<tr><td>Ada Lindqvist</td><td>Company</td></tr>';
+      document.getElementById('foot').textContent = 'Showing 1 of 1';
+    }, Number(q.get('ms') || 1500));
+  };
+</script></body></html>"""
+
+DROPDOWN_PAGE = """<!doctype html><html><head><title>Dashboard</title></head><body>
+<h1>Dashboard</h1><button id="period" type="button" role="combobox" aria-label="Period" aria-expanded="false">Last 30 days</button>
+<div id="list" role="listbox" hidden><div role="option" tabindex="0">Last 7 days</div><div role="option" tabindex="0">Last 90 days</div></div>
+<p id="msg">Period: Last 30 days</p>
+<script>
+  const b = document.getElementById('period'), l = document.getElementById('list');
+  b.onclick = () => { l.hidden = false; b.setAttribute('aria-expanded', 'true'); };
+  for (const o of l.children) o.onclick = () => { b.textContent = o.textContent; l.hidden = true;
+    document.getElementById('msg').textContent = 'Period: ' + o.textContent + '. Saved successfully'; };
+</script></body></html>"""
+
+# A server-rendered sign-in form: the form is there at once, the code behind it arrives `ms` later. Until then a value
+# put in a field is in the field and not in the application, and the button does nothing.
+HYDRATE_PAGE = """<!doctype html><html><head><title>Sign in</title></head><body>
+<h1>Sign in</h1><input id="email" aria-label="E-mail"><input id="pw" type="password" aria-label="Password">
+<button id="signin" type="button">Sign in</button><p id="msg"></p>
+<script async src="/collect?ms=2500"></script>
+<script async src="/static/hydrate.js?ms=__MS__"></script></body></html>"""   # async, as a framework's bundles are: the document is complete without it
+
+HYDRATE_JS = """(() => {
+  const state = { email: '', pw: '' };   // what the application knows: only what was typed after it attached
+  document.getElementById('email').addEventListener('input', e => { state.email = e.target.value; });
+  document.getElementById('pw').addEventListener('input', e => { state.pw = e.target.value; });
+  document.getElementById('signin').onclick = () => {
+    document.getElementById('msg').textContent = state.email && state.pw ? 'Saved successfully' : 'missing email or phone'; };
+})();"""
+
+ROUTES = {"/records": RECORDS_PAGE, "/dropdown": DROPDOWN_PAGE, "/login-app": LOGIN_APP_PAGE, "/cache-app": CACHE_APP_PAGE, "/net": NET_PAGE, "/batch-form": BATCH_FORM_PAGE, "/replay-form": REPLAY_FORM_PAGE, "/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
           "/device": DEVICE_PAGE, "/tabs": TABS_PAGE, "/receipt": RECEIPT_PAGE, "/spinner": SPINNER_PAGE, "/shadow": SHADOW_PAGE,
           "/shadow-names": SHADOW_NAMES_PAGE}
 
@@ -571,6 +616,13 @@ class _Site(http.server.BaseHTTPRequestHandler):
             ms = next((int(part[3:]) for part in self.path.split("?", 1)[-1].split("&") if part.startswith("ms=") and part[3:].isdigit()), 0)
             time.sleep(ms / 1000)  # each request has its own thread (ThreadingHTTPServer)
             status, body, ctype = 200, "{}", "application/json"
+        elif path in ("/static/hydrate.js", "/hydrate"):
+            ms = next((int(part[3:]) for part in self.path.split("?", 1)[-1].split("&") if part.startswith("ms=") and part[3:].isdigit()), 0)
+            if path == "/hydrate":
+                status, body, ctype = 200, HYDRATE_PAGE.replace("__MS__", str(ms)), "text/html; charset=utf-8"
+            else:
+                time.sleep(ms / 1000)
+                status, body, ctype = 200, HYDRATE_JS, "application/javascript"
         elif path == "/favicon.ico":
             status, body, ctype = 204, "", "image/x-icon"
         elif path == "/home":
@@ -1317,6 +1369,54 @@ def run_checks(tmp: str | None = None) -> list[str]:
     trace, out = go("replay-off", replay_spec("r1kk", replay={"enabled": False}), ScriptedJev(full_moves, replay_rules))
     if "replay" in trace["result"] or any(replayed(trace)):
         failures.append("O: without replay nothing is read, nothing is written, and the result has no replay account")
+
+    # S. first contact with an application the examples had not seen (0.13.1) -----------------------------------------
+    # S1. a list that says "Loading records…" in its body and "No matching records" in its footer while it loads: the
+    # spec's "the list says no matching records" bug outcome is true of that page and is not the ending
+    def records_spec(query: str, **over) -> dict:
+        return make_spec(base + "/records" + query, goal="Open the Drivers tab, so that the list shows the driver Ada Lindqvist.",
+                         outcomes={"listed": {"when": "The list shows the driver Ada Lindqvist", "verdict": "pass"},
+                                   "no_records": {"when": "The list says 'No matching records'", "verdict": "bug", "requires_action": True}},
+                         **{"assert": [{"text_contains": "Ada Lindqvist"}], **over})
+    rules = {"listed": "Ada Lindqvist", "no_records": "No matching records"}
+    trace, out = go("records-loading", records_spec("?ms=1500"), ScriptedJev([("click", "Drivers")], rules))
+    held = [st for st in trace["steps"] if st.get("outcome_held")]
+    if (trace["status"], trace["result"]["outcome"]) != ("passed", "listed") or not held or held[0]["outcome_held"]["outcome"] != "no_records":
+        failures.append(f"S1: a wrong ending read off a loading list is held and the list's records are the ending: {trace['status']} "
+                        f"{trace['result']['outcome']} held={[st['n'] for st in held]}")
+    if "HELD:no_records" not in flags_of(trace, out):
+        failures.append("S1: the step table flags the held outcome")
+    trace, out = go("records-empty", records_spec("?ms=600&empty=1"), ScriptedJev([("click", "Drivers")], rules))
+    if (trace["status"], trace["result"]["outcome"], trace["result"]["verdict"]) != ("outcome", "no_records", "bug"):
+        failures.append(f"S1: a list that is empty once it has loaded ends in the bug outcome: {trace['status']} {trace['result']['outcome']}")
+    trace, out = go("records-forever", records_spec("?forever=1", browser={"navigation_timeout_ms": 1500}), ScriptedJev([("click", "Drivers")], rules))
+    held = [st for st in trace["steps"] if st.get("outcome_held")]
+    if (trace["status"], trace["result"]["outcome"]) != ("outcome", "no_records") or not held:
+        failures.append(f"S1: an indicator that never goes away holds the outcome no longer than a navigation may take: {trace['status']} "
+                        f"{trace['result']['outcome']} held={len(held)}")
+
+    # S2. a dropdown that is a button (role=combobox on a <button>): clicked open, its option clicked
+    spec = make_spec(base + "/dropdown", goal="Change the period to Last 7 days, so that the page says it was saved.", data={"note": "x"})
+    jev = ScriptedJev([("click", "Period"), ("click", "Last 7 days")], SAVED)
+    trace, out = go("dropdown-button", spec, jev)
+    acted = [((st.get("executed") or {}).get("action"), (st.get("target") or {}).get("label", "")) for st in trace["steps"]]
+    if trace["status"] != "passed" or not any(a == "CLICK" and "combobox" in label for a, label in acted):
+        failures.append(f"S2: a combobox that is a button is offered as a click target and opens: {trace['status']} {acted}")
+    period = next((e for e in jev.seen_states[0]["elements"] if e["role"] == "combobox"), {})
+    if period.get("operations") != ["CLICK"] or period.get("text") != "Last 30 days":
+        failures.append(f"S2: Jev sees the control as something to click, with its caption as text: {period}")
+
+    # S3. a scripted sign-in on a server-rendered form whose code arrives 700 ms later: the first step that touches the
+    # page waits for the scripts the document names (and not for the analytics script, which takes 2.5 s)
+    spec = make_spec(base + "/hydrate?ms=700", goal="Sign in, so that the page says it was saved.",
+                     setup=[{"action": "fill", "selector": "#email", "value": "a@example.com"},
+                            {"action": "fill", "selector": "#pw", "value": "longenough"},
+                            {"action": "click", "selector": "#signin"}])
+    trace, out = go("hydrate", spec, ScriptedJev([], SAVED))
+    waited = (trace.get("setup") or [{}])[0].get("scripts_ms") or 0
+    if trace["status"] != "passed" or not 300 <= waited < 2200:
+        failures.append(f"S3: scripted steps wait for the page's own scripts before they touch it, and not for analytics: {trace['status']} "
+                        f"waited {waited} ms; the page said: {(trace.get('final') or {}).get('url')}")
     return failures
 
 

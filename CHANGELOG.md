@@ -3,6 +3,43 @@
 Notable changes to the jev-browser-test skill. Versions follow [semantic versioning](https://semver.org); the version
 is the one in `.claude-plugin/plugin.json`, and merging a new one to `main` tags and releases it.
 
+## [0.13.1] - 2026-11-18
+
+What the first run against an application the examples had never been tuned on turned up: eleven read-only specs
+on a server-rendered operations app (component-library dropdowns, lists that take 10 to 30 s to load). One false
+BUG, one stalled run and one failed sign-in were the runner's; all three are fixed here, each with a unit test and
+an offline self-test case (scenario S).
+
+### Fixed
+- **A wrong ending is not read off a page that says it is loading.** A list showed "Loading records…" in its body
+  and "0 records · No matching records" in its footer for ten seconds, and the run ended on the spec's "the list
+  says no matching records" bug outcome after eight. A non-pass outcome seen while the page shows a loading
+  indicator (a blank layer over controls, a spinner, a progress bar, a "Loading …" line) is now held: the runner
+  waits (settle x 1, 2, 4, 4, ending when the page changes) and looks again, for as long as the page keeps saying
+  so and no longer than `browser.navigation_timeout_ms` since the first hold, after which the outcome stands (an
+  indicator that never goes away is decoration or a hang). `outcome_held` on the step, `HELD:<outcome>` in the
+  step table. A pass was never affected: its assertions and confirming look already wait.
+- **"Loading records…", "Fetching your orders...", "Reading…" count as loading indicators**: the verb, up to three
+  words of what, and an ellipsis (required, so "Loading dock" and "Reading list" are still names).
+- **A dropdown that is a button can be opened.** A `combobox` was always a field to type into, so `<button
+  role="combobox">` (the select of Radix, shadcn/ui, MUI, Headless UI) was offered for typing only: Jev answered
+  CLICK at 0.95 and the click question did not contain the control. A combobox is now a text field only when it is
+  an `<input>`, a `<textarea>` or contenteditable; any other is a click target whose caption is shown as text.
+- **Scripted steps wait for the page's scripts.** `setup` / `login` ran at DOM-quiet, which a server-rendered form
+  reaches before the code behind it has loaded: a sign-in filled both fields, clicked, and the application answered
+  "missing email or phone" with both fields visibly filled (one run in ten with two browsers loading). The first
+  step that touches a page after it was opened (and after every `goto`) now waits until every script the document
+  names has arrived, plus one idle moment: at most 3 s, analytics scripts not counted, nothing at all on a page
+  whose scripts are in (`scripts_ms` on the step when it waited).
+- **`run_suite.py specs/` works**: a folder stands for the spec files in it, as it already did for `rerun.py`.
+  It used to end `[Errno 21] Is a directory` as an environment failure.
+
+### Documentation
+- `references/spec-format.md` (Writing the goal and data): name the option a goal chooses ("another period" split
+  Jev between two equally good options and the run ended undecided), and give the feature under test a bug outcome
+  of its own (a goal such as "search for X and open it" was reached through the menu while the search box did
+  nothing).
+
 ## [0.13.0] - 2026-11-17
 
 Step 6 of the speed work: **one command for running specs again**, and the six steps measured together.

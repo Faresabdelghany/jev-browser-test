@@ -198,7 +198,9 @@ environment problem, like a missing key.
 ## Setup steps (deterministic Playwright, no Jev)
 
 Use these for anything with stable selectors that is not what you are testing: login, dismissing a
-known banner, seeding a fixture. Each step runs in order; the first failure aborts the run with `error`,
+known banner, seeding a fixture. The first step that touches a page after it was opened waits for the scripts the
+page names (at most 3 s; a server-rendered form is on screen before the code behind it), so a `fill` needs no
+`wait` in front of it. Each step runs in order; the first failure aborts the run with `error`,
 `result.reason.phase: "setup"` and exit 2: the flow was never observed, so it is a spec problem to fix (the
 selector, the wait), never a verdict about the app, and `run_suite.py` keeps it out of the outcome distribution.
 
@@ -468,6 +470,16 @@ Checks are Noul questions: Jev returns the probability that the statement is tru
   Saturday or a holiday is answered 'No Working Days Selected'), and how far the application looks (a date thirty
   days ahead fell into the next leave year in December, which its list does not show: take the shortest offset that
   is safely in the future).
+- **Name the choice.** A goal that leaves a choice open ("change the period to another one it offers") splits Jev
+  between the options that all fit, and a decision split 0.55 / 0.45 is one the runner does not act on: the run ends
+  `low_confidence` in front of an open list. Say which option ("change the period to 'Last 7 days'").
+- **Give the feature under test a bug outcome of its own.** A goal is reached by whatever route is open: "search for
+  the supplier and open the one it finds" passed through the menu while the search box did nothing. When the route
+  is the point, declare what its failure looks like ("the query is in the Search field and the page shows no
+  results for it", `requires_action`, `after: {type: ...}`), and the dead control ends the run as a bug.
+- **Slow lists.** An outcome about an empty list ("the list says 'No matching records'") is held while the page
+  shows a loading indicator, so it needs no wait of its own; give the pass an assertion on a record the list
+  should hold, and `--slow` (or `browser.navigation_timeout_ms`) the time the list needs.
 - **Long pages.** Form controls and buttons below the first screen are offered marked `(below the fold)` and the
   click scrolls to them; links and plain clickables there are not, so on a long page say in the goal where to scroll
   ("scroll down to the bottom of the form").

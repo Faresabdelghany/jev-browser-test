@@ -395,6 +395,7 @@ OBSERVE_JS = "(args) => {\n  const deep = !!args.shadowDom;\n" + JS_HELPERS + r"
       // inside a table row: a control that belongs to a record (its Edit, its checkbox), there as often as there are
       // records. Not sent to Jev; a saved path's page fingerprint leaves such controls out (replay.page_print)
       row: el.closest('tr, [role="row"]') ? true : undefined,
+      editable: el.isContentEditable || undefined,  // with `tag`: is a combobox a text field or a button (policy.types_text)
       icon_named: iconNamed,  // the name is a guess from an icon's class ("calendar icon"), not something the page says
       disabled, below: isBelow || undefined,
       x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)
@@ -718,6 +719,9 @@ INDICATORS_JS = r"""() => {
   const clean = s => (s || '').replace(/\s+/g, ' ').trim();
   const LOADING_TOKEN = /(^|[-_])(loading|loader|spinner|spinning|skeleton)([-_]|$)/i;
   const LOADING_TEXT = /^(loading|please wait|wait for it|fetching|one moment|working on it)\b[\s.…!]*$/i;
+  // "Loading records…", "Fetching your orders...", "Reading…": the verb, up to three words of what, and an ellipsis.
+  // The ellipsis is required here: "Loading dock", "Reading list" and "Loading zone B" are names, not states.
+  const LOADING_WHAT = /^(loading|fetching|retrieving|reading|searching|refreshing|syncing)(\s+[\p{L}\p{N}'’-]+){0,3}\s*(\.{2,}|…)$/iu;
   const indicatorsNow = () => {
     const found = [];
     const onScreen = el => { const r = el.getBoundingClientRect();
@@ -739,7 +743,9 @@ INDICATORS_JS = r"""() => {
       let node, seen = 0;
       while ((node = walker.nextNode()) && ++seen < 4000) {
         const raw = node.textContent;
-        if (!raw || raw.length > 60 || !LOADING_TEXT.test(clean(raw))) continue;
+        if (!raw || raw.length > 60) continue;
+        const line = clean(raw);
+        if (!LOADING_TEXT.test(line) && !LOADING_WHAT.test(line)) continue;
         const parent = node.parentElement;
         if (parent && !parent.closest('script, style, noscript, template, option, [role="option"], button, a')) add(parent);
       }

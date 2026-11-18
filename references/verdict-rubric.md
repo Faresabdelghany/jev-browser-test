@@ -141,7 +141,8 @@ When you are handed a run folder (`result.json`, `trace.json`, screenshots) the 
    them in a BUG report. `LOADING-IND:<n>` (a spinner or 'Loading...' line that covers nothing), `NEW-TAB` /
    `NEW-TAB(not followed)` (the action opened a tab).
    The outcome's flags: `DEFERRED:<outcome>` (true of the page, but its `requires_action` / `after` condition has not
-   happened yet: not counted), `RECHECK:<n>` / `ASSERT-PENDING:<n>` (a pass in sight on a page still busy, looked at
+   happened yet: not counted), `HELD:<outcome>` (a non-pass outcome seen while the page showed a loading indicator:
+   not the ending yet; the runner waited and looked again, at most `navigation_timeout_ms` in all), `RECHECK:<n>` / `ASSERT-PENDING:<n>` (a pass in sight on a page still busy, looked at
    again).
    In the operation column, `(not run)` marks a decision the runner turned into a wait (a marginal or deferred action,
    an undecided step) and `AUTO_DONE` a pass the runner confirmed itself when its outcome came into sight, without Jev

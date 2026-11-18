@@ -116,6 +116,8 @@ def _flags(step: dict, nxt: dict | None = None) -> str:
         f.append("ASSERT-FAILED")
     if step.get("no_effect") or (step.get("page_changed") is False and ex.get("action") in NO_EFFECT_ACTIONS and ex.get("ok")):
         f.append("NO-EFFECT")  # the action landed and the page Jev sees did not change (a dead control?); derived for older traces
+    if step.get("outcome_held"):
+        f.append("HELD:" + step["outcome_held"]["outcome"])  # a non-pass outcome read off a page that said it was loading: not the ending yet
     if step.get("outcome_deferred"):
         f.append("DEFERRED:" + ",".join(step["outcome_deferred"]))  # true of the page, but no action was taken yet (requires_action)
     if step.get("covered_controls"):
