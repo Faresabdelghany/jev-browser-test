@@ -1355,3 +1355,69 @@ First runs with every first-run option (`final-ab-combo-first-public`: `--batch-
 **The skill eval** (`2026-11-17-skill-eval-iteration-5/`): eval 6, "rerun an existing suite", one agent a
 configuration. 55.6 s and 73,950 tokens with the skill at v0.7.0 (seven tool calls, five files opened) against 28.7 s
 and 68,189 tokens at 0.13.0 (four tool calls, SKILL.md alone). Both answers right.
+
+## 0.13.1 (2026-11-18): an application the examples had not seen
+
+The first run of the skill against an application none of its rules or examples were written on: a private,
+server-rendered operations app (a component-library UI, lists that take 10 to 32 s to show their records), one
+account, read-only flows. The app, its data and the raw runs are the owner's and are **not** in this repository;
+what is here is the tally.
+
+**How.** One read-only look at the app with a plain browser script (the eleven pages of its menu, the first rows of
+each list), then eleven specs scaffolded with `scaffold.py --slow`: sign in, a rejected sign-in, sign out, open a
+record, switch a tab, three list searches, remove a filter, change a dropdown, the global search. Scripted sign-in in
+`login` for nine of them. `run_suite.py`, 2 workers, `jev-1.14.0`.
+
+| | 0.13.0, first run (11 x 1) | `fix/first-contact`, corrected specs (11 x 3) |
+|---|---:|---:|
+| wall-clock, 2 workers | 108.4 s | 262.1 s |
+| pass | 6 of 11 | 10 specs 3/3, 1 spec 2/3 |
+| BUG that was not one | 1 | 0 |
+| undetermined | 4 | 1 run of 33 |
+| Jev requests / input tokens (per pass of the 11) | 66 / 205k (10 specs ran) | about 76 / 244k |
+
+**What the five non-passes of the first run were.**
+
+| spec | ended | cause | whose |
+|---|---|---|---|
+| tab of a list | BUG `no_records` | the list said "Loading records…" in its body and "0 records · No matching records" in its footer for 10 s; the outcome was taken after 8 | the runner (fixed: the outcome is held) |
+| change a dropdown | `low_confidence` | the control is `<button role="combobox">`, offered for typing only; Jev answered CLICK at 0.95 with no such target | the runner (fixed) |
+| a list search | setup failure | the scripted sign-in filled the server-rendered form before its code had loaded; the app answered "missing email or phone" | the runner's timing (fixed: scripted steps wait for the page's scripts) |
+| remove a filter | `assert_failed` | my URL assertion: the list is also the page a sign-in lands on, at another path | the spec |
+| global search | `low_confidence` | the search box does nothing (checked by hand: typing and Enter change nothing) | the application |
+
+Two more things the first attempts cost before any of that: `run_suite.py specs` (a folder) ended `[Errno 21] Is a
+directory` (fixed), and a workspace without the machine's `SSL_CERT_FILE` ended eleven runs "TypeSafe API
+unreachable", each suggested `flaky` (open: it is the environment's, not the page's).
+
+**After the fixes** (three specs corrected: the URL assertion dropped, the dropdown's option named, a bug outcome
+for a search that shows nothing): the false BUG is gone (the outcome was held in 3 of 3 runs of that spec and the
+list's records were the ending), the dropdown passes 3/3 at 0.95, no sign-in failed in 27 scripted sign-ins (two
+waited about 100 ms for the page's scripts, the rest found them in).
+
+**Still wrong, and the two findings that matter.**
+
+1. **A pass by another route.** The global-search spec passes 3/3 although the search box does nothing: Jev types
+   the query, sees no results, and reaches the record through the menu. The bug outcome written for it ("the query
+   is in the Search field and the page shows no results for it") read 0.33 against `none_yet` 0.54 on the page
+   where it was true, below the threshold, and the next step left that page. A goal-driven run takes whatever
+   route is open; a spec has no way yet to say "by this control, or it is a bug".
+2. **Patience on an undecided page is shorter than a slow list.** The remove-a-filter spec stalled once in three:
+   the list took 32 s to load, and five undecided looks on a page with a loading indicator end after about 27 s at
+   the `--slow` settings (2.5 s x 1, 2, 4, 4), while `navigation_timeout_ms` is 45 s.
+
+Smaller: a failed setup step does not quote what the page said (the screenshot had "missing email or phone"; the
+result had a Playwright timeout); a goal that leaves a choice open ("another period") splits Jev 0.55 / 0.45 between
+two equally good options and the run ends undecided (documented in spec-format.md; the runner could say so itself).
+
+**Did the fixes move the 22 examples?** `ab.py --a-runner` (0.13.0 against the branch, interleaved, one at a time,
+two streams): 17 public specs x 2 repeats, no ending moved, requests equal, wall-clock within noise. 5 OrangeHRM
+specs x 2: four unchanged; `hrm-add-employee` differed in some runs, so it was run alone x 5 more. Over the seven
+runs of each arm: **A** `employee_saved` 5, `low_confidence` 1, `employee_id_taken` 1; **B** `employee_saved` 5,
+`low_confidence` 1, `employee_id_taken` 1 (the spec's known noise, the same in both arms). In all the branch's
+example runs the hold never fired and no scripted step waited 50 ms or more: the fixes took no part in them.
+
+Offline: 244 unit tests, `selftest.py` and `selftest_capabilities.py` (scenario S: a list that loads under a
+"No matching records" footer passes, the same list empty after loading ends BUG, an indicator that never ends
+holds the outcome no longer than a navigation; a button combobox is clicked open; a sign-in form whose code
+arrives 700 ms late is waited for, its 2.5 s analytics script is not).
