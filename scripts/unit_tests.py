@@ -3283,6 +3283,40 @@ class ReplayTests(unittest.TestCase):
             self.assertEqual(rp.handed_back, {"at_step": 4, "path_step": 2, "reason": "the page changed"})
             self.assertFalse(rp.active)
 
+    def test_the_path_resumes_when_jevs_decision_is_the_saved_step(self) -> None:
+        from replay import RESUME_TRIES, Replay, Tokens, describe_target, page_print
+        spec = self.spec()
+        t = Tokens(spec)
+        form = _obs([_el(0, "textbox", "First Name"), _el(1, "button", "Continue"), _el(2, "button", "Cancel")])
+        steps = [{"operation": "TYPE_TEXT", "page": page_print(form, t), "wait_ms": 0, "value_key": "first", "target": describe_target(form["elements"][0], None, t)},
+                 {"operation": "CLICK", "page": page_print(form, t), "wait_ms": 0, "target": describe_target(form["elements"][1], None, t)},
+                 {"operation": "CLICK", "page": page_print(form, t), "wait_ms": 0, "target": describe_target(form["elements"][2], None, t)}]
+        now = _obs([_el(0, "button", "Help"), _el(1, "textbox", "First Name"), _el(2, "button", "Continue"), _el(3, "button", "Cancel")])  # one more button
+        with tempfile.TemporaryDirectory() as tmp:
+            file = self.path_for(spec, tmp, steps)
+            rp = Replay(spec, file)
+            self.assertIn("fields and buttons differ", rp.decide(rp.next_step(), now)[1])
+            rp.hand_back(1, "the page's fields and buttons differ")
+            self.assertEqual((rp.cursor, rp.resume_at), (None, 0))
+            # Jev types another value into the field: not the saved step
+            self.assertFalse(rp.try_resume(1, "TYPE_TEXT", now, now["elements"][1], None, "user"))
+            # Jev types the saved value into the control the path describes: the path goes on from its second step
+            self.assertTrue(rp.try_resume(2, "TYPE_TEXT", now, now["elements"][1], None, "first"))
+            self.assertEqual((rp.cursor, rp.resume_at, rp.resumed, rp.active), (1, None, [{"at_step": 2, "path_step": 1}], True))
+            self.assertEqual(rp.handed_back["at_step"], 1)  # the account keeps where and why Jev was asked
+            # a second handover, and Jev leaves the path: after RESUME_TRIES other actions it is given up
+            rp.hand_back(3, "again")
+            for k in range(RESUME_TRIES):
+                self.assertEqual(rp.resume_at, 1)
+                self.assertFalse(rp.try_resume(4 + k, "CLICK", now, now["elements"][3], None, None))  # Cancel, not Continue
+            self.assertIsNone(rp.resume_at)
+            self.assertFalse(rp.try_resume(9, "CLICK", now, now["elements"][2], None, None))
+            # a handover at the ending (no saved step left) has nothing to resume
+            done = Replay(spec, file)
+            done.cursor = len(steps)
+            done.hand_back(5, "no declared outcome")
+            self.assertIsNone(done.resume_at)
+
     def test_a_path_is_dropped_when_the_spec_the_options_or_the_format_change(self) -> None:
         import replay
         spec = self.spec()
@@ -3887,6 +3921,140 @@ class PerHostTests(unittest.TestCase):
         examples = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "specs", "examples")
         limited = sorted(f[:-5] for f in os.listdir(examples) if f.endswith(".json") and load_spec(os.path.join(examples, f))["host_limit"] == 1)
         self.assertEqual(limited, ["hrm-add-employee", "hrm-admin-add-user", "hrm-leave-assign", "hrm-login", "hrm-pim-add-employee-list"])
+
+
+class RerunTests(unittest.TestCase):
+    """rerun.py: one command, a few lines, an exit code."""
+
+    def write(self, folder: str, name: str, **more) -> str:
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"{name}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"id": name, "start_url": "https://shop.example/", "goal": "g", **more}, f)
+        return path
+
+    def test_specs_come_from_files_folders_and_earlier_suites(self) -> None:
+        from rerun import collect_specs
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = self.write(os.path.join(tmp, "specs"), "a"), self.write(os.path.join(tmp, "specs"), "b")
+            self.write(os.path.join(tmp, "specs", "drafts"), "draft")  # a subfolder is not the folder
+            with open(os.path.join(tmp, "specs", "package.json"), "w", encoding="utf-8") as f:
+                f.write('{"name": "not a spec"}')
+            specs, problems = collect_specs([os.path.join(tmp, "specs")])
+            self.assertEqual((specs, problems), ([os.path.abspath(a), os.path.abspath(b)], []))
+            self.assertEqual(collect_specs([a, a, b])[0], [os.path.abspath(a), os.path.abspath(b)])
+            suite = os.path.join(tmp, "runs", "suite", "t1")
+            os.makedirs(suite)
+            with open(os.path.join(suite, "results.json"), "w", encoding="utf-8") as f:
+                json.dump({"specs": {"a": {"spec": "../../../specs/a.json"}, "gone": {"spec": "../../../specs/gone.json"}}}, f)
+            specs, problems = collect_specs([suite])
+            self.assertEqual(specs, [os.path.abspath(a)])
+            self.assertIn("no longer there", problems[0])
+            self.assertEqual(collect_specs([os.path.join(suite, "results.json")])[0], [os.path.abspath(a)])
+            self.assertIn("no such file or folder", collect_specs([os.path.join(tmp, "nope")])[1][0])
+            self.assertIn("no spec files", collect_specs([os.path.join(tmp, "runs")])[1][0])
+
+    def report(self, **specs) -> dict:
+        import run_suite
+        out = {sid: {"runs": runs, **run_suite.aggregate_spec(runs)} for sid, runs in specs.items()}
+        return {"specs": out, "suite": run_suite.suite_verdict(out), "elapsed_ms": 48200, "workers": 4, "out_dir": "runs/suite/t", "timestamp": "2026-11-17T16:00:00+02:00"}
+
+    def test_a_green_rerun_is_one_line_to_read(self) -> None:
+        from rerun import summarize
+        ok = {"run": 1, "exit_code": 0, "outcome": "done", "verdict": "pass", "status": "passed", "requests": 1, "out_dir": "a/01",
+              "replay": {"used": True, "steps_replayed": 8, "steps_in_path": 8, "handed_back": None}}
+        text = summarize(self.report(a=[ok], b=[{**ok, "expected": True, "outcome": "undetermined", "verdict": None, "requests": 9, "replay": {"used": False}}]),
+                         {"timestamp": "2026-11-17T15:02:11+02:00", "verdicts": {"a": "pass", "b": "expected"}})
+        lines = text.splitlines()
+        self.assertEqual(lines[0], "GREEN: 2 of 2 specs in 48 s (4 workers, 10 Jev requests). Nothing to read.")
+        self.assertEqual(lines[1], "Same verdicts as the last rerun (2026-11-17 15:02).")
+        self.assertIn("Replay: 1 walked their saved path, 0 handed over to Jev on the way, 1 had no path to walk", lines[2])
+        self.assertEqual(lines[-1], "Report: runs/suite/t/results.md")
+        self.assertEqual(len(lines), 4)
+
+    def test_what_is_not_green_gets_a_line_and_a_folder_each(self) -> None:
+        from rerun import changes, summarize
+        ok = {"run": 1, "exit_code": 0, "outcome": "done", "verdict": "pass", "status": "passed", "requests": 1, "out_dir": "a/01"}
+        bug = {"run": 1, "exit_code": 1, "outcome": "form_error", "verdict": "bug", "status": "outcome", "requests": 9, "out_dir": "checkout/01-without-replay",
+               "evidence_line": "Error:   Last Name is required", "replay_attempt": {"outcome": "form_error"}, "replay_disagreed": False,
+               "replay": {"used": False}}
+        stall = {"run": 1, "exit_code": 1, "outcome": "undetermined", "verdict": None, "status": "low_confidence", "suggested_verdict": "test_issue",
+                 "requests": 7, "out_dir": "hr/01", "replay": {"used": True, "steps_replayed": 2, "steps_in_path": 5,
+                                                               "handed_back": {"at_step": 3, "reason": 'button "Save" is not on the page'}}}
+        env = {"run": 1, "exit_code": 2, "environment_failure": True, "status": "error", "outcome": None, "verdict": None, "error": "navigation failed: Timeout 30000ms"}
+        text = summarize(self.report(a=[ok], checkout=[bug], hr=[stall], down=[env]),
+                         {"timestamp": "2026-11-16T09:00:00+02:00", "verdicts": {"a": "pass", "checkout": "pass", "old": "pass", "hr": "undetermined"}})
+        lines = text.splitlines()
+        self.assertEqual(lines[0], "NOT GREEN: 1 of 4 specs green in 48 s (4 workers, 17 Jev requests)")
+        self.assertIn('checkout  BUG          form_error  "Error: Last Name is required"  (the same without the saved path)  -> runs/suite/t/checkout/01-without-replay', lines[1])
+        self.assertIn("hr        UNDETERMINED undetermined (low_confidence, suggested: test_issue)  -> runs/suite/t/hr/01", lines[2])
+        self.assertIn("down      UNDETERMINED never observed a page (environment or setup): navigation failed: Timeout 30000ms", lines[3])
+        self.assertEqual(lines[4], "Changed since the last rerun (2026-11-16 09:00): checkout pass -> bug; down is new (undetermined); old is no longer in the suite")
+        self.assertIn('  handed over: hr at step 3: button "Save" is not on the page', text)
+        self.assertIn("Read result.json in those folders, then the trace if it does not settle it. The 1 green spec needs no reading.", text)
+        self.assertEqual(changes(None, {"a": "pass"}), [])
+        flaky = summarize(self.report(f=[ok, {**bug, "run": 2}]))
+        self.assertIn("f  FLAKY        runs disagreed: done x1, form_error x1", flaky)
+        self.assertNotIn("last rerun", flaky)  # nothing to compare with on a first rerun
+
+    def test_end_to_end_with_a_fake_runner(self) -> None:
+        import contextlib
+        import io
+        import rerun
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = os.path.join(tmp, "fake_runner.py")
+            with open(runner, "w", encoding="utf-8") as f:
+                f.write(FAKE_RUNNER)
+            folder = os.path.join(tmp, "specs")
+            self.write(folder, "always-pass")
+            state = os.path.join(tmp, "state")
+
+            def go(*extra: str) -> tuple[int, str]:
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    code = rerun.main(["rerun.py", folder, "--runner", runner, "--out", os.path.join(tmp, f"o{len(os.listdir(tmp))}"),
+                                       "--state-dir", state, *extra])
+                return code, buf.getvalue()
+            code, text = go()
+            self.assertEqual(code, 0)
+            self.assertTrue(text.startswith("GREEN: 1 of 1 specs in "), text)
+            self.assertNotIn("always-pass 1/1", text)  # the suite's progress lines are not this command's output
+            self.assertNotIn("last rerun", text)
+            self.write(folder, "blocked")
+            code, text = go()
+            self.assertEqual(code, 1)
+            self.assertIn("NOT GREEN: 1 of 2 specs green", text)
+            self.assertNotIn("last rerun", text)  # another set of specs: nothing remembered for it
+            code, text = go("--no-replay", "--no-sessions")
+            self.assertIn("Same verdicts as the last rerun", text)
+            out = sorted(d for d in os.listdir(tmp) if d.startswith("o"))[-1]
+            with open(os.path.join(tmp, out, "summary.md"), encoding="utf-8") as f:
+                self.assertEqual(f.read(), text)
+            with open(os.path.join(tmp, out, "results.json"), encoding="utf-8") as f:
+                last = json.load(f)
+            self.assertEqual((last["run_args"], last["workers"], last["replay"]), ([], 4, False))
+            self.assertTrue(os.path.isfile(os.path.join(state, ".gitignore")))
+            with mock.patch.object(rerun, "run_suite", side_effect=AssertionError("must not run")):
+                self.assertEqual(rerun.main(["rerun.py", os.path.join(tmp, "nope")]), 2)
+                self.assertEqual(rerun.main(["rerun.py", folder, "--host-limit", "x"]), 2)
+
+    def test_the_cheap_options_are_on_by_default(self) -> None:
+        import rerun
+        seen: dict = {}
+
+        def fake(specs, repeat, workers, out_root, run_args, python, runner, label, replay, **kw):
+            seen.update({"run_args": run_args, "workers": workers, "replay": replay, **kw})
+            os.makedirs(out_root, exist_ok=True)
+            return {"specs": {}, "suite": {"verdicts": {}, "all_pass": True}, "elapsed_ms": 1, "workers": workers, "out_dir": out_root, "timestamp": "t"}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(rerun, "run_suite", fake):
+            spec = self.write(tmp, "a")
+            rerun.main(["rerun.py", spec, "--out", os.path.join(tmp, "o"), "--state-dir", os.path.join(tmp, "s")])
+            self.assertEqual((seen["run_args"], seen["workers"], seen["replay"], seen["per_host"], seen["quiet"]),
+                             (["--replay", "--reuse-sessions"], 4, True, 2, True))
+            rerun.main(["rerun.py", spec, "--out", os.path.join(tmp, "o"), "--state-dir", os.path.join(tmp, "s"), "--replay-verify", "assert",
+                        "--http-cache", "--workers", "8", "--per-host", "8", "--host-limit", "*.example=3"])
+            self.assertEqual(seen["run_args"], ["--replay", "--replay-verify", "assert", "--reuse-sessions", "--http-cache"])
+            self.assertEqual((seen["workers"], seen["per_host"], seen["host_overrides"]), (8, 8, [("*.example", 3)]))
 
 
 class _FixedRand:

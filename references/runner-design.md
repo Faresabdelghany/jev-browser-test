@@ -44,6 +44,7 @@ secrets out of any model that does not need them, and turns a missing value into
 | `scripts/replay.py` | The saved path of a passing run (`--replay`): its format and where it is kept, the tokens that stand for a run's values, the page fingerprint, how a saved target is found again, when a path is dropped. Pure; the loop in `run_test.py` asks it for a decision where it would ask Jev |
 | `scripts/summarize_trace.py` | Summary table, `--step N` dump, `--result` |
 | `scripts/run_suite.py` | Specs × repeats as `run_test.py` subprocesses on a thread pool; `aggregate_spec` (outcome distribution, agreement, unanimous verdict or `flaky`), `suite_verdict`, `results.json` + `results.md`; exit 0 iff all unanimously pass |
+| `scripts/rerun.py` | The one command for running existing specs again: collects specs from files, folders or an earlier suite, calls `run_suite` with replay and sessions on, prints `summarize(report, previous)` (a few lines: green or what is not, what changed since the last rerun), remembers the verdicts under `.jev/reruns/` |
 | `scripts/report.py` | `render_report(trace, result, images)`: one self-contained `report.html` per run, screenshots inline as base64; given a suite directory, `suite_run_dirs` resolves the relative paths of its `results.json` and renders every run that has a trace |
 | `scripts/bench.py` | Runs a spec N times as subprocesses and reports medians; every number in the docs comes from its `--json` output |
 | `scripts/selftest.py` | Offline end-to-end test with local pages and a rule-based fake Jev |
@@ -214,6 +215,22 @@ examples, five an arm: the same verdicts, 94 → 83 requests and 99.5 → 94.4 s
 about half a second off a three-field checkout form, nothing off the two forms with a type-ahead (the batch stops
 at the suggestion list, and the extra questions cost about 9% more input tokens there). It stays opt-in for that
 reason: the saving is one request per plain extra field, and a first run should not pay for questions it cannot use.
+
+## The six speed steps together (0.8.0 to 0.13.0)
+
+What a rerun of the 22 examples is made of now (2026-11-17, dev-docs `measurements/`, section "0.13.0"): 194
+requests became 44 to 49, of which 16 to 18 are the deciding look of a replayed spec and the rest the four or five
+specs that do not end in a pass; 198 s on one worker became 136 to 159 s (127 to 134 s with the HTTP cache and the
+network settle); 135 s at the old safe parallel setting became 71 to 81 s on eight workers. The floor on eight
+workers is the slowest host's queue: five OrangeHRM flows one at a time, 59 to 116 s depending on the demo's hour,
+almost all of it the application answering. The floor on one worker is that plus 22 browser launches and page
+loads. Neither is a number of requests any more.
+
+After a handover the path can resume: `Replay.try_resume` compares the action Jev executed with the saved step the
+path stopped at, and the same operation on the control the path describes moves the cursor to the next step. The
+fingerprint is deliberately strict (a new button is something to look at), and strict fingerprints fail on pages
+whose furniture loads at its own pace; asking Jev once and carrying on is the cost of being strict that is worth
+paying, and handing over the rest of the run was not.
 
 ## Sessions and the HTTP cache (`scripts/session.py`)
 

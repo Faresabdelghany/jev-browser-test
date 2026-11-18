@@ -361,7 +361,9 @@ request, when the page's fingerprint is the recorded one and exactly one element
 identical `Delete` buttons, by their order among themselves, and only while there are as many as there were). The
 page gets the time the recorded run took to arrive, and at least two settles. On any mismatch (a renamed button, a
 new field, another page, a control that is gone or ambiguous) **Jev takes the run from that step**, on the
-observation in hand, and it is an ordinary run from there; if it passes, the path is written again.
+observation in hand. If what Jev then does is what the saved step says (the same operation on the control the path
+describes: the page differed in something that did not change what to do), the path goes on from its next step;
+otherwise Jev keeps the run, and it is an ordinary run from there. If it passes, the path is written again.
 
 **The ending is never the replay's word.** After the last saved step the run waits for the page the recorded run
 ended on and then decides as any run does: with `verify: "jev"` (the default) one request asks which declared

@@ -42,6 +42,7 @@ evidence, the file Claude reads first. The trace is the *evidence* behind it; th
   "replay": { "path": ".jev/paths/shop-checkout.json", "used": true,      // only with replay on (spec `replay`, --replay). used: a saved path was read
               "steps_in_path": 8, "steps_replayed": 8, "steps_by_jev": 0,  //   saved steps, how many ran without a request, executed actions Jev chose
               "handed_back": null,                                         //   or { "at_step": 4, "path_step": 4, "reason": "the page's fields and buttons differ ..." }
+              "resumed": [],                                               //   after a handover: [{ "at_step": 4, "path_step": 4 }] where Jev's own action was the saved step and the path went on
               "waited_ms": 12, "verified_by": "jev",                       //   time spent waiting for saved steps' pages; how the ending was decided ("jev" | "assertions")
               "saved": false, "save_note": "the saved path was replayed to its end and stands" }   // also "not_used" (why no path was read) and,
                                                                            //   for a red after saved steps, "note": run it once more with --no-replay
@@ -269,6 +270,7 @@ environment failure (or a spec file is missing / two files share an id).
                                                                      //   "replayed": true and no confidence; the summary shows `saved path`); how long the step waited for its page
       "replay_waited_for": "button \"Save\" is not on the page",     // with replay_waited_ms > 0: what the page lacked on the last look before the step applied
       "replay_handback": "the page's fields and buttons differ ...", // the step where the saved path stopped applying and Jev took over, and why (flag REPLAY-ENDED)
+      "replay_resumed": true,                                        // Jev decided this step after a handover and chose what the saved step says: the next step is the path's again (flag REPLAY-RESUMED)
       "replay_verify": true,                                         // the look that decides a replayed run's ending: checks, outcome and evidence line, no operation
                                                                      //   (flag REPLAY-VERIFY); "replay_final_mismatch": why the page is not the one the recorded run ended on
       "assertions": [ ... ],                                         // on the confirming step: the assert block's results

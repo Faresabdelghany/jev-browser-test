@@ -57,6 +57,7 @@ GENERATED_RE = re.compile(r"\d{3,}|[:.]")  # an id such as ":r5:", "ember1234", 
 WAIT_FLOOR_SETTLES = 2  # a saved step waits for its page at least this many settle_ms ...
 WAIT_FACTOR = 2  # ... and this many times what the recorded run waited, never beyond navigation_timeout_ms
 POLL_MS = 250  # while waiting for a saved step's page: look again this often (sooner when the page changes)
+RESUME_TRIES = 3  # after a handover: how many of Jev's actions may differ from the saved step before the path is given up
 
 # Read where the path is recorded and where two candidates must be told apart: the attributes that identify a control
 # across renders. One call for the indices asked about; the page's own tree and, with `deep`, its open shadow roots.
@@ -373,6 +374,12 @@ class Replay:
         self.final: dict | None = None  # this run's ending as a path's `final`
         self.saved: bool | None = None
         self.save_note: str | None = None
+        # After a handover: the saved step Jev was asked to decide in the path's place. When Jev's own action is that
+        # step (the same operation on the control the path describes), the path was right and only its picture of the
+        # page was not, and the replay goes on from the next saved step (try_resume).
+        self.resume_at: int | None = None
+        self.resume_misses = 0
+        self.resumed: list[dict] = []
 
     # -- walking the saved path ----------------------------------------------------------------------------------------
     @property
@@ -427,7 +434,32 @@ class Replay:
         if self.handed_back is None and self.path is not None:
             at = self.cursor if self.cursor is not None and self.cursor < len(self.path["steps"]) else None
             self.handed_back = {"at_step": n, "path_step": None if at is None else at + 1, "reason": reason}
+        if self.path is not None and self.cursor is not None and self.cursor < len(self.path["steps"]):
+            self.resume_at, self.resume_misses = self.cursor, 0
         self.cursor = None
+
+    def try_resume(self, n: int, operation: str, obs: dict, el: dict | None, option: int | None, value_key: str | None,
+                   read_attrs=None) -> bool:
+        """Jev has just executed an action after a handover. If it is the saved step the path stopped at (the same
+        operation, the same value key, and the control the path describes is the one Jev chose), the replay resumes
+        at the next saved step: the page differed from the recording in something that did not change what to do (a
+        widget that loaded earlier this time, a banner). Otherwise Jev may take up to RESUME_TRIES other actions (the
+        banner it had to dismiss first) before the path is given up for this run."""
+        if self.resume_at is None or self.path is None:
+            return False
+        saved = self.path["steps"][self.resume_at]
+        same = saved.get("operation") == operation and (saved.get("value_key") or None) == (value_key or None)
+        if same and operation in TARGET_OPERATIONS:
+            found, opt, _ = find_target(saved.get("target") or {}, obs.get("elements") or [], operation, self.spec, self.tokens, read_attrs)
+            same = found is not None and el is not None and found["idx"] == el["idx"] and (operation != "SELECT" or opt == option)
+        if same:
+            self.cursor, self.resume_at = self.resume_at + 1, None
+            self.resumed.append({"at_step": n, "path_step": self.cursor})
+            return True
+        self.resume_misses += 1
+        if self.resume_misses >= RESUME_TRIES:
+            self.resume_at = None
+        return False
 
     # -- recording what this run does ----------------------------------------------------------------------------------
     def record(self, operation: str, obs: dict, el: dict | None, attrs: dict | None, value_key: str | None,
@@ -503,6 +535,7 @@ class Replay:
             "steps_replayed": self.replayed,
             "steps_by_jev": sum(1 for s in acted if not s.get("replayed")),  # executed actions Jev chose in this run
             "handed_back": self.handed_back,  # {at_step, path_step, reason} when Jev took over before the path's end
+            "resumed": self.resumed,  # after a handover: [{at_step, path_step}] where Jev's action was the saved step and the path went on
             "waited_ms": self.waited_ms,  # spent waiting for saved steps' pages
             "verified_by": self.verified_by,  # how the ending was decided after a full replay: "jev" | "assertions"
             "saved": bool(self.saved),

@@ -1725,6 +1725,12 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     spent = int((time.perf_counter() - t0) * 1000)
                     if ready or spent >= budget_ms:
                         rp.waited_ms += spent
+                        if ready and spec["assert"] and spent > POLL_MS:
+                            # The assertions were read from the live page a moment after `obs` was taken, and the page was
+                            # changing: let it settle and look again, so the deciding look sees what the assertions saw.
+                            # Live: a loader ended between the two, the assertions held, and Jev was shown "Loading...".
+                            settle(page, spec, net=net, since=action_started)
+                            obs = look()
                         return obs, checked, why
                     obs = replay_wait(obs, budget_ms, spent)
 
@@ -1809,6 +1815,9 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     elif saved is not None:
                         step["replay_handback"] = f"the replayed {operation} failed: {executed.get('error')}"
                         rp.hand_back(n, step["replay_handback"])
+                    if saved is None and executed["ok"] and rp.try_resume(n, operation, obs, target_el or None, (target or {}).get("option"),
+                                                                          value_key, read_attrs):
+                        step["replay_resumed"] = True  # Jev chose what the saved step says: the path goes on from the next one
                 if not executed["ok"]:
                     step["screenshot_after_failure"] = shot(page, f"{n:03d}-failed.png", step)
                 step["settle"] = settle(page, spec, after=(operation, None if target_el.get("datalist") else target_el.get("role")),

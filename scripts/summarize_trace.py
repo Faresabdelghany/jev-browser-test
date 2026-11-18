@@ -65,6 +65,8 @@ def _replay_lines(rp: dict | None) -> list[str]:
         if hb:
             at = f"saved step {hb['path_step']}" if hb.get("path_step") else "the ending"
             line += f"; Jev took over at step {hb.get('at_step')} ({at}): {hb.get('reason')}"
+            if rp.get("resumed"):
+                line += f"; the path resumed after Jev chose the saved step itself ({len(rp['resumed'])} time{'s' if len(rp['resumed']) != 1 else ''})"
         elif rp.get("verified_by"):
             line += "; the ending was decided by " + ("the assertions alone" if rp["verified_by"] == "assertions" else "Jev (one request) and the assertions")
     line += "; path saved" if rp.get("saved") else ""
@@ -102,6 +104,8 @@ def _flags(step: dict, nxt: dict | None = None) -> str:
         f.append("BATCHED")  # typed without a request of its own: Jev assigned the value in the request that typed the form's first field
     if step.get("batch_stopped"):
         f.append("BATCH-ENDED")  # the page reacted to what was typed (step.batch_stopped says how); Jev decides again from here
+    if step.get("replay_resumed"):
+        f.append("REPLAY-RESUMED")  # Jev decided this step after a handover and chose what the saved step says: the path goes on
     if step.get("replay_handback"):
         f.append("REPLAY-ENDED")  # the saved path stopped applying here (step.replay_handback says why); Jev decides from this step on
     if step.get("replay_verify"):

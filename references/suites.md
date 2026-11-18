@@ -4,6 +4,14 @@
 python $SKILL/scripts/run_suite.py specs/*.json --repeat 3 --workers 2   # -> runs/suite/<ts>/results.json + results.md
 ```
 
+**Running the same specs again** is `python $SKILL/scripts/rerun.py specs/` (or spec files, or an earlier suite's
+folder): `run_suite.py` with replay and saved sessions on, 4 workers inside the per-host limits, and a summary in
+place of the tables. It prints, and writes to `summary.md` beside `results.json` and `results.md`, either `GREEN: N
+of N specs in T s ... Nothing to read.` or one line per spec that is not green with its verdict, outcome, evidence
+line and run folder; then what changed since the last rerun of the same set of specs (remembered under
+`.jev/reruns/`), and what the replay did (how many walked their path, where Jev took over and why). Exit 0 when
+every spec is green. For a green rerun that output is everything there is to read.
+
 **How many at once.** `--workers` is the total; `--per-host` (default 2) is how many runs one host sees at a time,
 whatever the total. A spec can lower its host's limit with `"host_limit": 1` (a host that hands out ids, or
 answers a second visitor with timeouts; the smallest value among the host's specs counts), and
