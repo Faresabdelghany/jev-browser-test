@@ -3102,6 +3102,355 @@ class ABTests(unittest.TestCase):
         self.assertIn("No spec moved and no confidence fell", text)
 
 
+def _el(idx: int, role: str, name: str = "", **more) -> dict:
+    return {"idx": idx, "role": role, "name": name, "disabled": False, **more}
+
+
+def _obs(elements: list[dict], url: str = "https://shop.example/checkout", title: str = "Checkout") -> dict:
+    return {"url": url, "title": title, "elements": elements, "can_scroll_down": True, "can_scroll_up": False}
+
+
+class ReplayTests(unittest.TestCase):
+    """replay.py: what a saved path holds, when a saved step applies to a page, and when a path is thrown away."""
+
+    def spec(self, **over) -> dict:
+        return _merge(DEFAULTS, {"id": "replay-unit", "start_url": "https://shop.example/", "goal": "Check out, so that the order is confirmed.",
+                                 "outcomes": {"done": {"when": "The page says the order is confirmed", "verdict": "pass"}},
+                                 "data": {"first": "Ada", "user": "ada-zz91", "pin": "s3cret-pin"}, "secrets": ["pin"],
+                                 "run_stamp": "zz91", "dates": {"${DATE+2d}": "2026-19-11"}, **over})
+
+    def test_tokens_write_keys_for_values_and_read_them_back(self) -> None:
+        from replay import Tokens
+        t = Tokens(self.spec())
+        text = "Row ada-zz91 for Ada, stamp zz91, due 2026-19-11, pin s3cret-pin"
+        written = t.template(text)
+        self.assertEqual(written, "Row {{data:user}} for {{data:first}}, stamp {{run_stamp}}, due {{date:0}}, pin {{data:pin}}")
+        self.assertEqual(t.fill(written), text)
+        # the run that replays has other values: the same tokens read as its own
+        later = Tokens(self.spec(data={"first": "Ada", "user": "ada-q7q7", "pin": "other-pin"}, run_stamp="q7q7", dates={"${DATE+2d}": "2026-20-11"}))
+        self.assertEqual(later.fill(written), "Row ada-q7q7 for Ada, stamp q7q7, due 2026-20-11, pin other-pin")
+        # a value the observer cut off at the end of a name is its first N characters
+        self.assertEqual(t.template("Delete ada-zz"), "Delete {{data:user:6}}")
+        self.assertEqual(later.fill("Delete {{data:user:6}}"), "Delete ada-q7")
+        self.assertEqual(Tokens({"data": {}}).template("nothing to write"), "nothing to write")
+
+    def test_url_shape_and_digits(self) -> None:
+        from replay import no_digits, url_shape
+        self.assertEqual(url_shape("https://h.example/pim/viewPersonalDetails/empNumber/123?b=2&a=1#/active"),
+                         "https://h.example/pim/viewPersonalDetails/empNumber/*?a,b#/active")
+        self.assertEqual(url_shape("https://h.example/o/3f2a9c1e-1111-2222-3333-444455556666/edit"), "https://h.example/o/*/edit")
+        self.assertEqual(url_shape("https://h.example/checkout-step-two.html"), "https://h.example/checkout-step-two.html")
+        self.assertEqual(no_digits("Cart (12) {{date:0}} of 3"), "Cart (#) {{date:0}} of #")
+
+    def test_page_print_is_the_named_fields_and_buttons(self) -> None:
+        from replay import Tokens, match_page, page_print
+        t = Tokens(self.spec())
+        obs = _obs([_el(0, "link", "Home"), _el(1, "textbox", "First Name"), _el(2, "button", "Cart (2)"), _el(3, "option", "ada-zz91"),
+                    _el(4, "button", "Remove", context="Row ada-zz91"), _el(5, "button", "Greet Ada"), _el(6, "button", "Approve", row=True),
+                    _el(7, "button", "×"), _el(8, "button", ""), _el(9, "button", "calendar icon", icon_named=True), _el(10, "button", "3")],
+                   url="https://shop.example/cart/77?x=1", title="Cart of ada-zz91")
+        fp = page_print(obs, t)
+        self.assertEqual(fp, {"url": "https://shop.example/cart/*?x", "title": "Cart of {{data:user}}",
+                              "controls": ['button "Cart (#)"', 'button "Greet {{data:first}}"', 'textbox "First Name"']})
+        self.assertNotIn("ada", json.dumps(fp))  # no typed value in what is saved
+        self.assertIsNone(match_page(fp, page_print(_obs(obs["elements"][:3] + [_el(9, "button", "Greet Ada"), _el(7, "link", "New link")],
+                                                     url="https://shop.example/cart/78?x=2", title="Cart of ada-zz91"), t)))
+        gone = match_page(fp, page_print(_obs(obs["elements"][:2] + [_el(8, "button", "Pay now")], url=obs["url"], title=obs["title"]), t))
+        self.assertIn('gone: button "Cart (#)"', gone)
+        self.assertIn('new: button "Pay now"', gone)
+        self.assertIn("recorded on https://shop.example/cart/*?x", match_page(fp, page_print(_obs([], url="https://shop.example/error"), t)))
+        self.assertIn("title", match_page(fp, page_print(_obs(obs["elements"], url=obs["url"], title="Error"), t)))
+
+    def test_a_final_page_recorded_under_its_loader_is_compared_by_url_and_title(self) -> None:
+        from replay import match_final
+        shell = {"page": {"url": "https://h.example/p/*", "title": "App", "controls": ['button "Help"']}, "wait_ms": 5000, "busy": True}
+        loaded = {"url": "https://h.example/p/*", "title": "App", "controls": ['button "Help"', 'button "Save"', 'textbox "Name"']}
+        self.assertIsNone(match_final(shell, loaded))
+        self.assertIn("fields and buttons differ", match_final({**shell, "busy": False}, loaded))
+        self.assertIn("recorded on https://h.example/p/*", match_final(shell, {**loaded, "url": "https://h.example/login"}))
+        self.assertIsNone(match_final(None, loaded))
+        self.assertIsNone(match_final({"wait_ms": 3}, loaded))
+
+    def test_find_target_by_what_the_control_is_never_by_its_index(self) -> None:
+        from replay import Tokens, describe_target, find_target
+        spec, t = self.spec(), Tokens(self.spec())
+        save = describe_target(_el(4, "button", "Save"), {"id": "save-btn", "data-test": "save"}, t)
+        self.assertEqual(save, {"role": "button", "name": "Save", "attrs": {"data-test": "save", "id": "save-btn"}})
+        moved = [_el(0, "button", "Cancel"), _el(1, "textbox", "Name"), _el(2, "button", "Save")]
+        el, option, why = find_target(save, moved, "CLICK", spec, t)
+        self.assertEqual((el["idx"], option, why), (2, None, None))  # the same control at another index
+        self.assertEqual(find_target(save, [_el(0, "button", "Save changes")], "CLICK", spec, t)[2], 'button "Save" is not on the page')
+        self.assertIn("cannot take CLICK now (disabled)", find_target(save, [_el(0, "button", "Save", disabled=True)], "CLICK", spec, t)[2])
+        self.assertIn("cannot take TYPE_TEXT", find_target({"role": "button", "name": "Save"}, moved, "TYPE_TEXT", spec, t)[2])
+
+    def test_same_named_controls_need_something_recorded_to_tell_them_apart(self) -> None:
+        from replay import Tokens, describe_target, find_target
+        spec, t = self.spec(), Tokens(self.spec())
+        rows = [_el(0, "button", "Delete", context="Row ada-zz91 Admin"), _el(1, "button", "Delete", context="Row bob Admin")]
+        by_context = describe_target(rows[0], None, t)
+        self.assertEqual(by_context["context"], "Row {{data:user}} Admin")
+        self.assertEqual(find_target(by_context, list(reversed(rows)), "CLICK", spec, t)[0]["idx"], 0)
+        # a recording with nothing but the name cannot choose between two
+        self.assertIn("2 controls read button \"Delete\"", find_target({"role": "button", "name": "Delete"}, rows, "CLICK", spec, t)[2])
+        # stable attributes, read from the page only when they are needed
+        asked: list = []
+
+        def read_attrs(indices):
+            asked.append(indices)
+            return {"0": {"data-testid": "delete-1"}, "1": {"data-testid": "delete-2", "id": "ember1234"}}
+        twins = [_el(0, "button", "Delete"), _el(1, "button", "Delete")]
+        saved = describe_target(twins[1], {"data-testid": "delete-2", "id": "ember1234"}, t)
+        self.assertEqual(saved["attrs"], {"data-testid": "delete-2"})  # a generated id identifies nothing next time
+        self.assertEqual(find_target(saved, twins, "CLICK", spec, t, read_attrs)[0]["idx"], 1)
+        self.assertEqual(asked, [[0, 1]])
+        asked.clear()
+        self.assertEqual(find_target(saved, twins[1:], "CLICK", spec, t, read_attrs)[0]["idx"], 1)
+        self.assertEqual(asked, [])  # one candidate with a name: the attributes are not read
+
+    def test_identical_controls_are_replayed_by_their_order_among_themselves(self) -> None:
+        from replay import Replay, Tokens, find_target
+        spec, t = self.spec(), Tokens(self.spec())
+        page = _obs([_el(0, "button", "Add"), _el(1, "button", "Delete"), _el(2, "button", "Delete")])
+        with tempfile.TemporaryDirectory() as tmp:
+            rp = Replay(spec, os.path.join(tmp, "p.json"))
+            rp.record("CLICK", page, page["elements"][2], None, None, None, 0, read_attrs=lambda idx: {})
+            rp.record("CLICK", page, page["elements"][0], None, None, None, 0)
+        second, only = rp.recorded[0]["target"], rp.recorded[1]["target"]
+        self.assertEqual((second["nth"], second["of"]), (1, 2))
+        self.assertNotIn("nth", only)  # a control that is alone needs no position
+        shifted = [_el(0, "button", "Delete"), _el(1, "link", "Help"), _el(2, "button", "Add"), _el(3, "button", "Delete")]
+        self.assertEqual(find_target(second, shifted, "CLICK", spec, t)[0]["idx"], 3)  # the second of the two, wherever the table puts it
+        three = shifted + [_el(4, "button", "Delete")]
+        self.assertIn("3 controls read button \"Delete\" and nothing recorded tells them apart (the recording had 2)",
+                      find_target(second, three, "CLICK", spec, t)[2])
+
+    def test_a_control_without_a_name_needs_an_attribute_or_a_context(self) -> None:
+        from replay import Tokens, find_target
+        spec, t = self.spec(), Tokens(self.spec())
+        box = [_el(3, "textbox", "")]
+        self.assertIn("has no name", find_target({"role": "textbox", "name": ""}, box, "TYPE_TEXT", spec, t)[2])
+        saved = {"role": "textbox", "name": "", "attrs": {"name": "q"}}
+        self.assertEqual(find_target(saved, box, "TYPE_TEXT", spec, t, lambda idx: {"3": {"name": "q"}})[0]["idx"], 3)
+        self.assertIn("has no name", find_target(saved, box, "TYPE_TEXT", spec, t, lambda idx: {"3": {"name": "other"}})[2])
+
+    def test_select_is_replayed_by_the_options_text(self) -> None:
+        from replay import Tokens, describe_target, find_target
+        spec, t = self.spec(), Tokens(self.spec())
+        sel = _el(2, "select", "Country", options=[{"i": 0, "text": "Egypt", "disabled": False}, {"i": 1, "text": "Peru", "disabled": False}])
+        saved = describe_target(sel, None, t, option="Peru")
+        reordered = {**sel, "options": [{"i": 0, "text": "Peru", "disabled": False}, {"i": 1, "text": "Egypt", "disabled": False}]}
+        self.assertEqual(find_target(saved, [reordered], "SELECT", spec, t)[:2], (reordered, 0))
+        gone = {**sel, "options": [{"i": 0, "text": "Egypt", "disabled": False}]}
+        self.assertIn('no option reading "Peru"', find_target(saved, [gone], "SELECT", spec, t)[2])
+
+    def path_for(self, spec: dict, tmp: str, steps: list[dict]) -> str:
+        from replay import PATH_FORMAT, path_file, run_options, save_path, spec_key
+        file = path_file(spec, tmp)
+        save_path(file, {"format": PATH_FORMAT, "spec_id": spec["id"], "spec_sha256": spec_key(spec), "options": run_options(spec),
+                         "outcome": "done", "verdict": "pass", "steps": steps, "final": None})
+        return file
+
+    def test_a_saved_step_decides_only_on_its_own_page(self) -> None:
+        from replay import Replay, Tokens, describe_target, page_print
+        spec = self.spec()
+        t = Tokens(spec)
+        form = _obs([_el(0, "textbox", "First Name"), _el(1, "button", "Continue")])
+        steps = [{"operation": "TYPE_TEXT", "page": page_print(form, t), "wait_ms": 300, "value_key": "first",
+                  "target": describe_target(form["elements"][0], None, t)},
+                 {"operation": "PRESS_ENTER", "page": page_print(form, t), "wait_ms": 0},
+                 {"operation": "CLICK", "page": page_print(form, t), "wait_ms": 0, "target": describe_target(form["elements"][1], None, t)}]
+        with tempfile.TemporaryDirectory() as tmp:
+            rp = Replay(spec, self.path_for(spec, tmp, steps))
+            self.assertTrue(rp.active)
+            self.assertEqual(rp.wait_budget(300), 2 * 300 + 400)  # twice the recorded wait and one settle
+            self.assertEqual(rp.wait_budget(0), 2 * 400)  # never less than two settles
+            self.assertEqual(rp.wait_budget(10 ** 6), spec["browser"]["navigation_timeout_ms"])
+            now = _obs([_el(5, "button", "Continue"), _el(6, "textbox", "First Name")])  # the table in another order
+            decision, why = rp.decide(rp.next_step(), now)
+            self.assertIsNone(why)
+            self.assertEqual((decision["operation"], decision["target"]["element"], decision["value_key"]), ("TYPE_TEXT", 6, "first"))
+            self.assertEqual(decision["target"]["label"], '[6] textbox "First Name"')
+            # PRESS_ENTER follows the typing it followed, nothing else
+            self.assertIn("only right after the typing", rp.decide(steps[1], now)[1])
+            rp.record("TYPE_TEXT", now, decision["element"], None, "first", None, 5, replayed_from=rp.next_step())
+            self.assertEqual((rp.replayed, rp.cursor), (1, 1))
+            self.assertEqual(rp.decide(rp.next_step(), now)[0]["operation"], "PRESS_ENTER")
+            # another page, a missing data key: the step does not apply, and the reason says why
+            self.assertIn("fields and buttons differ", rp.decide(steps[2], _obs([_el(0, "button", "Continue"), _el(1, "button", "Accept cookies")]))[1])
+            self.assertIn("no longer has", Replay(self.spec(data={}), self.path_for(spec, tmp, steps), use=False).decide(steps[0], now)[1])
+            rp.hand_back(4, "the page changed")
+            rp.hand_back(5, "a later reason is not the reason")
+            self.assertEqual(rp.handed_back, {"at_step": 4, "path_step": 2, "reason": "the page changed"})
+            self.assertFalse(rp.active)
+
+    def test_a_path_is_dropped_when_the_spec_the_options_or_the_format_change(self) -> None:
+        import replay
+        spec = self.spec()
+        with tempfile.TemporaryDirectory() as tmp:
+            file = self.path_for(spec, tmp, [])
+            self.assertEqual(replay.load_path(file, spec)[1], None)
+            self.assertEqual(replay.load_path(os.path.join(tmp, "none.json"), spec), (None, "no saved path yet"))
+            self.assertEqual(replay.load_path(file, self.spec(goal="Another goal, so that something else shows."))[1],
+                             "the spec changed since the path was recorded")
+            # a new stamp, a new day and other values of the same spec file are the same spec
+            self.assertIsNone(replay.load_path(file, self.spec(run_stamp="q7q7", dates={"${DATE+2d}": "2026-20-11"}))[1])
+            # the same file run with another device (--device): the spec is the same, the observations are not
+            from_file = {**self.spec(), "source": {"sha256": "the-file"}}
+            file2 = self.path_for(from_file, os.path.join(tmp, "f"), [])
+            phone = {**self.spec(), "source": {"sha256": "the-file"}}
+            phone["browser"]["device"] = "iPhone 13"
+            self.assertIsNone(replay.load_path(file2, from_file)[1])
+            self.assertEqual(replay.load_path(file2, phone)[1], "the run's options differ from the recording's (device)")
+            with mock.patch.object(replay, "PATH_FORMAT", replay.PATH_FORMAT + 1):
+                self.assertIn("this runner writes", replay.load_path(file, spec)[1])
+            with open(file, "w", encoding="utf-8") as f:
+                f.write("{not json")
+            self.assertIn("could not be read", replay.load_path(file, spec)[1])
+            # the directory ignores itself: a saved path never reaches a repository by accident
+            with open(os.path.join(tmp, ".gitignore"), encoding="utf-8") as f:
+                self.assertEqual(f.read().splitlines()[-1], "*")
+            nested = os.path.join(tmp, ".jev", "paths")
+            replay.private_dir(nested)
+            self.assertTrue(os.path.isfile(os.path.join(tmp, ".jev", ".gitignore")) and os.path.isfile(os.path.join(nested, ".gitignore")))
+
+    def test_the_source_hash_is_the_file_as_written(self) -> None:
+        from replay import spec_key
+        from spec import load_spec
+        body = {"id": "hashed", "start_url": "https://x.example/", "goal": "Create ${RUN_STAMP}, so that it is listed.",
+                "outcomes": {"ok": {"when": "The record ${RUN_STAMP} is listed on the page", "verdict": "pass"}}, "replay": True}
+        with tempfile.TemporaryDirectory() as tmp:
+            file = os.path.join(tmp, "s.json")
+            with open(file, "w", encoding="utf-8") as f:
+                json.dump(body, f)
+            a, b = load_spec(file, run_stamp="aaaa"), load_spec(file, run_stamp="bbbb")
+            self.assertEqual(a["replay"], {"enabled": True, "verify": "jev", "dir": None})  # "replay": true is the short form
+            self.assertEqual(spec_key(a), spec_key(b))
+            self.assertNotEqual(a["goal"], b["goal"])
+            with open(file, "w", encoding="utf-8") as f:
+                json.dump({**body, "goal": "Create ${RUN_STAMP}, so that it is listed first."}, f)
+            self.assertNotEqual(spec_key(load_spec(file, run_stamp="aaaa")), spec_key(a))
+
+    def test_replay_is_validated(self) -> None:
+        from spec import validate
+        ok = self.spec(replay={"enabled": True, "verify": "assert", "dir": "state/paths"})
+        self.assertEqual(validate(ok), [])
+        self.assertTrue(any("replay.verify" in e for e in validate(self.spec(replay={"enabled": True, "verify": "trust"}))))
+        self.assertTrue(any("'replay' must be" in e for e in validate({**self.spec(), "replay": "yes"})))
+        self.assertFalse(DEFAULTS["replay"]["enabled"])  # off unless asked for
+
+    def test_never_keeps_a_spec_out_of_replay_whatever_the_command_line_says(self) -> None:
+        import run_test
+        from spec import load_spec
+        body = {"id": "never", "start_url": "https://x.example/", "goal": "Open the page, so that it shows.", "replay": "never",
+                "outcomes": {"ok": {"when": "The page shows its heading", "verdict": "pass"}}}
+        seen: list[dict] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            file = os.path.join(tmp, "s.json")
+            with open(file, "w", encoding="utf-8") as f:
+                json.dump(body, f)
+            self.assertEqual(load_spec(file)["replay"], {"enabled": False, "verify": "jev", "dir": None, "never": True})
+            for extra, over in ((["--replay"], {}), (["--replay", "--replay-verify", "assert", "--replay-dir", "d"], {"replay": True})):
+                with open(file, "w", encoding="utf-8") as f:
+                    json.dump({**body, **over}, f)
+                # (a stand-in for Playwright: main() refuses to start without it, and these tests run where it is not installed)
+                with mock.patch.object(run_test, "JevClient"), mock.patch.object(run_test, "summarize", lambda *a: ""), \
+                        mock.patch.dict("sys.modules", {"playwright": mock.MagicMock()}), \
+                        mock.patch.object(run_test, "run", lambda spec, jev, out, screenshots=None: seen.append(spec) or {"pass": True}):
+                    run_test.main(["run_test.py", file, "--out", os.path.join(tmp, "o"), *extra])
+        self.assertFalse(seen[0]["replay"]["enabled"])
+        self.assertEqual((seen[1]["replay"]["enabled"], seen[1]["replay"]["verify"], seen[1]["replay"]["dir"]), (True, "assert", "d"))
+
+    def test_only_a_passing_run_saves_and_the_account_says_what_happened(self) -> None:
+        from replay import Replay, Tokens, describe_target, load_path, page_print
+        spec = self.spec()
+        t = Tokens(spec)
+        form = _obs([_el(0, "textbox", "User"), _el(1, "button", "Continue")])
+        acted = {"executed": {"action": "CLICK", "ok": True}}
+        with tempfile.TemporaryDirectory() as tmp:
+            file = os.path.join(tmp, "paths", "replay-unit.json")
+            first = Replay(spec, file)
+            self.assertEqual(first.not_used, "no saved path yet")
+            first.record("TYPE_TEXT", form, form["elements"][0], {"name": "user"}, "user", None, 120)
+            first.record("CLICK", form, form["elements"][1], None, None, None, 80, busy=True)
+            first.set_final(form, 40, busy=True)
+            red = first.finish({"status": "outcome", "outcome": "form_error", "steps": [acted, acted]})
+            self.assertEqual((red["saved"], red["save_note"], red["used"]), (False, "only a passing run's path is saved", False))
+            self.assertFalse(os.path.exists(file))
+            green = first.finish({"status": "passed", "outcome": "done", "steps": [acted, acted], "usage": {"jev_requests": 4}})
+            self.assertEqual((green["saved"], green["steps_by_jev"], green["steps_replayed"]), (True, 2, 0))
+            with open(file, encoding="utf-8") as f:
+                written = f.read()
+            self.assertNotIn("ada-zz91", written)  # the typed value is not in the file: its key is
+            self.assertIn('"value_key": "user"', written)
+            path, why = load_path(file, spec)
+            self.assertIsNone(why)
+            self.assertEqual([s["operation"] for s in path["steps"]], ["TYPE_TEXT", "CLICK"])
+            self.assertTrue(path["steps"][1]["busy"])
+            self.assertEqual((path["final"]["wait_ms"], path["final"]["busy"]), (40, True))
+            # the next run walks it to the end: the path stands, and a red after saved steps says what to do next
+            second = Replay(spec, file)
+            for saved in list(path["steps"]):
+                decision, why = second.decide(saved, form)
+                self.assertIsNone(why)
+                second.record(decision["operation"], form, decision["element"], None, decision["value_key"], None, 1, replayed_from=saved)
+            self.assertTrue(second.at_end and second.fully_replayed)
+            replayed = [{**acted, "replayed": True}] * 2
+            stands = second.finish({"status": "passed", "outcome": "done", "steps": replayed})
+            self.assertEqual((stands["saved"], stands["steps_replayed"], stands["steps_in_path"], stands["steps_by_jev"]), (False, 2, 2, 0))
+            self.assertIn("run it once more with --no-replay", second.finish({"status": "outcome", "outcome": "form_error", "steps": replayed})["note"])
+            self.assertEqual(describe_target(form["elements"][0], {"name": "user"}, t)["attrs"], {"name": "user"})
+            self.assertEqual(page_print(form, t)["controls"], ['button "Continue"', 'textbox "User"'])
+
+    def test_the_summary_says_what_the_replay_did(self) -> None:
+        from summarize_trace import _fmt_conf, _replay_lines
+        self.assertEqual(_replay_lines(None), [])
+        self.assertIn("no saved step used (no saved path yet); path saved", _replay_lines({"used": False, "not_used": "no saved path yet", "saved": True})[0])
+        full = _replay_lines({"used": True, "steps_replayed": 8, "steps_in_path": 8, "verified_by": "jev", "saved": False})
+        self.assertEqual(full, ["  replay: 8 of 8 saved steps replayed without Jev; the ending was decided by Jev (one request) and the assertions"])
+        back = _replay_lines({"used": True, "steps_replayed": 3, "steps_in_path": 8, "saved": True, "note": "run it again",
+                              "handed_back": {"at_step": 4, "path_step": 4, "reason": 'button "Finish" is not on the page'}})
+        self.assertIn('Jev took over at step 4 (saved step 4): button "Finish" is not on the page; path saved', back[0])
+        self.assertEqual(back[1], "  replay: run it again")
+        self.assertEqual(_fmt_conf({"replayed": True, "operation": {"choice": "CLICK"}}), "saved path")
+
+    def test_a_red_after_saved_steps_is_run_again_without_the_path(self) -> None:
+        import run_suite
+        calls: list[list[str]] = []
+
+        def fake(runner, python, spec_path, out_dir, run_args, base=None):
+            calls.append(run_args)
+            if "--replay-record" in run_args:
+                return {"out_dir": out_dir, "exit_code": 0, "wall_ms": 5000, "outcome": "done", "verdict": "pass", "status": "passed",
+                        "replay": {"used": False, "steps_replayed": 0}}
+            return {"out_dir": out_dir, "exit_code": 1, "wall_ms": 3000, "outcome": "form_error", "verdict": "bug", "status": "outcome",
+                    "result": "r.json", "replay": {"used": True, "steps_replayed": 4, "handed_back": {"at_step": 5}}}
+        with mock.patch.object(run_suite, "run_once", fake):
+            rec = run_suite.run_with_replay("r", "py", "s.json", "out/01", ["--replay"])
+        self.assertEqual(calls, [["--replay"], ["--replay", "--replay-record"]])
+        self.assertEqual((rec["verdict"], rec["wall_ms"], rec["replay_disagreed"]), ("pass", 8000, True))
+        self.assertEqual(rec["replay_attempt"]["outcome"], "form_error")
+        # green, or red without a saved step walked: one run
+        calls.clear()
+        green = {"exit_code": 0, "outcome": "done", "verdict": "pass", "status": "passed", "wall_ms": 1, "replay": {"used": True, "steps_replayed": 4}}
+        fresh_red = {"exit_code": 1, "outcome": "x", "verdict": "bug", "status": "outcome", "wall_ms": 1, "replay": {"used": False, "steps_replayed": 0}}
+        for rec_in in (green, fresh_red):
+            with mock.patch.object(run_suite, "run_once", lambda *a, **k: calls.append(1) or dict(rec_in)):
+                self.assertNotIn("replay_attempt", run_suite.run_with_replay("r", "py", "s.json", "o", ["--replay"]))
+        self.assertEqual(len(calls), 2)
+        agg = run_suite.aggregate_spec([rec, {**green, "run": 2}])
+        self.assertEqual(agg["replay"], {"full": 1, "handed_back": 0, "rerun_without": 1, "disagreed": 1})
+        self.assertEqual(agg["verdict"], "pass")  # the runs of record agree; the disagreement is reported beside them
+        suite = run_suite.suite_verdict({"a": agg})
+        self.assertEqual(suite["replay"]["disagreed_specs"], ["a"])
+        self.assertIsNone(run_suite.aggregate_spec([{"exit_code": 0, "outcome": "done", "verdict": "pass"}])["replay"])
+
+    def test_bench_counts_replayed_steps(self) -> None:
+        from bench import measure_trace
+        m = measure_trace({"steps": [], "replay": {"used": True, "steps_replayed": 8, "handed_back": None}})
+        self.assertEqual((m["replayed_steps"], m["replay_handed_back"]), (8, False))
+        self.assertEqual((measure_trace({"steps": []})["replayed_steps"], measure_trace({"steps": []})["replay_handed_back"]), (None, None))
+
+
 class _FixedRand:
     def __init__(self, chars: str) -> None:
         self.chars = list(chars)

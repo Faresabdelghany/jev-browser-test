@@ -359,7 +359,8 @@ OBSERVE_JS = "(args) => {\n  const deep = !!args.shadowDom;\n" + JS_HELPERS + r"
       el.getAttribute('title') || el.getAttribute('alt') || caption || text || ''
     ).slice(0, 80);
     if (!name && editable) name = groupLabel(el);  // a label beside the field beats its machine identifiers
-    if (!name) name = iconName(el);  // an icon-only control, named from its icon class
+    let iconNamed;
+    if (!name) { name = iconName(el); iconNamed = name ? true : undefined; }  // an icon-only control, named from its icon class
     if (!name) name = clean(el.getAttribute('name') || el.id || '').slice(0, 80);
     let context;
     if (!name || (role === 'checkbox' || role === 'radio' || role === 'switch')) {
@@ -391,6 +392,10 @@ OBSERVE_JS = "(args) => {\n  const deep = !!args.shadowDom;\n" + JS_HELPERS + r"
       // a native <datalist> shows its suggestions in browser UI, never as [role=option] nodes, so the
       // settle must not wait for one (run_test.settle)
       datalist: tag === 'input' && el.hasAttribute('list') ? true : undefined,
+      // inside a table row: a control that belongs to a record (its Edit, its checkbox), there as often as there are
+      // records. Not sent to Jev; a saved path's page fingerprint leaves such controls out (replay.page_print)
+      row: el.closest('tr, [role="row"]') ? true : undefined,
+      icon_named: iconNamed,  // the name is a guess from an icon's class ("calendar icon"), not something the page says
       disabled, below: isBelow || undefined,
       x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)
     });

@@ -11,6 +11,13 @@ agree), medians, and a suite verdict: one verdict everywhere → it; a spec with
 loaded or a setup step that failed is listed as an environment/setup failure and kept out of the distribution.
 Exit 0 iff every spec is `pass` or `expected`. Open a trace only for a spec that is `undetermined` or `flaky`.
 
+`--replay` runs every spec with its saved path (`run_test.py --replay`, see `spec-format.md`, "Replay"): the suite
+for reruns. The header of `results.md` then says how many runs walked their path to the end and how many handed over
+to Jev on the way. A run that ends red after saved steps is run again at once without the path, and that second run
+is the one in the table, so a saved path is never the reason for a red; the first is kept under the run's
+`replay_attempt`, and `suite.replay.disagreed_specs` lists the specs where the two ended differently (an application
+that varies, or a path that no longer fits: read both traces). `--replay-verify assert` passes the faster ending on.
+
 `--junit runs/junit.xml` also writes the suite as JUnit XML for a CI dashboard, one test case per spec: `pass` and
 `expected` are green, any other verdict is a `<failure>` whose type is the verdict (`bug`, `flaky`, ...) with every
 run's outcome and evidence line, and a spec whose every run failed before observing a page is an `<error

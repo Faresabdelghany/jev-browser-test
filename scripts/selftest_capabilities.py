@@ -34,6 +34,14 @@ and for the spec language:
   N. `${DATE...}`: a spec file with a date placeholder is loaded for a given day, the date it names is what Jev is
      offered and types, the assertion written with the same placeholder reads it back, and the trace says what each
      placeholder became; RUN_DATE in the environment moves the day
+
+and for the saved path (`replay`, off until the spec or --replay asks):
+
+  O. replay: a passing run saves its path without the value it typed; the same pages replay every step with one
+     request (the ending) or, with `verify: "assert"`, none; a control that appears late is waited for; a renamed
+     control and a moved one hand the run to Jev from that step, it still passes and the path is written again; a page
+     that now fails ends in the bug outcome under both ways of deciding the ending, never a pass; an edited spec
+     drops the path
 """
 from __future__ import annotations
 
@@ -96,6 +104,7 @@ class ScriptedJev:
     def system_one(self, state: dict, questions: dict) -> dict:
         self.requests += 1
         self.seen_states.append(state)
+        self.seen_questions = [*getattr(self, "seen_questions", []), questions]
         text = state.get("visible_text", "") + " " + " ".join(a.get("text", "") for a in state.get("announcements") or [])
         answers: dict = {}
         usage = {"input_tokens": 300, "output_tokens": 30}
@@ -390,13 +399,50 @@ li.addEventListener('mouseenter', () => { t = setTimeout(() => { sub.style.displ
 li.addEventListener('mouseleave', () => { clearTimeout(t); sub.style.display = 'none'; });
 </script></body>""")
 
-ROUTES = {"/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
+REPLAY_FORM_PAGE = """<!doctype html><html><head><title>Profile</title></head><body>
+<h1>Profile</h1>
+<label>Name <input id="name"></label>
+<button id="go" type="button" onclick="location.href='/replay-confirm?name=' + encodeURIComponent(document.getElementById('name').value)">Continue</button>
+</body></html>"""
+
+# The second page of the replay scenario, as the application's "current version" (the handler's `variant`) serves it:
+# v1 the page the path is recorded on; slow the same with Save arriving 400 ms late; renamed Save reads "Save changes";
+# moved Save sits behind "More options"; bug Save answers with an error.
+REPLAY_CONFIRM = {
+    "v1": '<button id="save" type="button">Save</button>',
+    "slow": '<span id="late"></span><script>setTimeout(() => { document.getElementById("late").outerHTML = \'<button id="save" type="button">Save</button>\'; wire(); }, 400);</script>',
+    "renamed": '<button id="save" type="button">Save changes</button>',
+    "moved": '<button id="more" type="button" onclick="document.getElementById(\'save\').hidden = false; this.remove()">More options</button> '
+             '<button id="save" type="button" hidden>Save</button>',
+    "bug": '<button id="save" type="button">Save</button>',
+}
+
+
+def replay_confirm_page(variant: str) -> str:
+    message = "'Error: could not save'" if variant == "bug" else "'Saved successfully for ' + who"
+    undo = "" if variant == "bug" else "const u = document.createElement('button'); u.type = 'button'; u.textContent = 'Undo ' + who; document.body.appendChild(u);"
+    return f"""<!doctype html><html><head><title>Confirm</title></head><body>
+<h1>Confirm</h1>
+<p>Confirm the profile of <b id="who"></b></p>
+<p id="msg"></p>
+<script>
+const who = new URLSearchParams(location.search).get('name') || '';
+document.getElementById('who').textContent = who;
+function wire() {{ const b = document.getElementById('save'); if (b) b.onclick = () => {{ document.getElementById('msg').textContent = {message}; b.remove(); {undo} }}; }}
+</script>
+{REPLAY_CONFIRM[variant]}
+<script>wire();</script>
+</body></html>"""
+
+
+ROUTES = {"/replay-form": REPLAY_FORM_PAGE, "/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
           "/device": DEVICE_PAGE, "/tabs": TABS_PAGE, "/receipt": RECEIPT_PAGE, "/spinner": SPINNER_PAGE, "/shadow": SHADOW_PAGE,
           "/shadow-names": SHADOW_NAMES_PAGE}
 
 
 class _Site(http.server.BaseHTTPRequestHandler):
     hits: list[str] = []  # the paths requested, for the teardown scenario
+    variant = "v1"  # which version of /replay-confirm the application serves now (the replay scenario changes it between runs)
 
     def log_message(self, *args) -> None:  # noqa: D401 - quiet
         pass
@@ -410,6 +456,8 @@ class _Site(http.server.BaseHTTPRequestHandler):
             status, body, ctype = 200, "{}", "application/json"
         elif path == "/favicon.ico":
             status, body, ctype = 204, "", "image/x-icon"
+        elif path == "/replay-confirm":
+            status, body, ctype = 200, replay_confirm_page(type(self).variant), "text/html; charset=utf-8"
         elif path in ROUTES:
             status, body, ctype = 200, ROUTES[path], "text/html; charset=utf-8"
         else:
@@ -865,6 +913,128 @@ def run_checks(tmp: str | None = None) -> list[str]:
             os.environ["RUN_DATE"] = old_run_date
     if (later["run_date"], later["data"]["day"]) != ("2026-12-17", "2027-20-01"):
         failures.append(f"N: RUN_DATE in the environment is the day the dates count from: {later['run_date']} {later['data']['day']}")
+    # O. replay -----------------------------------------------------------------------------------------------------------------
+    paths = os.path.join(tmp, "paths")
+    replay_rules = {"saved": "Saved successfully", "save_error": "could not save"}
+    full_moves = [("type", "Name", "name"), ("click", "Continue"), ("click", "Save")]
+
+    def replay_spec(stamp: str, verify: str = "jev", **over) -> dict:
+        # `source` stands for the spec file: the same file run with another ${RUN_STAMP} is the same spec
+        return make_spec(base + "/replay-form", **{
+            "id": "replay", "goal": "Enter the name, continue and save, so that the page says the profile was saved.",
+            "data": {"name": f"Ada {stamp}"}, "run_stamp": stamp, "source": {"sha256": "the spec file as written"},
+            "outcomes": {"saved": {"when": "The page says 'Saved successfully'", "verdict": "pass"},
+                         "save_error": {"when": "The page says 'Error: could not save'", "verdict": "bug"}},
+            "assert": [{"text_contains": "Saved successfully"}], "replay": {"enabled": True, "verify": verify, "dir": paths}, **over})
+
+    def replayed(trace: dict) -> list[bool]:
+        return [bool(st.get("replayed")) for st in trace["steps"] if (st.get("executed") or {}).get("action") in ("CLICK", "TYPE_TEXT")]
+
+    path_file = os.path.join(paths, "replay.json")
+    site.variant = "v1"
+    jev = ScriptedJev(full_moves, replay_rules)
+    trace, out = go("replay-record", replay_spec("r1aa"), jev)
+    rp = trace["result"].get("replay") or {}
+    if trace["status"] != "passed" or not rp.get("saved") or rp.get("used") or rp.get("steps_by_jev") != 3 or not os.path.isfile(path_file):
+        failures.append(f"O: a passing run with replay on saves its path: {trace['status']} {rp}")
+    recorded_requests = jev.requests
+    saved_text = open(path_file, encoding="utf-8").read() if os.path.isfile(path_file) else ""
+    saved_path = json.loads(saved_text) if saved_text else {"steps": [], "final": {}}
+    if "Ada" in saved_text or "r1aa" in saved_text or '"value_key": "name"' not in saved_text:
+        failures.append("O: the saved path holds the key of the value typed, never the value or the run stamp")
+    if [st["operation"] for st in saved_path["steps"]] != ["TYPE_TEXT", "CLICK", "CLICK"] or \
+            'button "Undo {{data:name}}"' not in ((saved_path.get("final") or {}).get("page") or {}).get("controls", []):
+        failures.append(f"O: three steps and the final page with this run's value as a token: {saved_text[:400]}")
+    if not all(os.path.isfile(os.path.join(paths, ".gitignore")) for _ in (0,)):
+        failures.append("O: the directory of saved paths ignores itself for git")
+
+    # the same pages, another run stamp: every step from the path, one request for the ending
+    jev = ScriptedJev([], replay_rules)
+    trace, out = go("replay-full", replay_spec("r2bb"), jev)
+    rp = trace["result"].get("replay") or {}
+    if (trace["status"], replayed(trace), rp.get("steps_replayed"), rp.get("handed_back"), rp.get("verified_by"), jev.requests) != \
+            ("passed", [True, True, True], 3, None, "jev", 1):
+        failures.append(f"O: unchanged pages replay every step and ask Jev once, about the ending: {trace['status']} {replayed(trace)} {rp} requests={jev.requests}")
+    if recorded_requests <= 1 or "operation" in (jev.seen_questions[-1] if getattr(jev, "seen_questions", None) else {}):
+        failures.append(f"O: the recording run asked {recorded_requests} requests; the deciding look asks no operation")
+    if trace["result"].get("confirmed_by") != "assertions" or not (trace["result"]["evidence"].get("line") or "").startswith("Saved successfully for Ada r2bb"):
+        failures.append(f"O: the ending is decided as in any run, and the evidence line rode in the one request: {trace['result'].get('confirmed_by')} {trace['result']['evidence']}")
+    if rp.get("saved") or "replayed to its end" not in (rp.get("save_note") or ""):
+        failures.append(f"O: a path walked to its end stands: {rp}")
+    text = flags_of(trace, out)
+    if "3 of 3 saved steps replayed without Jev" not in text or "saved path" not in text or "REPLAY-VERIFY" not in text:
+        failures.append("O: the summary says how many steps were replayed and marks them")
+
+    # verify "assert": the assertions alone decide, no request at all
+    jev = ScriptedJev([], replay_rules)
+    trace, out = go("replay-assert", replay_spec("r3cc", verify="assert"), jev)
+    rp = trace["result"].get("replay") or {}
+    if (trace["status"], jev.requests, rp.get("verified_by"), trace["result"].get("confirmed_by")) != ("passed", 0, "assertions", "assertions"):
+        failures.append(f"O: with verify assert a replayed pass costs no request: {trace['status']} requests={jev.requests} {rp}")
+    if "Jev was not asked" not in (trace["result"]["evidence"].get("skipped") or ""):
+        failures.append(f"O: the result says why it has no evidence line: {trace['result']['evidence']}")
+
+    # a control that arrives late is waited for, as long as the recorded run took and a little more
+    site.variant = "slow"
+    jev = ScriptedJev([], replay_rules)
+    trace, out = go("replay-slow", replay_spec("r4dd"), jev)
+    rp = trace["result"].get("replay") or {}
+    if (trace["status"], rp.get("steps_replayed"), rp.get("handed_back")) != ("passed", 3, None) or rp.get("waited_ms", 0) < 200:
+        failures.append(f"O: Save arriving 400 ms late is waited for, not handed to Jev: {trace['status']} {rp}")
+
+    # renamed: the saved step no longer applies, Jev takes the run from there, it passes and the path is written again
+    site.variant = "renamed"
+    jev = ScriptedJev([("click", "Save changes")], replay_rules)
+    trace, out = go("replay-renamed", replay_spec("r5ee"), jev)
+    rp = trace["result"].get("replay") or {}
+    hb = rp.get("handed_back") or {}
+    if (trace["status"], replayed(trace), hb.get("at_step"), hb.get("path_step"), rp.get("saved")) != ("passed", [True, True, False], 3, 3, True):
+        failures.append(f"O: a renamed control hands over to Jev at that step and the run still passes: {trace['status']} {replayed(trace)} {rp}")
+    if 'gone: button "Save"' not in (hb.get("reason") or "") or 'new: button "Save changes"' not in (hb.get("reason") or ""):
+        failures.append(f"O: the reason names what changed on the page: {hb}")
+    if "REPLAY-ENDED" not in flags_of(trace, out) or '"name": "Save changes"' not in open(path_file, encoding="utf-8").read():
+        failures.append("O: the step is flagged and the new path has the new name")
+    jev = ScriptedJev([], replay_rules)
+    trace, out = go("replay-renamed-again", replay_spec("r6ff"), jev)
+    if (trace["status"], replayed(trace), jev.requests) != ("passed", [True, True, True], 1):
+        failures.append(f"O: the rewritten path replays in full on the next run: {trace['status']} {replayed(trace)} requests={jev.requests}")
+
+    # moved: Save is now behind another control
+    site.variant = "moved"
+    jev = ScriptedJev([("click", "More options"), ("click", "Save")], replay_rules)
+    trace, out = go("replay-moved", replay_spec("r7gg"), jev)
+    rp = trace["result"].get("replay") or {}
+    if (trace["status"], replayed(trace), (rp.get("handed_back") or {}).get("at_step"), rp.get("saved")) != ("passed", [True, True, False, False], 3, True):
+        failures.append(f"O: a moved control hands over to Jev and the run still passes: {trace['status']} {replayed(trace)} {rp}")
+
+    # a page that now fails: the saved steps all apply, the ending is the bug, under both ways of deciding it
+    site.variant = "v1"
+    go("replay-rerecord", replay_spec("r8hh"), ScriptedJev(full_moves, replay_rules))  # the path of the healthy page again
+    before_bug = open(path_file, encoding="utf-8").read()
+    site.variant = "bug"
+    for verify in ("jev", "assert"):
+        jev = ScriptedJev([], replay_rules)
+        trace, out = go(f"replay-bug-{verify}", replay_spec("r9ii", verify=verify), jev)
+        rp = trace["result"].get("replay") or {}
+        if (trace["status"], trace["result"]["outcome"], trace["result"]["verdict"], trace["pass"]) != ("outcome", "save_error", "bug", False):
+            failures.append(f"O: a page that now fails ends in the bug outcome, never a pass (verify {verify}): {trace['status']} {trace['result']['outcome']}")
+        if rp.get("steps_replayed") != 3 or rp.get("saved") or "--no-replay" not in (rp.get("note") or "") or exit_code(trace) != 1:
+            failures.append(f"O: the red run keeps the old path and says to run once more without it (verify {verify}): {rp}")
+        if "final_mismatch" not in " ".join(k for st in trace["steps"] for k in st):
+            failures.append(f"O: the deciding look records that the final page is not the recorded one (verify {verify})")
+    if open(path_file, encoding="utf-8").read() != before_bug:
+        failures.append("O: a run that did not pass leaves the saved path as it was")
+
+    # an edited spec, and replay off
+    site.variant = "v1"
+    jev = ScriptedJev(full_moves, replay_rules)
+    trace, out = go("replay-edited", replay_spec("r0jj", source={"sha256": "the spec file after an edit"}), jev)
+    rp = trace["result"].get("replay") or {}
+    if (trace["status"], rp.get("used"), rp.get("not_used"), replayed(trace)) != ("passed", False, "the spec changed since the path was recorded", [False] * 3):
+        failures.append(f"O: an edited spec drops the path and records a new one: {trace['status']} {rp}")
+    trace, out = go("replay-off", replay_spec("r1kk", replay={"enabled": False}), ScriptedJev(full_moves, replay_rules))
+    if "replay" in trace["result"] or any(replayed(trace)):
+        failures.append("O: without replay nothing is read, nothing is written, and the result has no replay account")
     return failures
 
 

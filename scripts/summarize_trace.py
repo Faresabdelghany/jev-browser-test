@@ -27,6 +27,8 @@ def is_action_step(step: dict) -> bool:
 
 
 def _fmt_conf(step: dict) -> str:
+    if step.get("replayed"):
+        return "saved path"  # no request, so no confidence: the step came from the path of an earlier passing run
     op = step.get("operation") or {}
     tg = step.get("target") or {}
     a = f"{op.get('confidence', 0):.2f}" if op else "-"
@@ -48,6 +50,25 @@ def _fmt_checks(checks: dict, spec: dict) -> str:
             mark = "!!" if p >= spec["thresholds"]["never_true"] else "ok"
         parts.append(f"{name}={p:.2f}{mark}")
     return " ".join(parts)
+
+
+def _replay_lines(rp: dict | None) -> list[str]:
+    """What a run with replay on did with the saved path: how many steps it walked without Jev, where Jev took over
+    and why, how the ending was decided, whether this run's path was saved."""
+    if not rp:
+        return []
+    if not rp.get("used"):
+        line = f"  replay: no saved step used ({rp.get('not_used')})"
+    else:
+        line = f"  replay: {rp.get('steps_replayed')} of {rp.get('steps_in_path')} saved steps replayed without Jev"
+        hb = rp.get("handed_back")
+        if hb:
+            at = f"saved step {hb['path_step']}" if hb.get("path_step") else "the ending"
+            line += f"; Jev took over at step {hb.get('at_step')} ({at}): {hb.get('reason')}"
+        elif rp.get("verified_by"):
+            line += "; the ending was decided by " + ("the assertions alone" if rp["verified_by"] == "assertions" else "Jev (one request) and the assertions")
+    line += "; path saved" if rp.get("saved") else ""
+    return [line] + ([f"  replay: {rp['note']}"] if rp.get("note") else [])
 
 
 def _flags(step: dict, nxt: dict | None = None) -> str:
@@ -77,6 +98,10 @@ def _flags(step: dict, nxt: dict | None = None) -> str:
         f.append(f"ASSERT-PENDING:{len(step['assertions_pending'])}")  # a pass in sight whose assertions do not hold yet on this busy page
     if step.get("final_look"):
         f.append("FINAL-LOOK")
+    if step.get("replay_handback"):
+        f.append("REPLAY-ENDED")  # the saved path stopped applying here (step.replay_handback says why); Jev decides from this step on
+    if step.get("replay_verify"):
+        f.append("REPLAY-VERIFY")  # the look that decides the ending of a replayed run: outcome and checks, no operation
     if step.get("outcome_unconfirmed"):
         f.append("UNCONFIRMED:" + step["outcome_unconfirmed"])
     if step.get("assertions") and not all(a.get("ok") for a in step["assertions"]):
@@ -162,9 +187,11 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
         if (result.get("evidence") or {}).get("line"):
             lines.append(f"  evidence: \"{result['evidence']['line']}\"")
         elif (result.get("evidence") or {}).get("skipped"):
-            lines.append("  evidence: line not asked (evidence: \"failures\"); the assertions below are the proof")
+            asked = "evidence: \"failures\"" if "failures" in result["evidence"]["skipped"] else result["evidence"]["skipped"]
+            lines.append(f"  evidence: line not asked ({asked}); the assertions below are the proof")
         if result.get("note"):
             lines.append(f"  note: {result['note']}")
+    lines.extend(_replay_lines(trace.get("replay")))
     if trace.get("expected") is not None:
         ex = trace["expected"]
         lines.append(f"  expected result: {'MATCHED' if ex.get('matched') else 'NOT MATCHED'}  expect={ex.get('expect')}"
