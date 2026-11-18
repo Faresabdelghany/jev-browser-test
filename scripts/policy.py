@@ -346,11 +346,71 @@ def build_questions(spec: dict, obs: dict, last_operation: str | None, outcomes:
         questions["blocked_reason"] = choice(QUESTIONS["blocked_reason"], BLOCKED_REASONS)
     if ask_stuck:
         questions["stuck_reason"] = choice(QUESTIONS["stuck_reason"], STUCK_REASONS)
+    if "TYPE_TEXT" in ops:
+        questions.update(build_fill_questions(spec, obs))  # only with spec batch_fields, and two or more empty fields
     meta = {
         "operations": list(ops),
         "offered": {k: list(q["criteria"]) for k, q in questions.items() if q["type"] == "choice"},
     }
     return questions, meta
+
+
+# One request per form (spec `batch_fields`). On a page with several empty text fields the request that decides the
+# next action also asks, per field, which data value belongs in it (`fill_<index>`, a Choice over the data keys and
+# FILL_NONE). When the decision is TYPE_TEXT, the runner then types the other fields Jev assigned with confidence, one
+# step each and no further request, for as long as the page does not react (run_test: the batch). The September probe
+# is why this is free in time: eight questions cost what two do (references/runner-design.md).
+FILL_PREFIX = "fill_"
+FILL_NONE = "leave_empty"
+FILL_NONE_DESCRIPTION = "None of the listed values belongs in this field, or the field should stay as it is for now"
+FILL_MIN_FIELDS = 2  # with one empty field there is nothing to batch: the ordinary decision fills it
+
+
+def fillable_fields(spec: dict, obs: dict) -> list[dict]:
+    """The fields a batch may fill: offered for TYPE_TEXT and empty."""
+    return [e for e in obs["elements"] if "TYPE_TEXT" in element_operations(spec, e) and not e.get("value")]
+
+
+def fill_key(e: dict) -> str:
+    return f"{FILL_PREFIX}{e['idx']}"
+
+
+def build_fill_questions(spec: dict, obs: dict) -> dict:
+    """The per-field questions of a form batch: {} unless the spec turns `batch_fields` on and the page offers at
+    least FILL_MIN_FIELDS empty text fields."""
+    if not spec.get("batch_fields") or not spec["data"]:
+        return {}
+    fields = fillable_fields(spec, obs)
+    if len(fields) < FILL_MIN_FIELDS:
+        return {}
+    values = {d["key"]: d for d in data_values(spec)}
+    out = {}
+    for e in fields:
+        where = f' in "{e["context"]}"' if e.get("context") else ""
+        text = (f'The goal may need several fields of this page filled. For the field [{e["idx"]}] {e["role"] } "{e.get("name") or ""}"{where}: '
+                f'which of the available data values should be typed into it on this page? Choose {FILL_NONE} when none of them '
+                f'belongs in this field or it should not be filled now.')
+        out[fill_key(e)] = choice(text, {**values, FILL_NONE: FILL_NONE_DESCRIPTION})
+    return out
+
+
+def plan_batch(spec: dict, obs: dict, answers: dict, offered: dict, chosen_idx: int, chosen_key: str | None, threshold: float) -> list[dict]:
+    """The fields to type after the one Jev chose, from the `fill_<index>` answers of the same request, in table order:
+    [{"element", "value_key", "confidence"}]. A field is taken only when its answer is a data key at `threshold` or
+    more. Nothing is planned when Jev's two answers about the chosen field disagree (its `fill_` answer names another
+    value with that confidence), and a value assigned to more than one field (the chosen one included) is typed into
+    none of them: which field it belongs in is then exactly what Jev was not sure of."""
+    fields = fillable_fields(spec, obs)
+    read = {e["idx"]: read_choice(answers, fill_key(e), offered.get(fill_key(e))) for e in fields if fill_key(e) in offered}
+    own = read.get(chosen_idx)
+    if own and own["choice"] != chosen_key and own["confidence"] >= threshold:
+        return []
+    picked = [(e["idx"], a) for e in fields if e["idx"] != chosen_idx
+              for a in [read.get(e["idx"])] if a and a["choice"] in spec["data"] and a["confidence"] >= threshold]
+    used: dict[str, int] = {chosen_key: 1} if chosen_key else {}
+    for _, a in picked:
+        used[a["choice"]] = used.get(a["choice"], 0) + 1
+    return [{"element": idx, "value_key": a["choice"], "confidence": a["confidence"]} for idx, a in picked if used[a["choice"]] == 1]
 
 
 def build_reason_questions() -> tuple[dict, dict]:

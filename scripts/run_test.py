@@ -35,11 +35,12 @@ from observe import (
     fingerprint, loading_indicators, mask_secrets, mask_text, observe, signature,
 )
 from policy import (
-    ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, SUGGESTED_VERDICTS, announcement_lines, build_adjudication, build_questions, build_reason_questions,
-    build_state, defer_action, deferred_outcomes, evidence_line_keys, is_field, quoted_pick, read_checks, read_choice,
+    ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, FILL_PREFIX, SUGGESTED_VERDICTS, announcement_lines, build_adjudication, build_questions,
+    build_reason_questions, build_state, defer_action, deferred_outcomes, evidence_line_keys, is_field, plan_batch, quoted_pick, read_checks, read_choice,
     read_outcome, recent_announcements, resolve_target, seen_outcomes, suggested_verdict, validate_choice,
 )
-from replay import ATTRS_JS, POLL_MS, REPLAYABLE, STABLE_ATTRS, VERIFY_MODES, Replay, match_final, page_print
+from replay import (ATTRS_JS, POLL_MS, REPLAYABLE, STABLE_ATTRS, VERIFY_MODES, Replay, Tokens, describe_target, find_target, match_final,
+                    match_page, page_print)
 from spec import (DIAGNOSTIC_ASSERTIONS, HEADED_ENV, UNDETERMINED, effective_outcomes, load_dotenv, load_spec, match_expect, resolve_headless,
                   spec_warnings, utf8_stdio, validate)
 from summarize_trace import STALLED_STATUSES, is_action_step, summarize, unobserved_controls
@@ -1163,6 +1164,11 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     rp_cfg = spec.get("replay") or {}
     rp = Replay(spec, use=rp_cfg.get("use", True)) if rp_cfg.get("enabled") else None
     last_action_end = time.perf_counter()  # when the last executed action (or the setup) had settled: a path step's wait is counted from here
+    # One request per form (spec batch_fields): the fields Jev assigned values to in the request that chose a TYPE_TEXT,
+    # still to be typed without asking again, and the page as it was then: {"items", "print", "text", "covered", "options"}
+    batch: dict | None = None
+    batch_account: dict = {"fields_typed": 0, "stopped": []}  # result.batch
+    tokens = Tokens(spec)
 
     def record(entry: dict, step: dict, sig: str) -> None:
         """Append a history entry and remember which observation it was decided on, so the next
@@ -1540,6 +1546,33 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                         return obs, checked, why
                     obs = replay_wait(obs, budget_ms, spent)
 
+            def options_shown(obs: dict) -> int:
+                return sum(1 for e in obs["elements"] if e["role"] == "option")
+
+            def batch_next(obs: dict, announced: list[dict]) -> tuple[dict | None, dict | None, str | None]:
+                """The next field of the batch on this observation, as (item, element, None), or (None, None, why the
+                batch ends here). It ends the moment the page has reacted to what was typed: a message announced, a field
+                or button that appeared or went, any change of the visible text (a validation line, a counter), a layer,
+                a list of options; or when the field is not found again as itself, empty."""
+                if announced:
+                    return None, None, f"the page announced a message ({announced[0]['text'][:60]!r})"
+                why = match_page(batch["print"], page_print(obs, tokens))
+                if why:
+                    return None, None, why
+                if obs.get("covered", 0) != batch["covered"] or obs.get("loading_options"):
+                    return None, None, "a layer or a loading list appeared over the form"
+                if options_shown(obs) != batch["options"]:
+                    return None, None, "a list of suggestions opened"
+                if obs["visible_text"] != batch["text"]:
+                    return None, None, "the page's text changed after a field was typed (a validation message, a hint, a counter)"
+                item = batch["items"][0]
+                el, _, why = find_target(item["target"], obs["elements"], "TYPE_TEXT", spec, tokens, read_attrs)
+                if el is None:
+                    return None, None, why
+                if el.get("value"):
+                    return None, None, f"the field {item['label']} already has a value"
+                return item, el, None
+
             def act(n: int, step: dict, obs: dict, sig: str, operation: str, target: dict | None, value_key: str | None,
                     state_fn, saved: dict | None = None) -> bool:
                 """Execute a decided action and record it: repeat detection, the WAIT backoff, the picture, the action, the
@@ -1694,6 +1727,33 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                            lambda: build_state(spec, obs, n, history, recent_ann), replay_decision["saved"]):
                         break
                     continue
+                if batch is not None:
+                    # A field Jev assigned its value to in the request that typed the previous one: typed now, without a
+                    # request, unless the page has reacted since (then Jev decides, on this observation).
+                    item, el, why = batch_next(obs, announced)
+                    if item is None:
+                        step["batch_stopped"] = why
+                        batch_account["stopped"].append({"step": n, "reason": why, "fields_left": len(batch["items"])})
+                        batch = None
+                    else:
+                        batch["items"].pop(0)
+                        conf = round(item["confidence"], 3)
+                        operation, value_key = "TYPE_TEXT", item["value_key"]
+                        target = {"question": "type_target", "choice": str(el["idx"]), "element": el["idx"], "confidence": conf,
+                                  "label": f'[{el["idx"]}] {element_label(el)}', "batched": True}
+                        step.update({"batched": True, "offered_operations": [], "latency_ms": {"jev": 0}, "usage": None, "checks": {},
+                                     "operation": {"choice": operation, "confidence": conf, "batched": True}, "target": target,
+                                     "type_value": {"choice": value_key, "confidence": conf, "batched": True},
+                                     "low_confidence": False, "decision_confidence": conf})
+                        stale_streak, low_streak, last_low_sig = 0, 0, None
+                        batch_account["fields_typed"] += 1
+                        if not batch["items"]:
+                            batch = None
+                        if act(n, step, obs, sig, operation, target, value_key, lambda: build_state(spec, obs, n, history, recent_ann)):
+                            break
+                        if not step["executed"]["ok"]:
+                            batch = None  # the typing failed: whatever is left is Jev's to decide
+                        continue
                 if replay_why and not verify_look:
                     step["replay_handback"] = replay_why  # why the saved path stopped here; Jev decides from this step on
                 if verify_look:
@@ -2027,8 +2087,26 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     finish(page, step, "blocked", {"action": "BLOCKED", "ok": True, "error": None})
                     break
 
+                if operation == "TYPE_TEXT" and spec.get("batch_fields") and target and not target.get("missing") and any(
+                        k.startswith(FILL_PREFIX) for k in offered):
+                    # One request per form: the other empty fields Jev assigned a value to in this same request are typed
+                    # next, one step each, without asking again (batch_next, at the top of the loop).
+                    planned = plan_batch(spec, obs, answers, offered, target["element"], value_key, th["batch_confidence"])
+                    step["fill"] = {k[len(FILL_PREFIX):]: {"choice": a["choice"], "confidence": round(a["confidence"], 3)}
+                                    for k in offered if k.startswith(FILL_PREFIX) for a in [read_choice(answers, k, offered[k])] if a}
+                    if planned:
+                        by_idx = {e["idx"]: e for e in obs["elements"]}
+                        attrs = read_attrs([p["element"] for p in planned if not by_idx[p["element"]].get("frame")])
+                        items = [{"target": describe_target(by_idx[p["element"]], attrs.get(str(p["element"])), tokens),
+                                  "value_key": p["value_key"], "confidence": p["confidence"],
+                                  "label": f'{by_idx[p["element"]]["role"]} "{by_idx[p["element"]].get("name") or ""}"'} for p in planned]
+                        step["batch_planned"] = [{"field": i["label"], "value_key": i["value_key"], "confidence": round(i["confidence"], 3)} for i in items]
+                        batch = {"items": items, "print": page_print(obs, tokens), "text": obs["visible_text"],
+                                 "covered": obs.get("covered", 0), "options": options_shown(obs)}
                 if act(n, step, obs, sig, operation, target, value_key, lambda: state):
                     break
+                if batch is not None and not step["executed"]["ok"]:
+                    batch = None  # the first field was not typed: nothing follows from it
             else:
                 status = "budget_exhausted"
             t_lap = lap("steps_ms", t_lap)
@@ -2160,6 +2238,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         result["expected"] = match_expect(result, spec["expect"])
     trace["expected"] = result.get("expected")
     trace["outcome"], trace["verdict"] = result["outcome"], result["verdict"]
+    if spec.get("batch_fields"):
+        result["batch"] = trace["batch"] = batch_account  # fields typed without a request of their own, and where a batch stopped
     if rp is not None:
         # steps replayed, where Jev took over and why, and whether this run's path was saved (a passing run's is)
         result["replay"] = trace["replay"] = rp.finish(trace, save=rp_cfg.get("save", True))
@@ -2194,6 +2274,9 @@ def main(argv: list[str]) -> int:
     deep.add_argument("--shadow-dom", action="store_true", help="observe inside open shadow roots (observation.shadow_dom; the default)")
     deep.add_argument("--no-shadow-dom", action="store_true", help="observe the document's own tree only (observation.shadow_dom false)")
     ap.add_argument("--junit", metavar="FILE", help="also write the result as a JUnit XML report (one test case) for a CI dashboard")
+    ap.add_argument("--batch-fields", action="store_true",
+                    help="one request per form: on a page with several empty text fields Jev assigns a value to each in the request "
+                         "that types the first, and the others are typed without asking again (spec: \"batch_fields\": true)")
     rpl = ap.add_mutually_exclusive_group()
     rpl.add_argument("--replay", action="store_true",
                      help="walk the path saved by this spec's last passing run without asking Jev, for as long as each step still "
@@ -2219,6 +2302,8 @@ def main(argv: list[str]) -> int:
             spec["extra_operations"] = [*spec["extra_operations"], "HOVER"]
         if args.shadow_dom or args.no_shadow_dom:
             spec["observation"]["shadow_dom"] = bool(args.shadow_dom)
+        if args.batch_fields:
+            spec["batch_fields"] = True
         if args.replay or args.no_replay:
             spec["replay"]["enabled"] = bool(args.replay) and not spec["replay"].get("never")  # "replay": "never" beats --replay
         if args.replay_record:

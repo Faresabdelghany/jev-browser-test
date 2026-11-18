@@ -35,7 +35,7 @@ RESERVED_QUESTIONS = {
 def is_reserved_question(name: str) -> bool:
     """A check or outcome name the runner uses as a question key: the fixed set above plus the per-sentence
     evidence keys `evidence_line_1`, `evidence_line_2`, … of a compound outcome statement."""
-    return name in RESERVED_QUESTIONS or re.fullmatch(r"evidence_line_\d+", name) is not None
+    return name in RESERVED_QUESTIONS or re.fullmatch(r"(evidence_line|fill)_\d+", name) is not None
 
 
 OUTCOME_NONE = "none_yet"  # the outcome Choice's "nothing listed is visible yet" option; not a valid outcome name
@@ -284,6 +284,11 @@ DEFAULTS = {
     # decision confidence in every wording tried (docs/superpowers/measurements/2026-09-22-track1-ab-*.json),
     # so they are opt-in for apps where Jev repeats no-op actions or needs the untrusted-page-text guard.
     "rules": False,
+    # One request per form. true: on a page with two or more empty text fields, the request that decides the next
+    # action also asks which data value belongs in each of them, and after a TYPE_TEXT the runner types the other
+    # fields Jev assigned at thresholds.batch_confidence or more, with no further request, stopping the moment the page
+    # reacts (a field appears or goes, a message, a list of suggestions, any change of its text). Off by default.
+    "batch_fields": False,
     # Replay (scripts/replay.py): remember the path of a passing run and walk it again without asking Jev. Off unless
     # the spec says `"replay": true` (or an object) or the run is started with --replay. `verify`: how the ending of a
     # fully replayed run is decided. "jev": one request asks which declared outcome the page shows, then the
@@ -310,6 +315,8 @@ DEFAULTS = {
         # before the 'Balance not sufficient' dialog covered the form; was 0.8, and the deferral fired once per page.
         # 0 turns the deferral off.
         "covered_action_confidence": 0.9,
+        # with batch_fields: a field is typed without a request of its own only when Jev assigned its value at this or more
+        "batch_confidence": 0.8,
     },
     "browser": {
         "headless": True,
@@ -610,7 +617,7 @@ def validate(spec: dict) -> list[str]:
     if cdp is not None and not (isinstance(cdp, str) and cdp.startswith(("http://", "https://", "ws://", "wss://"))):
         errors.append("'browser.cdp_url' must be an http(s):// or ws(s):// URL of a browser's remote-debugging endpoint")
     t = spec.get("thresholds", {})
-    for k in ("check_true", "never_true", "outcome_true", "min_confidence", "covered_action_confidence"):
+    for k in ("check_true", "never_true", "outcome_true", "min_confidence", "covered_action_confidence", "batch_confidence"):
         v = t.get(k, 0.5)
         if not (isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= v <= 1.0):
             errors.append(f"'thresholds.{k}' must be a number between 0 and 1")
@@ -633,7 +640,7 @@ def validate(spec: dict) -> list[str]:
     ss = o.get("screenshots", "key")
     if not (ss is True or ss is False or ss == "key"):
         errors.append("'observation.screenshots' must be true, false or \"key\"")
-    for k in ("auto_done", "fail_fast", "rules"):
+    for k in ("auto_done", "fail_fast", "rules", "batch_fields"):
         if not isinstance(spec.get(k, False), bool):
             errors.append(f"'{k}' must be true or false")
     if spec.get("evidence", "always") not in ("always", "failures"):

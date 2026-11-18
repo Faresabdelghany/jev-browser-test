@@ -3451,6 +3451,79 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual((measure_trace({"steps": []})["replayed_steps"], measure_trace({"steps": []})["replay_handed_back"]), (None, None))
 
 
+class FormBatchTests(unittest.TestCase):
+    """One request per form: which per-field questions are asked, and which of their answers the runner acts on."""
+
+    def spec(self, **over) -> dict:
+        return _merge(DEFAULTS, {"id": "batch-unit", "start_url": "https://x.example/", "goal": "Sign up, so that the page says saved.",
+                                 "done_when": ["ok"], "checks": {"ok": "The page says the profile was saved"},
+                                 "data": {"first": "Ada", "last": "Lovelace", "email": "ada@example.org"}, "batch_fields": True, **over})
+
+    def obs(self) -> dict:
+        return _obs([_el(0, "textbox", "First name"), _el(1, "textbox", "Last name"), _el(2, "textbox", "Email", context="Contact"),
+                     _el(3, "textbox", "Search", value="shoes"), _el(4, "button", "Save")])
+
+    @staticmethod
+    def answer(choice: str, conf: float = 0.95) -> dict:
+        return {"type": "choice", "choice": choice, "confidence": conf, "probabilities": {choice: conf, "leave_empty" if choice != "leave_empty" else "first": 1 - conf}}
+
+    def test_the_questions_are_asked_only_when_the_spec_says_so_and_there_is_a_form(self) -> None:
+        from policy import FILL_NONE, build_fill_questions
+        from spec import is_reserved_question, validate
+        obs = self.obs()
+        questions, meta = build_questions(self.spec(), obs, None)
+        self.assertEqual([k for k in questions if k.startswith("fill_")], ["fill_0", "fill_1", "fill_2"])  # the filled Search box is not asked about
+        self.assertEqual(meta["offered"]["fill_1"], ["first", "last", "email", FILL_NONE])
+        self.assertIn('[2] textbox "Email" in "Contact"', questions["fill_2"]["instructions"])
+        self.assertEqual(questions["fill_0"]["criteria"]["last"], {"key": "last", "value": "Lovelace"})
+        self.assertEqual(build_fill_questions(self.spec(batch_fields=False), obs), {})
+        one_field = _obs([_el(0, "textbox", "E-mail"), _el(1, "button", "Send")])
+        self.assertEqual(build_fill_questions(self.spec(), one_field), {})  # one empty field is the ordinary decision
+        self.assertNotIn("fill_0", build_questions(self.spec(batch_fields=False), obs, None)[0])
+        self.assertTrue(is_reserved_question("fill_12") and not is_reserved_question("fill_form"))
+        self.assertFalse(DEFAULTS["batch_fields"])
+        self.assertTrue(any("batch_confidence" in e for e in validate(self.spec(thresholds={"batch_confidence": 2}))))
+        self.assertTrue(any("'batch_fields' must be" in e for e in validate(self.spec(batch_fields="yes"))))
+
+    def test_only_confident_assignments_of_a_value_used_once_are_planned(self) -> None:
+        from policy import plan_batch
+        spec, obs = self.spec(), self.obs()
+        offered = build_questions(spec, obs, None)[1]["offered"]
+        answers = {"fill_0": self.answer("first"), "fill_1": self.answer("last", 0.9), "fill_2": self.answer("email", 0.85)}
+        self.assertEqual(plan_batch(spec, obs, answers, offered, 0, "first", 0.8),
+                         [{"element": 1, "value_key": "last", "confidence": 0.9}, {"element": 2, "value_key": "email", "confidence": 0.85}])
+        # Jev chose the last name first: the fields before it are planned too, in table order
+        self.assertEqual([p["element"] for p in plan_batch(spec, obs, answers, offered, 1, "last", 0.8)], [0, 2])
+        # below the threshold, left empty, or an answer that was not offered: not typed
+        unsure = {**answers, "fill_1": self.answer("last", 0.6), "fill_2": self.answer("leave_empty")}
+        self.assertEqual(plan_batch(spec, obs, unsure, offered, 0, "first", 0.8), [])
+        self.assertEqual(plan_batch(spec, obs, {**answers, "fill_1": self.answer("phone")}, offered, 0, "first", 0.8),
+                         [{"element": 2, "value_key": "email", "confidence": 0.85}])
+        # one value for two fields: which of them it belongs in is what Jev was not sure of, so neither is typed
+        twice = {**answers, "fill_2": self.answer("last")}
+        self.assertEqual(plan_batch(spec, obs, twice, offered, 0, "first", 0.8), [])
+        self.assertEqual(plan_batch(spec, obs, {**answers, "fill_1": self.answer("first")}, offered, 0, "first", 0.8),
+                         [{"element": 2, "value_key": "email", "confidence": 0.85}])
+        # the two answers about the chosen field disagree: no batch at all
+        self.assertEqual(plan_batch(spec, obs, {**answers, "fill_0": self.answer("email")}, offered, 0, "first", 0.8), [])
+
+    def test_the_flag_turns_it_on(self) -> None:
+        import run_test
+        seen: list[dict] = []
+        body = {"id": "flag", "start_url": "https://x.example/", "goal": "Open the page, so that it shows.",
+                "outcomes": {"ok": {"when": "The page shows its heading", "verdict": "pass"}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            file = os.path.join(tmp, "s.json")
+            with open(file, "w", encoding="utf-8") as f:
+                json.dump(body, f)
+            for extra in ([], ["--batch-fields"]):
+                with mock.patch.object(run_test, "JevClient"), mock.patch.object(run_test, "summarize", lambda *a: ""), \
+                        mock.patch.dict("sys.modules", {"playwright": mock.MagicMock()}), \
+                        mock.patch.object(run_test, "run", lambda spec, jev, out, screenshots=None: seen.append(spec) or {"pass": True}):
+                    run_test.main(["run_test.py", file, "--out", os.path.join(tmp, "o"), *extra])
+        self.assertEqual([s["batch_fields"] for s in seen], [False, True])
+
+
 class _FixedRand:
     def __init__(self, chars: str) -> None:
         self.chars = list(chars)
