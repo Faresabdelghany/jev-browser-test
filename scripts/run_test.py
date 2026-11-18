@@ -153,8 +153,59 @@ DEEP_BODY_TEXT_JS = r"""() => {
 }"""
 
 
-def settle(page, spec: dict, after: tuple[str | None, str | None] | None = None) -> dict:
+# Network-aware settle (spec browser.settle "network"). The requests that count as "the action's": what an application
+# fetches to render the next state (XHR, fetch) and what it loads to be able to (a route's script and stylesheet).
+# Images, fonts and media arrive after the page can be read; a WebSocket and an EventSource never end; a frame's
+# document is the frame's business. Analytics and monitoring calls are named by where they go.
+NET_RESOURCE_TYPES = ("xhr", "fetch", "script", "stylesheet")
+NET_IGNORED_RE = re.compile(
+    r"google-analytics|googletagmanager|analytics\.google|doubleclick|googlesyndication|googleadservices|facebook\.(?:com|net)/tr|connect\.facebook|"
+    r"hotjar|segment\.(?:io|com)|mixpanel|amplitude|sentry\.io|bugsnag|newrelic|nr-data|datadoghq|clarity\.ms|fullstory|intercom|"
+    r"optimizely|matomo|piwik|plausible\.io|cloudflareinsights|/(?:collect|beacon|telemetry|analytics|rum|pixel|track(?:ing)?)(?:[/?.]|$)", re.I)
+NET_POLL_MS = 15  # while the action's requests are in flight: look again this often
+NET_ROUNDS = 4  # requests finished -> the DOM quiet again -> more requests? At most this many rounds inside the cap
+
+
+class NetWatch:
+    """The requests in flight, as the browser reports them (no script in the page): what `settle` reads with
+    `browser.settle: "network"` to know that what an action started has finished. A request is watched from its
+    `request` event to `requestfinished` / `requestfailed`; only those started after a given moment (the action's
+    start) are waited for, so a long poll or a stream opened earlier holds nothing up, and one opened by the action is
+    bounded by the settle's cap like everything else."""
+
+    def __init__(self) -> None:
+        self.pending: dict = {}  # request -> perf_counter() when its event was handled
+        self.seen = 0
+
+    def attach(self, page) -> None:
+        def on_request(req) -> None:
+            try:
+                if req.resource_type in NET_RESOURCE_TYPES and not NET_IGNORED_RE.search(req.url):
+                    self.pending[req] = time.perf_counter()
+                    self.seen += 1
+            except Exception:  # noqa: BLE001 - a request that cannot be read is not waited for
+                pass
+
+        def on_done(req) -> None:
+            self.pending.pop(req, None)
+
+        page.on("request", on_request)
+        page.on("requestfinished", on_done)
+        page.on("requestfailed", on_done)
+
+    def started_since(self, since: float) -> int:
+        return sum(1 for t in self.pending.values() if t >= since)
+
+
+def settle(page, spec: dict, after: tuple[str | None, str | None] | None = None, net: NetWatch | None = None,
+           since: float | None = None) -> dict:
     """Wait for the page to stop changing after an action, then return how the wait ended.
+
+    With `browser.settle: "network"` and a watcher (`net`): the DOM-quiet window is `browser.network_quiet_ms` (short:
+    the long window stood in for "the responses have arrived"), and after it the requests started since `since` (the
+    action's start; default: this call) are waited for, then the DOM once more, inside the same cap. The result then
+    carries "network": {"requests": how many were in flight, "ms": how long they were waited for, "left": still in
+    flight at the cap}, and `ended` is "network" when they all finished.
 
     Event-based, not a fixed pause: `domcontentloaded` (short timeout, ignored on failure), then a page-side
     promise that resolves once two animation frames have passed AND the DOM has had no mutation for
@@ -169,6 +220,9 @@ def settle(page, spec: dict, after: tuple[str | None, str | None] | None = None)
     """
     cap = spec["browser"]["settle_ms"]
     quiet = min(spec["browser"]["quiet_ms"], cap)
+    network = net is not None and spec["browser"].get("settle") == "network"
+    if network:
+        quiet = min(quiet, spec["browser"]["network_quiet_ms"])
     operation, role = after or (None, None)
     args = {"quietMs": quiet, "capMs": cap, "waitForOptions": operation == "TYPE_TEXT" and role in AUTOCOMPLETE_ROLES,
             "deep": bool(spec.get("observation", {}).get("shadow_dom"))}
@@ -192,6 +246,28 @@ def settle(page, spec: dict, after: tuple[str | None, str | None] | None = None)
     if not isinstance(result, dict):
         page.wait_for_timeout(quiet)
         result = {"ended": "navigated"}
+    if network:
+        since = t0 if since is None else since
+        in_flight, t_net, waited_ms = net.started_since(since), time.perf_counter(), 0
+        left = lambda: cap - (time.perf_counter() - t0) * 1000  # noqa: E731
+        for _ in range(NET_ROUNDS):
+            if not net.started_since(since) or left() <= 0:
+                break
+            while net.started_since(since) and left() > 0:
+                page.wait_for_timeout(max(min(NET_POLL_MS, left()), 1))  # the browser's events are handled while this waits
+            waited_ms = int((time.perf_counter() - t_net) * 1000)
+            if left() <= 0:
+                break
+            try:  # what the responses rendered: the DOM quiet again, inside what is left of the cap
+                again = page.evaluate(SETTLE_JS, {**args, "capMs": max(int(left()), 1), "waitForOptions": False})
+                if isinstance(again, dict) and again.get("ended") == "cap":
+                    result["ended"] = "cap"
+            except Exception:  # noqa: BLE001 - a response navigated the page: the next observation waits for the new document
+                loaded()
+        if in_flight:
+            still = net.started_since(since)
+            result["network"] = {"requests": in_flight, "ms": waited_ms, **({"left": still} if still else {})}
+            result["ended"] = "cap" if still or result.get("ended") == "cap" else "network"
     result["ms"] = int((time.perf_counter() - t0) * 1000)
     return result
 
@@ -207,7 +283,7 @@ def step_locator(page, step: dict, selector: str | None = None):
     return scope.locator(selector or step["selector"]).first
 
 
-def run_steps(page, spec: dict, steps: list[dict], results: list[dict], name: str = "setup") -> list[dict]:
+def run_steps(page, spec: dict, steps: list[dict], results: list[dict], name: str = "setup", net: NetWatch | None = None) -> list[dict]:
     """Deterministic Playwright steps, no Jev: `setup` before the flow (login, cookie banner, fixtures, and the
     interactions Jev is not offered: a file upload, a hover menu, a drag) and `teardown` after the verdict. Records
     land in `results` as they run (pass the trace's list, so a failing step is recorded even though this raises)."""
@@ -218,6 +294,7 @@ def run_steps(page, spec: dict, steps: list[dict], results: list[dict], name: st
         if step.get("frame"):
             rec["frame"] = step["frame"]
         before = fingerprint(page) if act in ("click", "press", "select") else None  # to tell a slow navigation from a failure
+        t_step = time.perf_counter()
         try:
             if act == "goto":
                 page.goto(step["url"], wait_until="domcontentloaded", timeout=spec["browser"]["navigation_timeout_ms"])
@@ -254,11 +331,11 @@ def run_steps(page, spec: dict, steps: list[dict], results: list[dict], name: st
                     step_locator(page, step).wait_for(state=step.get("state", "visible"), timeout=t)
                 if step.get("url"):
                     page.wait_for_url(step["url"], timeout=t)
-            settle(page, spec)
+            settle(page, spec, net=net, since=t_step)
         except Exception as e:  # noqa: BLE001 - we want every failure in the trace
             if navigation_pending(str(e)):
                 rec["slow_navigation"] = await_navigation(page, spec, before, timeout)  # landed; the page is on its way
-                settle(page, spec)
+                settle(page, spec, net=net, since=t_step)
                 results.append(rec)
                 continue
             rec["ok"] = False
@@ -269,18 +346,18 @@ def run_steps(page, spec: dict, steps: list[dict], results: list[dict], name: st
     return results
 
 
-def run_setup(page, spec: dict, results: list[dict] | None = None) -> list[dict]:
+def run_setup(page, spec: dict, results: list[dict] | None = None, net: NetWatch | None = None) -> list[dict]:
     """The spec's `setup` steps (see run_steps)."""
-    return run_steps(page, spec, spec["setup"], [] if results is None else results, "setup")
+    return run_steps(page, spec, spec["setup"], [] if results is None else results, "setup", net)
 
 
-def run_teardown(page, spec: dict, results: list[dict]) -> dict:
+def run_teardown(page, spec: dict, results: list[dict], net: NetWatch | None = None) -> dict:
     """The spec's `teardown` steps, after the verdict and whatever it was: best effort. The first failing step ends
     the teardown and is reported, never raised: cleaning up is not what the run was asked to judge. Returns
     {"ok", "steps", "ran"} and, on a failure, "failed": {"n", "action", "error"} (result.teardown)."""
     summary: dict = {"ok": True, "steps": len(spec["teardown"]), "ran": 0}
     try:
-        run_steps(page, spec, spec["teardown"], results, "teardown")
+        run_steps(page, spec, spec["teardown"], results, "teardown", net)
     except Exception as e:  # noqa: BLE001 - recorded on the step; the run's result stands
         last = results[-1] if results and not results[-1]["ok"] else {"n": len(results), "action": None, "error": f"{type(e).__name__}: {str(e)[:300]}"}
         summary["ok"] = False
@@ -1158,6 +1235,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     # first_seen_at_step is added when a pass sighting starts its confirmation (the confirming step becomes seen_at_step)
     secret_values = [spec["data"][k] for k in spec["secrets"] if spec["data"].get(k)]
     diagnostics = Diagnostics(secret_values)  # what the browser says went wrong (exceptions, failed requests, 4xx/5xx)
+    net = NetWatch() if spec["browser"].get("settle") == "network" else None  # the requests in flight, for the settle
+    action_started = time.perf_counter()  # when the last executed action began: the settle waits for what was requested since
     teardown_summary: dict | None = None
     # Replay (replay.py): with `replay` on, a saved path's steps are executed in place of Jev's decisions for as long as
     # each applies to the page in front of it, and a passing run writes the path it took.
@@ -1268,7 +1347,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
             ms = spec["browser"]["settle_ms"] if wait_ms is None else wait_ms
             step["executed"]["wait_ms"] = ms
             step["executed"]["wait"] = wait_for_change(page, before, ms)
-        step["settle"] = settle(page, spec)
+        step["settle"] = settle(page, spec, net=net, since=action_started)
         step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
         trace["steps"].append(step)
 
@@ -1460,6 +1539,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         page.expose_function(ANNOUNCE_FUNCTION, on_announce)  # the page's announcements land in announced_raw, across navigations
         page.set_default_timeout(spec["browser"]["action_timeout_ms"])
         diagnostics.attach(page)
+        if net is not None:
+            net.attach(page)
         first_page = page  # `page` moves on to a new tab when browser.follow_new_tabs says so; this one is still ours to close
 
         def note_diagnostics(step: dict) -> None:
@@ -1472,12 +1553,12 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
             phase = "navigation"
             try:
                 page.goto(spec["start_url"], wait_until="domcontentloaded", timeout=spec["browser"]["navigation_timeout_ms"])
-                settle(page, spec)
+                settle(page, spec, net=net, since=action_started)
                 t_lap = lap("navigation_ms", t_lap)
                 phase = "setup"
-                run_setup(page, spec, trace["setup"])  # records into trace["setup"] as it goes, so a failed step is kept
+                run_setup(page, spec, trace["setup"], net)  # records into trace["setup"] as it goes, so a failed step is kept
                 t_lap = lap("setup_ms", t_lap)
-                last_action_end = time.perf_counter()
+                last_action_end = action_started = time.perf_counter()
             except Exception:
                 # Nothing was observed, so the flow was not exercised: a slow or unreachable host (navigation), a setup
                 # selector that did not match (setup). Reported apart from the flow's outcomes: result.reason.phase,
@@ -1497,7 +1578,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 left of the step's wait), let a change settle, observe again."""
                 waited = wait_for_change(page, obs.get("fingerprint"), max(min(POLL_MS, budget_ms - spent_ms), 1))
                 if waited["ended"] != "timeout":
-                    settle(page, spec)
+                    settle(page, spec, net=net, since=action_started)
                 return look()
 
             def replay_look(obs: dict) -> tuple[dict, dict | None, str | None]:
@@ -1579,7 +1660,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 settle, a new tab, the history. Shared by Jev's decisions and a saved path's (`saved`: the path step being
                 replayed). `state_fn()` builds Jev's state for the follow-up question of a `stuck` ending. Returns True
                 when the run ends here."""
-                nonlocal page, wait_streak, last_wait_sig, last_operation, last_action_end
+                nonlocal page, wait_streak, last_wait_sig, last_operation, last_action_end, action_started
                 # Repeat detection: the same action on an unchanged page max_repeat times is `stuck`. A WAIT is
                 # not an action on the page: Jev choosing it again on a page that still says "Loading..." is the
                 # right answer for as long as the page keeps loading (measured live: a 5 s loader ended `stuck`
@@ -1613,6 +1694,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 target_el = next((e for e in obs["elements"] if e["idx"] == (target or {}).get("element")), {})
                 tabs_before = len(popups)
                 path_attrs, path_wait = None, int((t_b - last_action_end) * 1000)
+                if operation != "WAIT":
+                    action_started = t_b
                 if rp is not None and saved is None and target_el and not target_el.get("frame"):
                     # recorded now, before the action can remove the element: what identifies it across renders
                     path_attrs = read_attrs([target_el["idx"]]).get(str(target_el["idx"]))
@@ -1627,7 +1710,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                         rp.hand_back(n, step["replay_handback"])
                 if not executed["ok"]:
                     step["screenshot_after_failure"] = shot(page, f"{n:03d}-failed.png", step)
-                step["settle"] = settle(page, spec, after=(operation, None if target_el.get("datalist") else target_el.get("role")))
+                step["settle"] = settle(page, spec, after=(operation, None if target_el.get("datalist") else target_el.get("role")),
+                                        net=net, since=action_started)
                 if len(popups) > tabs_before:
                     # The action opened a new tab (target=_blank, window.open; the popup event arrives during the settle
                     # above, not with the click). A person's eyes go with it; the run's do when the spec says so
@@ -1647,9 +1731,11 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                                 pass
                             newest.set_default_timeout(spec["browser"]["action_timeout_ms"])
                             diagnostics.attach(newest)
+                            if net is not None:
+                                net.attach(newest)
                             page = newest
                             step["new_tab"] = {"followed": True, "url": mask_text(page.url, secret_values)}
-                            step["settle"] = settle(page, spec)  # the new tab's document, before it is observed
+                            step["settle"] = settle(page, spec, net=net, since=action_started)  # the new tab's document, before it is observed
                     except Exception as e:  # noqa: BLE001 - the tab closed itself again: the run stays where it was
                         step["new_tab"]["error"] = f"{type(e).__name__}: {str(e)[:120]}"
                 step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
@@ -2196,7 +2282,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 # After the verdict and its picture, whatever the verdict was (a start page that never loaded has
                 # nothing to clean up). Best effort: recorded, never part of the result.
                 t_td = time.perf_counter()
-                teardown_summary = run_teardown(page, spec, trace["teardown"])
+                teardown_summary = run_teardown(page, spec, trace["teardown"], net)
                 timing["teardown_ms"] = int((time.perf_counter() - t_td) * 1000)
             if cdp_url:
                 # Only what we opened goes away: the user's tabs stay. On a connected browser,
@@ -2274,6 +2360,9 @@ def main(argv: list[str]) -> int:
     deep.add_argument("--shadow-dom", action="store_true", help="observe inside open shadow roots (observation.shadow_dom; the default)")
     deep.add_argument("--no-shadow-dom", action="store_true", help="observe the document's own tree only (observation.shadow_dom false)")
     ap.add_argument("--junit", metavar="FILE", help="also write the result as a JUnit XML report (one test case) for a CI dashboard")
+    ap.add_argument("--settle", choices=("dom", "network"),
+                    help="when a page counts as settled after an action: dom = quiet for browser.quiet_ms (the default); network = "
+                         "the requests the action started have finished and the DOM has been quiet for browser.network_quiet_ms")
     ap.add_argument("--batch-fields", action="store_true",
                     help="one request per form: on a page with several empty text fields Jev assigns a value to each in the request "
                          "that types the first, and the others are typed without asking again (spec: \"batch_fields\": true)")
@@ -2304,6 +2393,8 @@ def main(argv: list[str]) -> int:
             spec["observation"]["shadow_dom"] = bool(args.shadow_dom)
         if args.batch_fields:
             spec["batch_fields"] = True
+        if args.settle:
+            spec["browser"]["settle"] = args.settle
         if args.replay or args.no_replay:
             spec["replay"]["enabled"] = bool(args.replay) and not spec["replay"].get("never")  # "replay": "never" beats --replay
         if args.replay_record:

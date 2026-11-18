@@ -3,6 +3,42 @@
 Notable changes to the jev-browser-test skill. Versions follow [semantic versioning](https://semver.org); the version
 is the one in `.claude-plugin/plugin.json`, and merging a new one to `main` tags and releases it.
 
+## [0.10.0] - 2026-11-17
+
+Step 3 of the speed work: a **network-aware settle**. Off by default (`--settle network`,
+`"browser": {"settle": "network"}`), and it stays off: it makes steps cheaper and decisions steadier, and it does
+not make a slow application faster, which was the target.
+
+### Added
+- **`browser.settle: "network"`.** After an action the runner waits for the DOM to be quiet for
+  `browser.network_quiet_ms` (50 ms), then for the requests the action started (XHR, fetch, a route's script and
+  stylesheet), then for the DOM again, all inside `browser.settle_ms`. The requests are counted from the browser's
+  own events; nothing is injected into the page. Not waited for: connections opened before the action (a long
+  poll, a stream), sockets and event streams, images and fonts, and analytics or monitoring calls by name. A
+  request that outlasts the cap ends the settle there and is reported: `settle.network` on the step has `requests`,
+  `ms` and, when some were still in flight, `left`.
+
+### Measured
+Interleaved A/B (`ab.py --b-arg=--settle=network`, 5 runs an arm), all 22 examples, live `jev-1.14.0`:
+
+| | 17 public specs | 5 OrangeHRM specs |
+|---|---:|---:|
+| Verdicts | the same (two random pages vary in both arms; one spec went undetermined once *without* the option) | the same flows pass; 2 undetermined runs without the option, 1 setup timeout with it |
+| Browser time per action, median | 153 → 102 ms | 249 → 100 ms |
+| Browser time per action, mean | 401 → 283 ms | 542 → 681 ms |
+| Decisions gone stale under a moving page | 6 → 0 | 8 → 0 |
+| Undecided (low-confidence) steps | 39 → 28 | 46 → 24 |
+| Jev requests, sum of medians | 111 → 106 | 82 → 67 |
+| Wall-clock, sum of medians | 83.6 → 78.5 s | 109.4 → 117.7 s |
+
+The target was OrangeHRM "well under 560 ms per step". A step that fetches nothing (typing) now settles in about
+100 ms there instead of 250; a step that loads something takes as long as the application takes to answer, and
+that is most of the mean. The waiting moved (fewer WAITs, fewer refused decisions, fewer requests) and did not
+shrink: **wall-clock on OrangeHRM did not improve**. On fast public pages it fell 6%.
+
+Tried and dropped: asking Jev again after 300 ms instead of `settle_ms` when nothing is in flight. On OrangeHRM it
+turned one spec's undetermined runs from 1 in 5 into 3 in 5 and saved no time (`references/runner-design.md`).
+
 ## [0.9.0] - 2026-11-17
 
 Step 2 of the speed work: **one request per form**. Off by default (`--batch-fields`, `"batch_fields": true`), and

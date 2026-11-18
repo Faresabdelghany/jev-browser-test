@@ -256,6 +256,8 @@ environment failure (or a spec file is missing / two files share an id).
       "batched": true,                                               // this TYPE_TEXT was one of them: no request (operation / target / type_value carry the assignment's
                                                                      //   confidence and "batched": true; flag BATCHED)
       "batch_stopped": "a list of suggestions opened",               // the page reacted to what was typed: the rest of the batch was dropped and Jev decided (flag BATCH-ENDED)
+      // "settle": { "ended": "network", "ms": 412, "network": { "requests": 2, "ms": 340 } } with browser.settle "network": the action's requests were waited
+      //   for (how many were in flight, for how long); "left": n when some were still in flight at the cap (ended "cap")
       "at_ms": 2392,                                                 // when this page was observed, in ms from the start of the run
       "replayed": true, "replay_waited_ms": 0,                       // with replay: this action came from the saved path, no request (operation / target / type_value carry
                                                                      //   "replayed": true and no confidence; the summary shows `saved path`); how long the step waited for its page

@@ -3524,6 +3524,133 @@ class FormBatchTests(unittest.TestCase):
         self.assertEqual([s["batch_fields"] for s in seen], [False, True])
 
 
+class _SettlePage:
+    """A page for settle(): evaluate returns scripted results, wait_for_timeout advances a clock and lets requests finish."""
+
+    def __init__(self, net, finish_after_ms: dict | None = None, results: list | None = None):
+        self.net, self.finish_after_ms, self.results = net, dict(finish_after_ms or {}), list(results or [])
+        self.waited_ms, self.evaluated = 0, []
+
+    def wait_for_load_state(self, *a, **k) -> None:
+        pass
+
+    def evaluate(self, script, args=None):
+        self.evaluated.append(args)
+        return dict(self.results.pop(0)) if self.results else {"ended": "quiet", "ms": 1}
+
+    def wait_for_timeout(self, ms) -> None:
+        self.waited_ms += ms
+        for req, after in list(self.finish_after_ms.items()):
+            if self.waited_ms >= after:
+                self.net.pending.pop(req, None)
+                del self.finish_after_ms[req]
+
+
+class NetworkSettleTests(unittest.TestCase):
+    """browser.settle "network": which requests are the action's, and when the settle ends."""
+
+    def spec(self, **browser) -> dict:
+        return _merge(DEFAULTS, {"browser": {"settle": "network", **browser}})
+
+    def test_the_watcher_counts_what_an_action_fetches(self) -> None:
+        import time as _time
+        from run_test import NET_IGNORED_RE, NetWatch
+        handlers: dict = {}
+
+        class Page:
+            def on(self, name, fn):
+                handlers[name] = fn
+        net = NetWatch()
+        net.attach(Page())
+        t0 = _time.perf_counter()
+        api, chunk, image, ga, ws = (_Obj(resource_type=t, url=u) for t, u in (
+            ("xhr", "https://app.example/api/employees"), ("script", "https://app.example/assets/pim.chunk.js"),
+            ("image", "https://app.example/logo.png"), ("fetch", "https://www.google-analytics.com/g/collect?v=2"),
+            ("websocket", "wss://app.example/live")))
+        for req in (api, chunk, image, ga, ws):
+            handlers["request"](req)
+        self.assertEqual(net.started_since(t0), 2)  # the call and the route's script; not the picture, the analytics hit or the socket
+        self.assertEqual(net.started_since(_time.perf_counter() + 1), 0)  # nothing was started after that moment
+        handlers["requestfinished"](api)
+        handlers["requestfailed"](chunk)
+        handlers["requestfinished"](image)  # never watched: nothing to forget
+        self.assertEqual((net.started_since(t0), net.seen), (0, 2))
+        for url in ("https://x.example/collect?e=1", "https://o1.ingest.sentry.io/api/1/envelope/", "https://x.example/api/track/42", "https://cdn.segment.com/v1/t"):
+            self.assertTrue(NET_IGNORED_RE.search(url), url)
+        for url in ("https://x.example/api/collections", "https://x.example/api/tracks.json", "https://x.example/web/index.php/api/v2/pim/employees"):
+            self.assertFalse(NET_IGNORED_RE.search(url), url)
+
+    def test_the_settle_waits_for_the_actions_requests_then_for_the_dom(self) -> None:
+        import time as _time
+        from run_test import NetWatch, settle
+        net = NetWatch()
+        since = _time.perf_counter()
+        net.pending["old"] = since - 5  # opened before the action: a long poll
+        net.pending["save"] = since + 0.001
+        page = _SettlePage(net, {"save": 45})
+        res = settle(page, self.spec(), net=net, since=since)
+        self.assertEqual((res["ended"], res["network"]["requests"]), ("network", 1))
+        self.assertNotIn("left", res["network"])
+        self.assertEqual(page.evaluated[0]["quietMs"], 50)  # the short window: the long one stood in for the responses
+        self.assertEqual(len(page.evaluated), 2)  # quiet, the request, quiet again
+        self.assertIn("old", net.pending)
+
+    def test_without_requests_it_is_one_short_quiet_window(self) -> None:
+        import time as _time
+        from run_test import NetWatch, settle
+        net = NetWatch()
+        page = _SettlePage(net)
+        res = settle(page, self.spec(quiet_ms=200, settle_ms=2500), net=net, since=_time.perf_counter())
+        self.assertEqual((res["ended"], "network" in res, len(page.evaluated), page.waited_ms), ("quiet", False, 1, 0))
+        self.assertEqual((page.evaluated[0]["quietMs"], page.evaluated[0]["capMs"]), (50, 2500))
+        # a spec that asks for a quiet window shorter than the network one keeps it
+        self.assertEqual(settle(_SettlePage(net), self.spec(quiet_ms=20), net=net)["ended"], "quiet")
+
+    def test_the_default_settle_is_unchanged(self) -> None:
+        from run_test import NetWatch, settle
+        net = NetWatch()
+        net.pending["save"] = float("inf")
+        for spec, watcher in ((_merge(DEFAULTS, {}), net), (self.spec(), None)):
+            page = _SettlePage(net)
+            res = settle(page, spec, net=watcher)
+            self.assertEqual((res["ended"], "network" in res, page.waited_ms, page.evaluated[0]["quietMs"]), ("quiet", False, 0, 100))
+        self.assertEqual(DEFAULTS["browser"]["settle"], "dom")
+
+    def test_a_request_that_outlasts_the_cap_ends_the_settle_at_the_cap(self) -> None:
+        import time as _time
+        from run_test import NetWatch, settle
+        net = NetWatch()
+        since = _time.perf_counter()
+        net.pending["stream"] = since + 0.001
+
+        class Slow(_SettlePage):
+            def wait_for_timeout(self, ms) -> None:
+                _time.sleep(ms / 1000)
+        res = settle(Slow(net), self.spec(settle_ms=60), net=net, since=since)
+        self.assertEqual((res["ended"], res["network"]["left"]), ("cap", 1))
+        self.assertLess(res["ms"], 400)
+
+    def test_the_spec_and_the_flag(self) -> None:
+        from spec import validate
+        base = {"id": "s", "start_url": "https://x.example/", "goal": "Open the page, so that it shows.",
+                "outcomes": {"ok": {"when": "The page shows its heading", "verdict": "pass"}}}
+        self.assertEqual(validate(_merge(DEFAULTS, {**base, "browser": {"settle": "network", "network_quiet_ms": 30}})), [])
+        self.assertTrue(any("browser.settle" in e for e in validate(_merge(DEFAULTS, {**base, "browser": {"settle": "idle"}}))))
+        self.assertTrue(any("network_quiet_ms" in e for e in validate(_merge(DEFAULTS, {**base, "browser": {"network_quiet_ms": -1}}))))
+        import run_test
+        seen: list[dict] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            file = os.path.join(tmp, "s.json")
+            with open(file, "w", encoding="utf-8") as f:
+                json.dump(base, f)
+            for extra in ([], ["--settle", "network"]):
+                with mock.patch.object(run_test, "JevClient"), mock.patch.object(run_test, "summarize", lambda *a: ""), \
+                        mock.patch.dict("sys.modules", {"playwright": mock.MagicMock()}), \
+                        mock.patch.object(run_test, "run", lambda spec, jev, out, screenshots=None: seen.append(spec) or {"pass": True}):
+                    run_test.main(["run_test.py", file, "--out", os.path.join(tmp, "o"), *extra])
+        self.assertEqual([s["browser"]["settle"] for s in seen], ["dom", "network"])
+
+
 class _FixedRand:
     def __init__(self, chars: str) -> None:
         self.chars = list(chars)
