@@ -36,7 +36,7 @@ RUN_TEST = os.path.join(HERE, "run_test.py")
 RUN_FIELDS = (
     "wall_ms", "duration_ms", "jev_ms", "adjudication_ms", "browser_ms", "requests", "input_tokens", "output_tokens",
     "steps", "actions_executed", "decision_confidence", "min_decision_confidence", "stale_steps",
-    "jev_first_ms", "jev_warm_ms", "browser_per_action_ms", "launch_ms", "navigation_ms", "setup_ms", "replayed_steps",
+    "jev_first_ms", "jev_warm_ms", "browser_per_action_ms", "launch_ms", "navigation_ms", "setup_ms", "login_ms", "replayed_steps",
 )
 
 
@@ -88,6 +88,8 @@ def measure_trace(trace: dict) -> dict:
         "launch_ms": timing.get("launch_ms"),
         "navigation_ms": timing.get("navigation_ms"),
         "setup_ms": timing.get("setup_ms"),
+        "login_ms": timing.get("login_ms"),  # the `login` steps (about 0 when a saved session was reused); None for a spec without them
+        "session_reused": (trace.get("session") or {}).get("reused") if trace.get("session") else None,
         # replay (None without it): saved steps executed without a request, and whether Jev took over before the path's end
         "replayed_steps": (trace.get("replay") or {}).get("steps_replayed") if trace.get("replay") else None,
         "replay_handed_back": bool((trace.get("replay") or {}).get("handed_back")) if (trace.get("replay") or {}).get("used") else None,

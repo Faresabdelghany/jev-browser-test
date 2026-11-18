@@ -8,6 +8,10 @@ Employee Id when a form opens, and two forms opened in the same second collide).
 cold start can add 25 s to a run's navigation, which the runner reports as such. The latest suite results are in
 `docs/superpowers/measurements/README.md` (on the `dev-docs` branch).
 
+The four shop specs and four of the OrangeHRM specs keep their login in a `login` block: with `--sessions` the suite
+logs in once per account and the others start logged in. `hrm-login` and `login-logout` test the login and have
+none.
+
 Run again with `--replay` and the seventeen specs that end in a pass walk the path their last pass saved (one Jev
 request each, for the ending). The five that do not end in a pass by design (`shop-checkout-problem-account`,
 `shop-checkout-error-account`, `table-sort-due`, and `notify-random` / `menu-random` on the visits where the page

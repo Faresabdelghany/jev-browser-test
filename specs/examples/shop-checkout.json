@@ -4,7 +4,7 @@
   "goal": "Add the Sauce Labs Bolt T-Shirt to the cart, open the cart, check out with the given first name, last name and postal code, and finish the order, so that the confirmation 'Thank you for your order!' is shown.",
   "notes": "Every product card has its own Add to cart button; use the one in the Sauce Labs Bolt T-Shirt card. The cart icon in the top-right corner opens the cart. Checkout asks for First Name, Last Name and Zip/Postal Code, then Continue, then Finish.",
   "data": { "first_name": "Ada", "last_name": "Lovelace", "zip_postal_code": "12345" },
-  "setup": [
+  "login": [
     { "action": "fill", "selector": "#user-name", "value": "standard_user" },
     { "action": "fill", "selector": "#password", "value": "secret_sauce" },
     { "action": "click", "selector": "#login-button" },

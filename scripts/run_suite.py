@@ -53,7 +53,8 @@ RUN_TEST = os.path.join(HERE, "run_test.py")
 FLAKY = "flaky"
 EXPECTED = "expected"  # a spec with `expect` whose every run ended in the declared result: green, like pass
 GREEN = ("pass", EXPECTED)
-MEDIAN_FIELDS = ("wall_ms", "duration_ms", "jev_ms", "browser_ms", "requests", "input_tokens", "decision_confidence", "steps", "replayed_steps")
+MEDIAN_FIELDS = ("wall_ms", "duration_ms", "jev_ms", "browser_ms", "requests", "input_tokens", "decision_confidence", "steps", "replayed_steps",
+                 "launch_ms", "navigation_ms", "login_ms", "setup_ms")
 ENVIRONMENT_REASON = "every run failed before observing a page (browser, start URL or setup): see environment_failures"
 
 
@@ -373,6 +374,10 @@ def main(argv: list[str]) -> int:
                     help="every run walks the path its spec's last passing run saved (.jev/paths), asking Jev only where a step no "
                          "longer applies and about the ending, and saves its own when it passes. A run that ends red after saved "
                          "steps is run again without the path, and that run is the result")
+    ap.add_argument("--sessions", action="store_true",
+                    help="log in once per site and account: specs with a `login` block reuse the session the first of them saved "
+                         "(run_test.py --reuse-sessions)")
+    ap.add_argument("--http-cache", action="store_true", help="keep the browser's HTTP cache between runs (run_test.py --http-cache)")
     ap.add_argument("--replay-verify", choices=("jev", "assert"),
                     help="how a fully replayed run's ending is decided (run_test.py --replay-verify)")
     ap.add_argument("--python", default=sys.executable)
@@ -396,7 +401,8 @@ def main(argv: list[str]) -> int:
     specs = list(dict.fromkeys(os.path.abspath(p) for p in args.specs))  # the same file twice runs once
     out_root = args.out or os.path.join("runs", "suite", datetime.now().strftime("%Y%m%d-%H%M%S"))
     run_args = [*args.run_arg, *(["--headed"] if args.headed else []), *(["--headless"] if args.headless else []),
-                *(["--replay"] if args.replay else []), *(["--replay-verify", args.replay_verify] if args.replay_verify else [])]
+                *(["--replay"] if args.replay else []), *(["--replay-verify", args.replay_verify] if args.replay_verify else []),
+                *(["--reuse-sessions"] if args.sessions else []), *(["--http-cache"] if args.http_cache else [])]
     replay = args.replay or "--replay" in args.run_arg
     report = run_suite(specs, args.repeat, args.workers, out_root, run_args, args.python, args.runner, args.label, replay)
     print()

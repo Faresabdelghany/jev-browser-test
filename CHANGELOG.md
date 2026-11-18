@@ -3,6 +3,61 @@
 Notable changes to the jev-browser-test skill. Versions follow [semantic versioning](https://semver.org); the version
 is the one in `.claude-plugin/plugin.json`, and merging a new one to `main` tags and releases it.
 
+## [0.11.0] - 2026-11-17
+
+Step 4 of the speed work: **log in once, keep the cache**. Both off by default.
+
+### Added
+- **`login`**: the scripted steps that only establish who is logged in, kept apart from `setup` (same actions, run
+  before it). Without the option below nothing changes.
+- **Saved sessions** (`--reuse-sessions`; `run_suite.py --sessions`; spec `"session": true`). The first run that
+  logs in saves the browser's storage state and the page the login ended on to `.jev/sessions/<key>.json`; later
+  runs of a spec with the same `login` on the same site start from it and skip the login. The session is checked
+  before it counts: the page (the one the login ended on, or the page `setup`'s first `goto` names, which is then
+  not loaded twice) must answer at its own URL shape and show what the login waited for; otherwise the session is
+  deleted and the run logs in. The key covers the site's origin, the login as executed and the device; file names
+  are HMACs under a per-directory key; the file holds cookies and localStorage, never what was typed.
+  `"session": "never"` opts a spec out. `result.session`, `timing.login_ms`. What the application says to a session
+  it no longer accepts (its "log in first" alert, its 404) is dropped with the session and never reaches the run:
+  live, the shop's ten-minute cookie ran out between two suites, the alert reached Jev as an announcement on the
+  first step after the fresh login, and two runs ended blocked on an application error that was not one.
+- **An HTTP cache that outlives the run** (`--http-cache`, `browser.http_cache`). The browser runs on a profile
+  under `.jev/http-cache/` from which everything but the cache folders is removed before each launch: the HTTP
+  cache carries over, cookies, storage and service workers do not. One slot per concurrent browser.
+
+### Changed
+- Eight examples (the four shop specs and four OrangeHRM specs) keep their login in `login` instead of `setup`. The
+  two specs that test a login (`hrm-login`, `login-logout`) have none and never reuse a session.
+
+### Measured
+Interleaved A/B, 3 runs an arm, live `jev-1.14.0`:
+
+| | without | with |
+|---|---:|---:|
+| **Sessions**, 4 OrangeHRM specs: logins | 11.1 s | 0 |
+| ... page load + login + setup, before the first step | 33.7 s | 21.9 s |
+| ... wall-clock, sum of medians | 100.1 s | 95.6 s |
+| **Sessions**, 4 shop specs: page load + login | 4.7 s | 2.9 s |
+| **HTTP cache**, 17 public specs: page loads | 19.0 s | 7.7 s |
+| ... wall-clock, sum of medians | 82.7 s | 69.5 s |
+| **HTTP cache**, 5 OrangeHRM specs: page loads | 10.3 s | 4.5 s |
+| ... wall-clock, sum of medians | 111.9 s | 108.2 s |
+
+Verdicts: the same in every run of the public specs except the two random pages. On OrangeHRM the flows that
+finished ended the same; three runs ended `employee_id_taken` (the demo answering "Employee Id already exists" for
+the id it had pre-filled), all three in an arm with an option on, and `hrm-add-employee`'s first-field
+`low_confidence` ended one run in each arm. Over the day's other A/Bs `employee_id_taken` ended runs without any
+option too (twice), and nothing in a saved session or a cache touches how the demo hands out ids, so it is read as
+the shared demo's; three against none in 54 runs is still worth saying.
+
+The cache is the larger gain where pages are light and the host is slow to serve them (the-internet: 1.45 → 0.64 s
+a load); a session is the larger one where the login is a slow application's (OrangeHRM: 2.4 to 3.8 s each). On
+OrangeHRM the seconds saved before the first step are real, and the flow's wall-clock moves less than that because
+the flows there vary by more from run to run.
+
+Both stay opt-in for a single run. A first run should load the application as a visitor does, and a session file
+is a logged-in browser on disk: neither should appear because nobody said no.
+
 ## [0.10.0] - 2026-11-17
 
 Step 3 of the speed work: a **network-aware settle**. Off by default (`--settle network`,

@@ -3651,6 +3651,137 @@ class NetworkSettleTests(unittest.TestCase):
         self.assertEqual([s["browser"]["settle"] for s in seen], ["dom", "network"])
 
 
+class SessionTests(unittest.TestCase):
+    """session.py: which saved login a run may use, what the file holds, and the profile that keeps only its cache."""
+
+    def spec(self, user: str = "ada", **over) -> dict:
+        return _merge(DEFAULTS, {"id": "s", "start_url": "https://app.example/auth/login", "goal": "Open the page, so that it shows.",
+                                 "outcomes": {"ok": {"when": "The page shows its heading", "verdict": "pass"}},
+                                 "login": [{"action": "fill", "selector": "#u", "value": user}, {"action": "fill", "selector": "#p", "value": "pw"},
+                                           {"action": "click", "selector": "#go"}], **over})
+
+    def test_the_key_is_the_site_the_login_and_the_device(self) -> None:
+        import session
+        with tempfile.TemporaryDirectory() as tmp:
+            key = session.session_key(self.spec(), tmp)
+            self.assertEqual(key, session.session_key(self.spec(goal="Another flow, so that something else shows."), tmp))
+            self.assertEqual(key, session.session_key(self.spec(start_url="https://app.example/web/index.php/dashboard"), tmp))
+            self.assertNotEqual(key, session.session_key(self.spec("bob"), tmp))
+            self.assertNotEqual(key, session.session_key(self.spec(start_url="https://staging.app.example/auth/login"), tmp))
+            self.assertNotEqual(key, session.session_key(self.spec(browser={"device": "iPhone 13"}), tmp))
+            self.assertRegex(key, r"^[0-9a-f]{32}$")
+            with tempfile.TemporaryDirectory() as other:
+                self.assertNotEqual(key, session.session_key(self.spec(), other))  # another directory, another key: names are HMACs
+            self.assertTrue(os.path.isfile(os.path.join(tmp, ".salt")) and os.path.isfile(os.path.join(tmp, ".gitignore")))
+
+    def test_a_session_is_saved_loaded_aged_and_dropped(self) -> None:
+        import session
+        state = {"cookies": [{"name": "sid", "value": "abc", "domain": "app.example", "path": "/"}], "origins": []}
+        with tempfile.TemporaryDirectory() as tmp:
+            file = session.session_file(os.path.join(tmp, "sessions"), "k")
+            self.assertEqual(session.load_session(file), (None, "no saved session yet"))
+            session.save_session(file, state, "https://app.example/dashboard/index", now=1000.0)
+            loaded, why = session.load_session(file, max_age_s=600, now=1300.0)
+            self.assertEqual((why, loaded["age_s"], loaded["url"], loaded["state"]), (None, 300, "https://app.example/dashboard/index", state))
+            self.assertIn("h old", session.load_session(file, max_age_s=600, now=1000.0 + 7200)[1])
+            if os.name == "posix":
+                self.assertEqual(os.stat(file).st_mode & 0o077, 0)  # the owner's only: it is a logged-in browser
+            with open(file, "w", encoding="utf-8") as f:
+                f.write('{"format": 99}')
+            self.assertIn("not one this runner wrote", session.load_session(file)[1])
+            session.drop_session(file)
+            session.drop_session(file)
+            self.assertFalse(os.path.exists(file))
+
+    def test_an_expired_session_is_seen_by_where_the_application_sends_it(self) -> None:
+        from session import page_mismatch
+        self.assertIsNone(page_mismatch("https://app.example/dashboard/index", "https://app.example/dashboard/index"))
+        self.assertIsNone(page_mismatch("https://app.example/pim/emp/12?tab=a", "https://app.example/pim/emp/15?tab=b"))
+        self.assertIn("answered with https://app.example/auth/login", page_mismatch("https://app.example/dashboard/index", "https://app.example/auth/login"))
+
+    def test_what_the_probe_of_an_expired_session_saw_is_forgotten(self) -> None:
+        from run_test import Diagnostics
+        d = Diagnostics([])
+        d._add("http_errors", {"status": 500, "method": "GET", "url": "https://app.example/home", "resource": "document"})
+        d._add("console_errors", {"text": "denied"})
+        self.assertTrue(d.any() and d.server_errors == 1)
+        d.reset()
+        self.assertEqual((d.any(), d.server_errors, d.take(1), d.for_trace()["counts"]["http_errors"]), (False, 0, {}, 0))
+
+    def test_local_storage_is_put_back_per_origin_once_per_tab(self) -> None:
+        from session import local_storage_script
+        self.assertIsNone(local_storage_script({"cookies": [], "origins": []}))
+        script = local_storage_script({"origins": [{"origin": "https://app.example", "localStorage": [{"name": "token", "value": "t-1"}]},
+                                                   {"origin": "https://cdn.example", "localStorage": []}]})
+        self.assertIn('"https://app.example": [["token", "t-1"]]', script)
+        self.assertNotIn("cdn.example", script)
+        self.assertIn("__jevSessionRestored", script)
+
+    def test_a_profile_is_cut_back_to_its_caches(self) -> None:
+        from session import strip_profile
+        with tempfile.TemporaryDirectory() as tmp:
+            for rel in ("Default/Cache/data_0", "Default/Code Cache/js/x", "Default/Cookies", "Default/Local Storage/leveldb/000.log",
+                        "Default/Service Worker/db", "Local State", "SingletonLock", "Default/Network/Cookies"):
+                path = os.path.join(tmp, *rel.split("/"))
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w") as f:
+                    f.write("x")
+            strip_profile(tmp)
+            self.assertEqual(sorted(os.listdir(tmp)), ["Default"])
+            self.assertEqual(sorted(os.listdir(os.path.join(tmp, "Default"))), ["Cache", "Code Cache"])
+            self.assertTrue(os.path.isfile(os.path.join(tmp, "Default", "Cache", "data_0")))
+            strip_profile(os.path.join(tmp, "no-such-profile"))  # a first launch: nothing to remove
+
+    def test_cache_slots_are_one_browser_each(self) -> None:
+        import session
+        with tempfile.TemporaryDirectory() as tmp:
+            a = session.CacheSlot.acquire(tmp)
+            b = session.CacheSlot.acquire(tmp)
+            self.assertEqual((os.path.basename(a.path), os.path.basename(b.path)), ("slot-0", "slot-1"))
+            a.release()
+            self.assertEqual(os.path.basename(session.CacheSlot.acquire(tmp).path), "slot-0")  # a released slot is taken again, warm
+            self.assertIsNone(session.CacheSlot.acquire(tmp, slots=2))  # both held: the run goes without a cache
+            # a lock left by a run that died is taken over once it is old
+            self.assertEqual(os.path.basename(session.CacheSlot.acquire(tmp, slots=2, now=__import__("time").time() + session.SLOT_STALE_S + 5).path), "slot-0")
+            self.assertTrue(os.path.isfile(os.path.join(tmp, ".gitignore")))
+
+    def test_the_spec_fields_and_the_flags(self) -> None:
+        import run_test
+        from spec import load_spec, validate
+        self.assertEqual(validate(self.spec(session={"reuse": True, "max_age_s": 60}, browser={"http_cache": True})), [])
+        self.assertTrue(any("'session' must be" in e for e in validate({**self.spec(), "session": "always"})))
+        self.assertTrue(any("max_age_s" in e for e in validate(self.spec(session={"max_age_s": 0}))))
+        self.assertTrue(any("http_cache" in e for e in validate(self.spec(browser={"http_cache": "yes"}))))
+        self.assertTrue(any(e.startswith("login[0]") for e in validate(self.spec(login=[{"action": "teleport"}]))))
+        self.assertFalse(DEFAULTS["session"]["reuse"] or DEFAULTS["browser"]["http_cache"])
+        redacted = run_test.redacted_spec(_merge(self.spec(), {"teardown": []}))
+        self.assertEqual([st.get("value") for st in redacted["login"]], ["<redacted>", "<redacted>", None])
+        seen: list[dict] = []
+        body = {k: v for k, v in self.spec().items() if k in ("id", "start_url", "goal", "outcomes", "login")}
+        with tempfile.TemporaryDirectory() as tmp:
+            file = os.path.join(tmp, "s.json")
+            for over, extra in (({}, []), ({}, ["--reuse-sessions", "--http-cache", "--session-dir", "sd", "--http-cache-dir", "cd"]),
+                                ({"session": "never"}, ["--reuse-sessions"]), ({"session": True}, [])):
+                with open(file, "w", encoding="utf-8") as f:
+                    json.dump({**body, **over}, f)
+                with mock.patch.object(run_test, "JevClient"), mock.patch.object(run_test, "summarize", lambda *a: ""), \
+                        mock.patch.dict("sys.modules", {"playwright": mock.MagicMock()}), \
+                        mock.patch.object(run_test, "run", lambda spec, jev, out, screenshots=None: seen.append(spec) or {"pass": True}):
+                    run_test.main(["run_test.py", file, "--out", os.path.join(tmp, "o"), *extra])
+            self.assertEqual(load_spec(file)["session"]["reuse"], True)
+        self.assertEqual([(s["session"]["reuse"], s["browser"]["http_cache"]) for s in seen], [(False, False), (True, True), (False, False), (True, False)])
+        self.assertEqual((seen[1]["session"]["dir"], seen[1]["browser"]["http_cache_dir"]), ("sd", "cd"))
+
+    def test_the_examples_keep_their_login_apart_from_their_setup(self) -> None:
+        from spec import load_spec
+        examples = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "specs", "examples")
+        with_login = sorted(f[:-5] for f in os.listdir(examples) if f.endswith(".json") and load_spec(os.path.join(examples, f))["login"])
+        self.assertEqual(with_login, ["hrm-add-employee", "hrm-admin-add-user", "hrm-leave-assign", "hrm-pim-add-employee-list",
+                                      "shop-add-second-item", "shop-checkout", "shop-checkout-error-account", "shop-checkout-problem-account"])
+        # the specs that test a login have none to skip
+        self.assertEqual((load_spec(os.path.join(examples, "hrm-login.json"))["login"], load_spec(os.path.join(examples, "login-logout.json"))["login"]), ([], []))
+
+
 class _FixedRand:
     def __init__(self, chars: str) -> None:
         self.chars = list(chars)

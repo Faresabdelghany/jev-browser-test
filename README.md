@@ -128,8 +128,8 @@ and the 22 examples from 190 requests to 53 (the rest are specs that do not end 
 ```
 SKILL.md          the instructions Claude loads
 scripts/          scaffold, run_test, run_suite, report, summarize_trace, spec, bench, ab, junit, selftest
-                  (with selftest_capabilities), unit_tests; observe / policy / rules / replay / jev_client are the
-                  runner's parts
+                  (with selftest_capabilities), unit_tests; observe / policy / rules / replay / session / jev_client
+                  are the runner's parts
 references/       spec-format, trace-format, verdict-rubric, suites, troubleshooting, runner-design
 specs/            two smoke specs; examples/ (public sites), compare/ (the Jev vs Playwright-CLI comparison)
 ```

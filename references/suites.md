@@ -11,6 +11,10 @@ agree), medians, and a suite verdict: one verdict everywhere → it; a spec with
 loaded or a setup step that failed is listed as an environment/setup failure and kept out of the distribution.
 Exit 0 iff every spec is `pass` or `expected`. Open a trace only for a spec that is `undetermined` or `flaky`.
 
+`--sessions` logs in once per site and account: specs that keep their login in a `login` block reuse the session
+the first of them saved (`spec-format.md`, "Sessions and the HTTP cache"). `--http-cache` keeps the browser's HTTP
+cache between runs. Neither changes what a run decides; both shorten what happens before the first step.
+
 `--replay` runs every spec with its saved path (`run_test.py --replay`, see `spec-format.md`, "Replay"): the suite
 for reruns. The header of `results.md` then says how many runs walked their path to the end and how many handed over
 to Jev on the way. A run that ends red after saved steps is run again at once without the path, and that second run

@@ -35,6 +35,14 @@ and for the spec language:
      offered and types, the assertion written with the same placeholder reads it back, and the trace says what each
      placeholder became; RUN_DATE in the environment moves the day
 
+and for what a run takes over from an earlier one (`session`, `browser.http_cache`, both off until asked):
+
+  R. sessions and the HTTP cache: the first run with a `login` block logs in and saves the session, the next starts
+     logged in and skips the login; a session the application no longer accepts is thrown away and the run logs in
+     again; another account is another session; `"session": "never"` logs in every time. With the HTTP cache a
+     script is fetched once over two runs while cookies and stored state start empty in each, and a saved session
+     works on the cache profile too
+
 and for the settle (`browser.settle: "network"`, off until the spec or --settle network asks):
 
   Q. network-aware settle: after a click that fetches its answer the settle waits for the response, so the next look
@@ -457,6 +465,29 @@ function wire() {{ const b = document.getElementById('save'); if (b) b.onclick =
 
 # A sign-up form of three fields. ?react= makes the page answer the typing of the last name: `field` reveals a fourth
 # field, `message` a line of text, `list` a list of suggestions.
+# A site with a login: /do-login sets the session cookie and sends the browser to /home, which sends anyone without a
+# valid cookie back to the form. The handler counts the logins and can forget every session (`sessions`).
+LOGIN_APP_PAGE = """<!doctype html><html><head><title>Sign in</title></head><body>
+<h1>Sign in</h1>
+<script>if (location.search.includes('denied')) { const a = document.createElement('div'); a.setAttribute('role', 'alert');
+  a.textContent = 'Error: you can only open that page when you are signed in'; document.body.appendChild(a); console.error('denied'); }</script>
+<label>User <input id="user"></label> <label>Password <input id="pass" type="password"></label>
+<button id="go" type="button" onclick="location.href='/do-login?user=' + encodeURIComponent(document.getElementById('user').value)">Sign in</button>
+</body></html>"""
+
+HOME_PAGE = """<!doctype html><html><head><title>Home</title></head><body>
+<h1>Welcome __USER__</h1>
+<button id="do" type="button" onclick="document.getElementById('msg').textContent = 'Saved successfully'">Do it</button>
+<p id="msg"></p>
+</body></html>"""
+
+# The page says whether this browser has been here before (localStorage) and loads a script the server lets it cache.
+CACHE_APP_PAGE = """<!doctype html><html><head><title>Cache</title></head><body>
+<h1>Visit</h1><p id="msg"></p>
+<script>document.getElementById('msg').textContent = localStorage.getItem('seen') ? 'Seen before' : 'Saved successfully (first visit)'; localStorage.setItem('seen', '1'); document.cookie = 'visited=1; max-age=3600';</script>
+<script src="/static/big.js"></script>
+</body></html>"""
+
 # Save fetches its answer from a slow endpoint (?ms=, default 400) and only then writes the message. ?poll=1 opens a
 # request at load that never answers within a run; ?track=1 also sends a slow analytics call on the click.
 NET_PAGE = """<!doctype html><html><head><title>Slow save</title></head><body>
@@ -495,13 +526,15 @@ $('save').onclick = () => { $('msg').textContent = ($('first').value && $('last'
 </script>
 </body></html>"""
 
-ROUTES = {"/net": NET_PAGE, "/batch-form": BATCH_FORM_PAGE, "/replay-form": REPLAY_FORM_PAGE, "/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
+ROUTES = {"/login-app": LOGIN_APP_PAGE, "/cache-app": CACHE_APP_PAGE, "/net": NET_PAGE, "/batch-form": BATCH_FORM_PAGE, "/replay-form": REPLAY_FORM_PAGE, "/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
           "/device": DEVICE_PAGE, "/tabs": TABS_PAGE, "/receipt": RECEIPT_PAGE, "/spinner": SPINNER_PAGE, "/shadow": SHADOW_PAGE,
           "/shadow-names": SHADOW_NAMES_PAGE}
 
 
 class _Site(http.server.BaseHTTPRequestHandler):
     hits: list[str] = []  # the paths requested, for the teardown scenario
+    sessions: set = set()  # the users the application counts as logged in (the sessions scenario empties it to expire them)
+    logins = 0
     variant = "v1"  # which version of /replay-confirm the application serves now (the replay scenario changes it between runs)
 
     def log_message(self, *args) -> None:  # noqa: D401 - quiet
@@ -510,6 +543,25 @@ class _Site(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - the handler's name is the protocol's
         path = self.path.split("?", 1)[0]
         type(self).hits.append(self.path)
+        site = type(self)
+        cookie_user = next((c.split("=", 1)[1] for c in (self.headers.get("Cookie") or "").split("; ") if c.startswith("sid=")), None)
+        extra: dict = {}
+        if path == "/do-login":
+            user = self.path.split("user=", 1)[-1] if "user=" in self.path else "nobody"
+            site.logins += 1
+            site.sessions = site.sessions | {user}
+            self.send_response(302)
+            self.send_header("Set-Cookie", f"sid={user}; Path=/")
+            self.send_header("Location", "/home")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if path == "/home" and cookie_user not in site.sessions:
+            self.send_response(302)
+            self.send_header("Location", "/login-app?denied=1")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if path == "/api/save":
             status, body, ctype = (500, '{"error": "boom"}', "application/json") if "fail=1" in self.path else (200, '{"ok": true}', "application/json")
         elif path == "/api/deleted":
@@ -520,6 +572,11 @@ class _Site(http.server.BaseHTTPRequestHandler):
             status, body, ctype = 200, "{}", "application/json"
         elif path == "/favicon.ico":
             status, body, ctype = 204, "", "image/x-icon"
+        elif path == "/home":
+            status, body, ctype = 200, HOME_PAGE.replace("__USER__", cookie_user or ""), "text/html; charset=utf-8"
+        elif path == "/static/big.js":
+            status, body, ctype = 200, "window.big = 1; /*" + "x" * 50000 + "*/", "application/javascript"
+            extra["Cache-Control"] = "public, max-age=3600"
         elif path == "/replay-confirm":
             status, body, ctype = 200, replay_confirm_page(type(self).variant), "text/html; charset=utf-8"
         elif path in ROUTES:
@@ -530,12 +587,14 @@ class _Site(http.server.BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
+        for name, value in extra.items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(data)
 
 
 def start_site() -> tuple[str, type]:
-    handler = type("CapabilitiesSite", (_Site,), {"hits": []})
+    handler = type("CapabilitiesSite", (_Site,), {"hits": [], "sessions": set(), "logins": 0})
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return f"http://127.0.0.1:{server.server_address[1]}", handler
@@ -977,6 +1036,72 @@ def run_checks(tmp: str | None = None) -> list[str]:
             os.environ["RUN_DATE"] = old_run_date
     if (later["run_date"], later["data"]["day"]) != ("2026-12-17", "2027-20-01"):
         failures.append(f"N: RUN_DATE in the environment is the day the dates count from: {later['run_date']} {later['data']['day']}")
+    # R. sessions and the HTTP cache -------------------------------------------------------------------------------------------
+    sess_dir, cache_dir = os.path.join(tmp, "sessions"), os.path.join(tmp, "http-cache")
+
+    def login_spec(user: str = "ada", **over) -> dict:
+        return make_spec(base + "/login-app", **{
+            "id": "session", "goal": "Click Do it, so that the page says it was saved.",
+            "login": [{"action": "fill", "selector": "#user", "value": user}, {"action": "fill", "selector": "#pass", "value": "pw-of-" + user},
+                      {"action": "click", "selector": "#go"}, {"action": "wait_for", "url": "**/home"}, {"action": "wait_for", "selector": "#do"}],
+            "assert": [{"text_contains": "Saved successfully"}, {"text_contains": f"Welcome {user}"}],
+            "session": {"reuse": True, "dir": sess_dir}, **over})
+
+    def session_run(name: str, spec: dict) -> tuple[dict, str, dict]:
+        trace, out = go(name, spec, ScriptedJev([("click", "Do it")], SAVED))
+        return trace, out, trace["result"].get("session") or {}
+
+    trace, out, sess = session_run("session-first", login_spec())
+    files = [f for f in os.listdir(sess_dir) if f.endswith(".json")] if os.path.isdir(sess_dir) else []
+    if (trace["status"], site.logins, sess.get("reused"), sess.get("saved"), len(trace["login"]), len(files)) != ("passed", 1, False, True, 5, 1):
+        failures.append(f"R: the first run logs in and saves the session: {trace['status']} logins={site.logins} {sess} {files}")
+    saved_session = open(os.path.join(sess_dir, files[0]), encoding="utf-8").read() if files else ""
+    if "pw-of-ada" in saved_session or "pw-of-ada" in json.dumps(trace) or '"sid"' not in saved_session:
+        failures.append("R: the session file holds the browser's cookies, never what was typed; the trace has neither")
+    if not all(os.path.isfile(os.path.join(sess_dir, f)) for f in (".gitignore", ".salt")):
+        failures.append("R: the sessions directory ignores itself for git and keeps the key its file names are made with")
+    trace, out, sess = session_run("session-reused", login_spec())
+    if (trace["status"], site.logins, sess.get("reused"), trace["login"]) != ("passed", 1, True, []):
+        failures.append(f"R: the second run starts logged in and skips the login: {trace['status']} logins={site.logins} {sess} {trace['login']}")
+    if "login: skipped" not in flags_of(trace, out) or trace["timing"].get("login_ms", 99) > 50:
+        failures.append(f"R: the summary says the login was skipped and it cost nothing: {trace['timing']}")
+    site.sessions = set()  # the application forgets every session
+    trace, out, sess = session_run("session-expired", login_spec())
+    if (trace["status"], site.logins, sess.get("reused"), sess.get("expired"), sess.get("saved"), len(trace["login"])) != ("passed", 2, False, True, True, 5):
+        failures.append(f"R: a session the application no longer accepts is dropped and the run logs in again: {trace['status']} logins={site.logins} {sess}")
+    if any(st.get("announcements") for st in trace["steps"]) or "diagnostics" in trace or "signed in" in json.dumps(trace["result"]):
+        failures.append(f"R: what the application said to the expired session (its alert, its console error) is not part of the run: "
+                        f"{[st.get('announcements') for st in trace['steps']]} {trace.get('diagnostics')}")
+    trace, out, sess = session_run("session-other-account", login_spec("bob"))
+    if (trace["status"], site.logins, sess.get("reused"), sess.get("not_reused")) != ("passed", 3, False, "no saved session yet"):
+        failures.append(f"R: another account is another session: {trace['status']} logins={site.logins} {sess}")
+    trace, out, sess = session_run("session-never", login_spec(session={"reuse": False, "never": True, "dir": sess_dir}))
+    if (trace["status"], site.logins, "session" in trace["result"]) != ("passed", 4, False):
+        failures.append(f"R: a spec that opts out logs in every time and reports no session: {trace['status']} logins={site.logins}")
+    # a setup that begins with a goto: the reused session opens that page at once, and it is not loaded twice
+    before = len(site.hits)
+    trace, out, sess = session_run("session-goto", login_spec(setup=[{"action": "goto", "url": base + "/home?tab=2"},
+                                                                    {"action": "wait_for", "selector": "#do"}]))
+    homes = [h for h in site.hits[before:] if h.startswith("/home")]
+    if (trace["status"], site.logins, sess.get("reused"), homes, [(st["action"], st.get("by")) for st in trace["setup"]]) != \
+            ("passed", 4, True, ["/home?tab=2"], [("goto", "session"), ("wait_for", None)]):
+        failures.append(f"R: with a setup that starts with a goto the session is checked on that page, loaded once: {trace['status']} {sess} {homes} {trace['setup']}")
+    # the HTTP cache: the script once, the stored state never
+    for i in (1, 2):
+        spec = make_spec(base + "/cache-app", **{"id": "http-cache", "goal": "Open the page, so that it says saved.",
+                                                 "assert": [{"text_contains": "first visit"}], "browser": {"http_cache": True, "http_cache_dir": cache_dir}})
+        trace, out = go(f"http-cache-{i}", spec, ScriptedJev([], SAVED))
+        if trace["status"] != "passed" or trace["browser"].get("http_cache") != "slot-0":
+            failures.append(f"R: run {i} on the cache profile starts with no stored state (a first visit again): {trace['status']} {trace['browser']}")
+    if sum(1 for h in site.hits if h.startswith("/static/big.js")) != 1:
+        failures.append(f"R: the cacheable script is fetched once over two runs: {[h for h in site.hits if 'big.js' in h]}")
+    if os.path.exists(os.path.join(cache_dir, "slot-0.lock")) or not os.path.isfile(os.path.join(cache_dir, ".gitignore")):
+        failures.append("R: the cache slot is released after the run and the directory ignores itself for git")
+    # a saved session on the cache profile: cookies put back by hand
+    trace, out, sess = session_run("session-on-cache", login_spec(browser={"http_cache": True, "http_cache_dir": cache_dir}))
+    if (trace["status"], site.logins, sess.get("reused")) != ("passed", 4, True):
+        failures.append(f"R: a saved session is reused on the cache profile too: {trace['status']} logins={site.logins} {sess}")
+
     # Q. network-aware settle ----------------------------------------------------------------------------------------------------
     def net_spec(query: str = "", **browser) -> dict:
         return make_spec(base + "/net" + query, **{"id": "net-settle", "assert": [{"text_contains": "Saved successfully"}],

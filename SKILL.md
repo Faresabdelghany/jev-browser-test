@@ -284,7 +284,13 @@ The runner already makes one request per decision and waits on events, not on ti
 the API's floor (`references/runner-design.md` has the probe), so what *you* control is the number of round trips
 and the waiting:
 
-- Put login and known banners in `setup`: each is one Jev request saved and no chance of a wrong pick.
+- Put login and known banners in scripted steps: each is one Jev request saved and no chance of a wrong pick. Write
+  the steps that only log in as **`login`** (the same actions as `setup`, run before it), not as part of `setup`:
+  a suite run with `--sessions` then logs in once per site and account, saves the session, and every other spec
+  with the same `login` starts logged in. A spec that tests the login itself has no `login` block.
+- `--http-cache` keeps the browser's HTTP cache between runs (and nothing else: no cookies, no stored state). Page
+  loads on the public examples fell from 1.1 s to 0.45 s a spec. Leave it off when the run must load the
+  application as a first-time visitor does.
 - Give the spec assertions: a pass then confirms itself in code, saving a pause, an observation and a request.
 - Name the visible end state in the goal and the outcomes; a vague goal buys WAITs and wandering steps.
 - Use `wait_for {selector|url}` instead of `wait {ms}` in `setup`.

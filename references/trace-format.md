@@ -188,6 +188,11 @@ environment failure (or a spec file is missing / two files share an id).
   "started_at": "...", "ended_at": "...", "duration_ms": 6210,
   "actions_executed": 4,                 // steps that changed the browser (not DONE/STOP, not runner-inserted WAITs)
   "timing": { "launch_ms": 150, "navigation_ms": 2000, "setup_ms": 0, "steps_ms": 2500, "final_ms": 30,   // where the wall-clock went
+              "login_ms": 2400,              // only for a spec with `login`: its steps (about 0 when a saved session was reused); setup_ms is then the rest
+  //  "login": [ ... ] beside "setup": the login steps as they ran (empty when a session was reused);
+  //  "session": { "reused": true, "age_s": 340 } with session reuse on: or { "reused": false, "not_reused": "no saved session yet", "saved": true },
+  //             and "expired": true when a saved session was tried and the application no longer accepted it (also result.session);
+  //  "browser.http_cache": "slot-0" with browser.http_cache: the cache profile the run used
               "teardown_ms": 900,            // only for a spec with `teardown`
               "jev_connect_ms": 460 },       // the TCP + TLS handshake to the API, paid in the background while the browser launched
   "failed_before_observation": "navigation", // only when the start URL never loaded ("navigation") or a setup step failed ("setup"): no steps, exit 2

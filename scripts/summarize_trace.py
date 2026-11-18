@@ -210,6 +210,14 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
     if trace.get("passed_without_actions"):
         lines.append("  WARNING: passed on the start page before any action; the done_when checks may be too weak")
     lines.append(f"  goal: {spec.get('goal')}")
+    sess = trace.get("session")
+    if sess and sess.get("reused"):
+        lines.append(f"  login: skipped, the session saved {sess.get('age_s', 0) // 60} min ago was reused")
+    elif trace.get("login"):
+        ok = sum(1 for s in trace["login"] if s.get("ok"))
+        lines.append(f"  login: {ok}/{len(trace['login'])} scripted steps ok"
+                     + (f"; no saved session used ({sess.get('not_reused')})" if sess and sess.get("not_reused") else "")
+                     + ("; session saved" if sess and sess.get("saved") else ""))
     if trace.get("setup"):
         ok = sum(1 for s in trace["setup"] if s.get("ok"))
         lines.append(f"  setup: {ok}/{len(trace['setup'])} scripted steps ok")

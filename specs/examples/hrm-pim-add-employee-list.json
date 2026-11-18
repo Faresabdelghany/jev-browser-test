@@ -9,7 +9,7 @@
     "last_name": "Runner${RUN_STAMP}",
     "employee_name": "Jevtest Runner${RUN_STAMP}"
   },
-  "setup": [
+  "login": [
     {
       "action": "fill",
       "selector": "input[name=\"username\"]",

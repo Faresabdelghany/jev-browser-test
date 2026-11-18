@@ -254,6 +254,14 @@ DEFAULTS = {
     # Operations beyond the standing set, offered only when listed: "HOVER" (move the pointer over an element to open
     # a menu that only shows on hover). Off by default because every operation offered is a choice on every step.
     "extra_operations": [],
+    # Scripted steps that only establish who is logged in (the same actions as `setup`, run before it). Naming them
+    # apart from `setup` is what lets a run reuse the session an earlier run saved (`session`, scripts/session.py): the
+    # steps are then skipped and the run starts on the page they ended on. A spec that tests the login has none.
+    "login": [],
+    # reuse: start from the session saved by an earlier run with the same `login` on the same site, and save this
+    # run's when it had to log in (off unless the spec says `"session": true` or the run has --reuse-sessions;
+    # `"session": "never"` keeps a spec out even then). dir: default .jev/sessions. max_age_s: older sessions are not tried.
+    "session": {"reuse": False, "dir": None, "max_age_s": 43200},
     "setup": [],
     # Scripted steps after the verdict, whatever it was (delete the record the flow created, log out): the same
     # actions as `setup`. Best effort: a failing step is recorded (trace.teardown, result.teardown) and never changes
@@ -329,6 +337,11 @@ DEFAULTS = {
         # quiet window can then be short, because it no longer stands in for "the responses have arrived".
         "settle": "dom",
         "network_quiet_ms": 50,
+        # Keep the browser's HTTP cache between runs: the browser runs on a profile under http_cache_dir (default
+        # .jev/http-cache) from which everything but the cache folders is removed before each launch, so no cookie
+        # and no stored state carries over, only what the browser would have cached anyway. Ignored when attached.
+        "http_cache": False,
+        "http_cache_dir": None,
         "action_timeout_ms": 8000,
         "navigation_timeout_ms": 30000,  # the start URL and setup `goto`s: a slow shared host is not a flow outcome
         "storage_state": None,
@@ -584,7 +597,18 @@ def validate(spec: dict) -> list[str]:
     if not isinstance(extra, list) or any(op not in EXTRA_OPERATIONS for op in extra):
         errors.append(f"'extra_operations' must be a list with some of {list(EXTRA_OPERATIONS)}")
 
-    for list_name in ("setup", "teardown"):
+    sess = spec.get("session", {})
+    if not isinstance(sess, dict) or not isinstance(sess.get("reuse", False), bool) or not isinstance(sess.get("never", False), bool):
+        errors.append("'session' must be true, false, \"never\" or an object such as {\"reuse\": true, \"max_age_s\": 3600}")
+    else:
+        age = sess.get("max_age_s", 1)
+        if not (isinstance(age, (int, float)) and not isinstance(age, bool) and age > 0):
+            errors.append("'session.max_age_s' must be a number of seconds greater than 0")
+        if sess.get("dir") is not None and not (isinstance(sess["dir"], str) and sess["dir"].strip()):
+            errors.append("'session.dir' must be a directory path (default .jev/sessions)")
+    if not isinstance(spec.get("browser", {}).get("http_cache", False), bool):
+        errors.append("'browser.http_cache' must be true or false")
+    for list_name in ("login", "setup", "teardown"):
         steps = spec.get(list_name, [])
         if not isinstance(steps, list):
             errors.append(f"'{list_name}' must be a list of steps")
@@ -784,6 +808,10 @@ def load_spec(path: str, run_stamp: str | None = None, today: datetime.date | No
         raw = {**raw, "replay": {"enabled": raw["replay"]}}  # "replay": true is the short form
     elif isinstance(raw, dict) and raw.get("replay") == "never":
         raw = {**raw, "replay": {"enabled": False, "never": True}}  # not even when the command line says --replay
+    if isinstance(raw, dict) and isinstance(raw.get("session"), bool):
+        raw = {**raw, "session": {"reuse": raw["session"]}}  # "session": true is the short form
+    elif isinstance(raw, dict) and raw.get("session") == "never":
+        raw = {**raw, "session": {"reuse": False, "never": True}}  # not even under --reuse-sessions
     spec = _merge(DEFAULTS, raw)
     spec["source"] = {"sha256": source_sha}
     used = RUN_STAMP_TOKEN in json.dumps(raw)
