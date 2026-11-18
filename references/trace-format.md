@@ -97,6 +97,7 @@ per run that has a trace.
 ```jsonc
 {
   "label": "", "timestamp": "...", "git_commit": "185a10f", "repeat": 5, "workers": 4, "elapsed_ms": 18400,
+  "hosts": { "www.saucedemo.com": { "limit": 2, "peak": 2, "specs": 4 } },   // per host: runs allowed at once, the most it saw, its specs
   "out_dir": "runs/suite/<ts>",
   "specs": {
     "smoke-login": {

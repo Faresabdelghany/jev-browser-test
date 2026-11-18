@@ -37,16 +37,18 @@ read results.json, and open a trace only for a spec that is `undetermined` or `f
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import subprocess
 import sys
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from urllib.parse import urlsplit
 
 from bench import _git_commit, _median, measure_trace
-from spec import UNDETERMINED, utf8_stdio
+from spec import UNDETERMINED, load_dotenv, substitute_env, utf8_stdio
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUN_TEST = os.path.join(HERE, "run_test.py")
@@ -56,6 +58,96 @@ GREEN = ("pass", EXPECTED)
 MEDIAN_FIELDS = ("wall_ms", "duration_ms", "jev_ms", "browser_ms", "requests", "input_tokens", "decision_confidence", "steps", "replayed_steps",
                  "launch_ms", "navigation_ms", "login_ms", "setup_ms")
 ENVIRONMENT_REASON = "every run failed before observing a page (browser, start URL or setup): see environment_failures"
+
+
+DEFAULT_PER_HOST = 2  # runs at once against one host unless told otherwise: what a shared demo host takes without timing out
+
+
+def spec_host(spec_path: str) -> tuple[str, int | None]:
+    """The host a spec runs against (its start_url's, with ${ENV} filled in from the environment when it can be) and
+    the spec's own `host_limit`, if it declares one. A spec that cannot be read is its own host: it fails by itself."""
+    try:
+        with open(spec_path, encoding="utf-8") as f:
+            raw = json.load(f)
+        url = substitute_env(str(raw.get("start_url") or ""), [])
+        limit = raw.get("host_limit")
+        return (urlsplit(url).netloc or url or spec_path), (limit if isinstance(limit, int) and not isinstance(limit, bool) and limit >= 1 else None)
+    except (OSError, ValueError):
+        return spec_path, None
+
+
+def host_limits(spec_paths: list[str], per_host: int = DEFAULT_PER_HOST, overrides: list[tuple[str, int]] | None = None) -> tuple[dict, dict]:
+    """({spec path: host}, {host: how many runs it takes at once}). A host's limit is the command line's
+    `--host-limit PATTERN=N` when a pattern matches it (the first that does), else `--per-host`, lowered to the
+    smallest `host_limit` a spec on that host declares: a spec can ask for less than the default, never for more
+    (more is a statement about the host, and that is the command line's to make)."""
+    hosts, declared = {}, {}
+    for path in spec_paths:
+        host, limit = spec_host(path)
+        hosts[path] = host
+        if limit is not None:
+            declared[host] = min(limit, declared.get(host, limit))
+    limits = {}
+    for host in dict.fromkeys(hosts.values()):
+        forced = next((n for pattern, n in overrides or [] if fnmatch.fnmatch(host, pattern)), None)
+        limits[host] = forced if forced is not None else min(per_host, declared.get(host, per_host))
+    return hosts, limits
+
+
+def run_pool(jobs: list, workers: int, host_of, limits: dict, work) -> tuple[list, dict]:
+    """Run `work(job)` for every job on `workers` threads with at most `limits[host_of(job)]` jobs of one host at a
+    time. Returns (results in the jobs' order, {host: the most that ran at once}). A free worker takes, among the
+    jobs whose host has room, one from the host with the most work left per slot (jobs waiting / its limit): the
+    host that will finish last is the one that must never sit idle. Ties go to the earlier job."""
+    results: list = [None] * len(jobs)
+    pending = list(range(len(jobs)))
+    running: dict = {}
+    peaks: dict = {}
+    cond = threading.Condition()
+
+    def take() -> int | None:
+        waiting: dict = {}
+        for i in pending:
+            waiting[host_of(jobs[i])] = waiting.get(host_of(jobs[i]), 0) + 1
+        best, best_load = None, -1.0
+        for i in pending:
+            host = host_of(jobs[i])
+            if running.get(host, 0) >= limits.get(host, 1):
+                continue
+            load = waiting[host] / limits.get(host, 1)
+            if load > best_load:
+                best, best_load = i, load
+        return best
+
+    def worker() -> None:
+        while True:
+            with cond:
+                while True:
+                    if not pending:
+                        return
+                    i = take()
+                    if i is not None:
+                        break
+                    cond.wait()
+                pending.remove(i)
+                host = host_of(jobs[i])
+                running[host] = running.get(host, 0) + 1
+                peaks[host] = max(peaks.get(host, 0), running[host])
+            try:
+                results[i] = work(jobs[i])
+            except Exception:  # noqa: BLE001 - one job's failure leaves its result None; the worker and the slot go on
+                pass
+            finally:
+                with cond:
+                    running[host] -= 1
+                    cond.notify_all()
+
+    threads = [threading.Thread(target=worker, daemon=True) for _ in range(max(1, min(workers, len(jobs))))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return results, peaks
 
 
 def spec_id_of(spec_path: str) -> str:
@@ -244,6 +336,16 @@ def suite_verdict(specs: dict) -> dict:
     return out
 
 
+def _hosts_note(report: dict) -> str:
+    """' over N hosts, at most K at once on any (host: 1)' when the suite ran more than one run at a time."""
+    hosts = report.get("hosts") or {}
+    if report.get("workers", 1) < 2 or not hosts:
+        return ""
+    top = max(h["limit"] for h in hosts.values())
+    lower = [f"{host}: {h['limit']}" for host, h in hosts.items() if h["limit"] < top]
+    return f" over {len(hosts)} host(s), at most {top} at once on any" + (f" ({', '.join(lower)})" if lower else "")
+
+
 def render_markdown(report: dict) -> str:
     """results.md: one table for the suite, then the runs of every spec."""
     s = report["suite"]
@@ -251,7 +353,7 @@ def render_markdown(report: dict) -> str:
     lines = [f"# Suite {report.get('label') or ''} {report['timestamp']}".rstrip(),
              "",
              f"**{'ALL PASS' if s['all_pass'] else 'NOT ALL PASS'}** · {len(report['specs'])} spec(s) × {report['repeat']} repeat(s), "
-             f"{report['workers']} worker(s), {report['elapsed_ms'] / 1000:.1f} s wall-clock"
+             f"{report['workers']} worker(s){_hosts_note(report)}, {report['elapsed_ms'] / 1000:.1f} s wall-clock"
              + (f" · commit `{report['git_commit']}`" if report.get("git_commit") else "")
              + (f" · **{env_total} environment/setup failure(s)** (the browser, the start URL or a setup step failed before "
                 f"the flow was observed; not counted as outcomes)" if env_total else ""),
@@ -300,9 +402,13 @@ def render_markdown(report: dict) -> str:
 
 
 def run_suite(spec_paths: list[str], repeat: int, workers: int, out_root: str, run_args: list[str],
-              python: str = sys.executable, runner: str = RUN_TEST, label: str = "", replay: bool = False) -> dict:
-    """Run the pool, aggregate, write results.json + results.md, return the report."""
+              python: str = sys.executable, runner: str = RUN_TEST, label: str = "", replay: bool = False,
+              per_host: int | None = None, host_overrides: list[tuple[str, int]] | None = None) -> dict:
+    """Run the pool, aggregate, write results.json + results.md, return the report. `per_host` (default: `workers`,
+    so a caller that names only `workers` gets the pool it always got) and `host_overrides` bound how many runs one
+    host sees at once (host_limits)."""
     os.makedirs(out_root, exist_ok=True)
+    hosts, limits = host_limits(spec_paths, workers if per_host is None else per_host, host_overrides)
     jobs = []
     for spec_path in spec_paths:
         sid = spec_id_of(spec_path)
@@ -326,9 +432,9 @@ def run_suite(spec_paths: list[str], repeat: int, workers: int, out_root: str, r
         print(f"{sid} {i}/{repeat}: {shown} {rec['wall_ms']} ms", flush=True)
         return sid, i, rec
 
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        for sid, i, rec in pool.map(work, jobs):
-            records[sid][i - 1] = rec
+    done, peaks = run_pool(jobs, workers, lambda job: hosts[job[0]], limits, work)
+    for sid, i, rec in done:
+        records[sid][i - 1] = rec
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
     specs = {}
     for spec_path in spec_paths:
@@ -341,6 +447,8 @@ def run_suite(spec_paths: list[str], repeat: int, workers: int, out_root: str, r
         "git_commit": _git_commit(),
         "repeat": repeat,
         "workers": workers,
+        # how many runs each host was allowed at once, and the most it actually saw
+        "hosts": {host: {"limit": limits[host], "peak": peaks.get(host, 0), "specs": sum(1 for h in hosts.values() if h == host)} for host in limits},
         "replay": replay,
         "run_args": run_args,
         "elapsed_ms": elapsed_ms,
@@ -361,8 +469,15 @@ def main(argv: list[str]) -> int:
     ap.add_argument("specs", nargs="+", help="spec files to run")
     ap.add_argument("--repeat", type=int, default=1, help="runs per spec (default 1; use 3-5 to measure agreement)")
     ap.add_argument("--workers", type=int, default=2,
-                    help="runner subprocesses at once (default 2: more than that against one shared host turns its "
-                         "load timeouts into your flakiness; raise it for an app you host yourself)")
+                    help="runner subprocesses at once, over all hosts (default 2). Raising it is safe for the hosts: each "
+                         "still sees at most --per-host runs at a time")
+    ap.add_argument("--per-host", type=int, default=DEFAULT_PER_HOST,
+                    help=f"runs at once against one host (default {DEFAULT_PER_HOST}: more than that against a shared host turns its "
+                         "load timeouts into your flakiness). A spec's `host_limit` lowers it for its host; raise it for an "
+                         "application you host yourself")
+    ap.add_argument("--host-limit", action="append", default=[], metavar="HOST=N",
+                    help="runs at once against the hosts matching a pattern, e.g. --host-limit 'staging.example.com=8' or "
+                         "'*.example.com=4' (repeatable; beats --per-host and the specs' host_limit)")
     ap.add_argument("--out", help="output directory (default runs/suite/<timestamp>)")
     ap.add_argument("--label", default="", help="free-text label stored in results.json")
     ap.add_argument("--run-arg", action="append", default=[], help="extra argument passed through to run_test.py (repeatable)")
@@ -383,9 +498,17 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--python", default=sys.executable)
     ap.add_argument("--runner", default=RUN_TEST, help=argparse.SUPPRESS)  # the offline tests substitute a fake runner
     args = ap.parse_args(argv[1:])
-    if args.repeat < 1 or args.workers < 1:
-        print("--repeat and --workers must be >= 1", file=sys.stderr)
+    if args.repeat < 1 or args.workers < 1 or args.per_host < 1:
+        print("--repeat, --workers and --per-host must be >= 1", file=sys.stderr)
         return 2
+    overrides: list[tuple[str, int]] = []
+    for item in args.host_limit:
+        pattern, _, n = item.rpartition("=")
+        if not pattern or not n.isdigit() or int(n) < 1:
+            print(f"--host-limit takes HOST=N with N >= 1 (a host name or a pattern such as '*.example.com'), got '{item}'", file=sys.stderr)
+            return 2
+        overrides.append((pattern, int(n)))
+    load_dotenv()  # a start_url written as ${BASE_URL} names its host only with the environment the runs will have
     missing = [p for p in args.specs if not os.path.exists(p)]
     if missing:
         print("spec file(s) not found: " + ", ".join(missing), file=sys.stderr)
@@ -404,7 +527,8 @@ def main(argv: list[str]) -> int:
                 *(["--replay"] if args.replay else []), *(["--replay-verify", args.replay_verify] if args.replay_verify else []),
                 *(["--reuse-sessions"] if args.sessions else []), *(["--http-cache"] if args.http_cache else [])]
     replay = args.replay or "--replay" in args.run_arg
-    report = run_suite(specs, args.repeat, args.workers, out_root, run_args, args.python, args.runner, args.label, replay)
+    report = run_suite(specs, args.repeat, args.workers, out_root, run_args, args.python, args.runner, args.label, replay,
+                       per_host=args.per_host, host_overrides=overrides)
     print()
     print(render_markdown(report))
     print(f"results: {os.path.join(out_root, 'results.json')}  {os.path.join(out_root, 'results.md')}")

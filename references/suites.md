@@ -4,6 +4,16 @@
 python $SKILL/scripts/run_suite.py specs/*.json --repeat 3 --workers 2   # -> runs/suite/<ts>/results.json + results.md
 ```
 
+**How many at once.** `--workers` is the total; `--per-host` (default 2) is how many runs one host sees at a time,
+whatever the total. A spec can lower its host's limit with `"host_limit": 1` (a host that hands out ids, or
+answers a second visitor with timeouts; the smallest value among the host's specs counts), and
+`--host-limit 'HOST=N'` sets it from the command line for a name or a pattern (`'*.staging.example.com=6'`), which
+beats both. So for specs spread over several hosts, `--workers 6` is as safe for each host as `--workers 2`; the
+suite takes as long as its slowest host's queue. For **an application you host yourself**, say so:
+`--workers 8 --per-host 8` (or `--host-limit 'app.example.com=8'`), up to what the machine and the application's
+own data allow; specs that create records need unique data (`${RUN_STAMP}`) before they can run side by side.
+`results.md` names each host's limit, and `results.json` (`hosts`) the most runs each host saw at once.
+
 Launch it with the Bash tool's `run_in_background` and **do nothing until the completion notification**. Then
 read `results.md`: per spec the outcome distribution, the **agreement on verdicts** (two legitimate pass endings
 agree), medians, and a suite verdict: one verdict everywhere → it; a spec with `expect` whose every run matched →

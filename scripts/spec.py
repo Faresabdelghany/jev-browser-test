@@ -305,6 +305,10 @@ DEFAULTS = {
     # (default .jev/paths, which ignores itself for git). A path holds no typed value, only the keys of `data`.
     # `"replay": "never"` (never: true) keeps a spec out of replay even when the run is started with --replay.
     "replay": {"enabled": False, "verify": "jev", "dir": None},
+    # In a suite: at most this many runs at once against this spec's host (run_suite.py; the smallest value among the
+    # host's specs counts, and only below --per-host). null: the suite's --per-host. For a host that is slow or shared
+    # and answers a second visitor with timeouts.
+    "host_limit": None,
     "budget": {"max_steps": 25, "max_seconds": 240},
     "thresholds": {
         "check_true": 0.8,
@@ -680,6 +684,9 @@ def validate(spec: dict) -> list[str]:
             errors.append(f"'{k}' must be true or false")
     if spec.get("evidence", "always") not in ("always", "failures"):
         errors.append("'evidence' must be \"always\" (every outcome gets its evidence line) or \"failures\" (a pass whose assertions hold is not asked for one)")
+    hl = spec.get("host_limit")
+    if hl is not None and not (isinstance(hl, int) and not isinstance(hl, bool) and hl >= 1):
+        errors.append("'host_limit' must be an integer >= 1 (runs at once against this spec's host in a suite) or null")
     rp = spec.get("replay", {})
     if not isinstance(rp, dict) or not isinstance(rp.get("enabled", False), bool) or not isinstance(rp.get("never", False), bool):
         errors.append("'replay' must be true, false, \"never\" or an object such as {\"enabled\": true, \"verify\": \"assert\"}")
