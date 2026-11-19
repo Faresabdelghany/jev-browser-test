@@ -1422,6 +1422,35 @@ Offline: 244 unit tests, `selftest.py` and `selftest_capabilities.py` (scenario 
 holds the outcome no longer than a navigation; a button combobox is clicked open; a sign-in form whose code
 arrives 700 ms late is waited for, its 2.5 s analytics script is not).
 
+## 0.14.1 (2026-11-19): an undecided run waits for a page that says it is loading
+
+Branch `fix/undecided-while-loading` (stacked on `feat/required-control`), `jev-1.14.0`. `ab.py --a-runner`: arm A is
+the runner of 0.14.0, arm B this one, runs interleaved, one at a time. Raw rows: `experiments/patience-0141/`.
+
+**The private application** (the one of 0.13.1; nothing of it is here but the tally). One read-only spec that opens a
+form behind a button the page offers only once its list has loaded (30 s or so after sign-in), with no `setup` wait.
+
+| | A (0.14.0) | B (0.14.1) |
+|---|---|---|
+| default `settle_ms` 400, 3 runs each | `low_confidence` 3 of 3 (9.4, 9.6, 10.3 s) | pass 3 of 3 (31.5, 31.7, 33.6 s); `undecided_wait` in all three, 21.2, 21.4 and 23.3 s, ended `changed` |
+| `--slow` (`settle_ms` 2500), 8 runs each (3, then 5) | pass 5 of 8, `low_confidence` 3 of 8 | pass 8 of 8; `undecided_wait` in 1 of 8 (0.2 s, ended `changed`, 29.6 s after the first look) |
+
+With `--slow` the five looks last 27.5 s and the list arrives at about that time: seven of the eight B runs never
+reached the bound, and the three A failures are the runs in which the page was late. Eight runs an arm; the first
+row is the comparison that says something. Median run 33.8 s (A) and 33.7 s (B), 7 requests either way.
+
+**The public examples: partial.** The A/B over the 17 public and 5 OrangeHRM examples (3 repeats) was stopped part-way
+at the owner's request: live runs go to their application only from here on. What had finished
+(`examples-partial.json`): 15 public examples ended the same in both arms except `menu-random` and `notify-random`
+(pages that fail at random by design); `table-sort-due` ended `low_confidence` and `toolshop-search-cart` and
+`shop-checkout-error-account` `blocked` in every run of both arms (not this change; not looked into here);
+`hrm-admin-add-user` 3 of 3 both arms; `hrm-add-employee` A 3 of 3, B 2 of 3, the third `low_confidence` after three
+looks on a page with no blank layer and no indicator, no `undecided_wait` in its trace (the unchanged path);
+`hrm-leave-assign` 2 runs of A and 1 of B, all pass. No conclusion about the examples is drawn from this.
+
+Offline: 258 unit tests; capabilities selftest scenario U. With `LOADING_WAITS_MAX = 0` the new case (a 6 s spinner)
+ends `low_confidence` after 4.9 s; with 3 it passes in 6.9 s with one wait of 2.3 s.
+
 ## 0.14.0 (2026-11-19): `via`, the control under test
 
 Finding 1 of 0.13.1, "a pass by another route". The spec field `via` names the action a pass has to come through; the

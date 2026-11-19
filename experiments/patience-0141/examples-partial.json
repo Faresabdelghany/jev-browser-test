@@ -1,0 +1,761 @@
+{
+ "note": "Partial: stopped at the owner's request before it finished. Arm a 0.14.0, arm b 0.14.1.",
+ "specs": {
+  "add-remove-elements": {
+   "a": [
+    {
+     "ending": "one_delete_left",
+     "conf": 0.95,
+     "requests": 5,
+     "s": 4.6
+    },
+    {
+     "ending": "one_delete_left",
+     "conf": 0.96,
+     "requests": 5,
+     "s": 3.8
+    },
+    {
+     "ending": "one_delete_left",
+     "conf": 0.95,
+     "requests": 5,
+     "s": 3.9
+    }
+   ],
+   "b": [
+    {
+     "ending": "one_delete_left",
+     "conf": 0.95,
+     "requests": 5,
+     "s": 3.8
+    },
+    {
+     "ending": "one_delete_left",
+     "conf": 0.93,
+     "requests": 5,
+     "s": 3.7
+    },
+    {
+     "ending": "one_delete_left",
+     "conf": 0.93,
+     "requests": 5,
+     "s": 3.7
+    }
+   ]
+  },
+  "dynamic-controls": {
+   "a": [
+    {
+     "ending": "both_done",
+     "conf": 0.85,
+     "requests": 11,
+     "s": 9.5
+    },
+    {
+     "ending": "both_done",
+     "conf": 0.8,
+     "requests": 11,
+     "s": 9.6
+    },
+    {
+     "ending": "both_done",
+     "conf": 0.85,
+     "requests": 11,
+     "s": 9.5
+    }
+   ],
+   "b": [
+    {
+     "ending": "both_done",
+     "conf": 0.88,
+     "requests": 11,
+     "s": 9.6
+    },
+    {
+     "ending": "both_done",
+     "conf": 0.85,
+     "requests": 11,
+     "s": 9.4
+    },
+    {
+     "ending": "both_done",
+     "conf": 0.87,
+     "requests": 11,
+     "s": 9.6
+    }
+   ]
+  },
+  "forgot-password": {
+   "a": [
+    {
+     "ending": "email_sent",
+     "conf": 0.98,
+     "requests": 4,
+     "s": 3.8
+    },
+    {
+     "ending": "email_sent",
+     "conf": 0.99,
+     "requests": 4,
+     "s": 3.4
+    },
+    {
+     "ending": "email_sent",
+     "conf": 0.99,
+     "requests": 4,
+     "s": 3.6
+    }
+   ],
+   "b": [
+    {
+     "ending": "email_sent",
+     "conf": 0.99,
+     "requests": 4,
+     "s": 3.5
+    },
+    {
+     "ending": "email_sent",
+     "conf": 0.99,
+     "requests": 4,
+     "s": 3.6
+    },
+    {
+     "ending": "email_sent",
+     "conf": 0.99,
+     "requests": 4,
+     "s": 4.2
+    }
+   ]
+  },
+  "load-wait": {
+   "a": [
+    {
+     "ending": "loaded",
+     "conf": 0.99,
+     "requests": 7,
+     "s": 8.2
+    },
+    {
+     "ending": "loaded",
+     "conf": 1.0,
+     "requests": 7,
+     "s": 8.1
+    },
+    {
+     "ending": "loaded",
+     "conf": 1.0,
+     "requests": 7,
+     "s": 7.9
+    }
+   ],
+   "b": [
+    {
+     "ending": "loaded",
+     "conf": 1.0,
+     "requests": 7,
+     "s": 8.1
+    },
+    {
+     "ending": "loaded",
+     "conf": 0.99,
+     "requests": 7,
+     "s": 7.9
+    },
+    {
+     "ending": "loaded",
+     "conf": 1.0,
+     "requests": 7,
+     "s": 8.1
+    }
+   ]
+  },
+  "login-logout": {
+   "a": [
+    {
+     "ending": "logged_out",
+     "conf": 0.98,
+     "requests": 6,
+     "s": 4.7
+    },
+    {
+     "ending": "logged_out",
+     "conf": 0.98,
+     "requests": 6,
+     "s": 4.7
+    },
+    {
+     "ending": "logged_out",
+     "conf": 0.98,
+     "requests": 6,
+     "s": 4.9
+    }
+   ],
+   "b": [
+    {
+     "ending": "logged_out",
+     "conf": 0.98,
+     "requests": 6,
+     "s": 4.8
+    },
+    {
+     "ending": "logged_out",
+     "conf": 0.98,
+     "requests": 6,
+     "s": 4.8
+    },
+    {
+     "ending": "logged_out",
+     "conf": 0.98,
+     "requests": 6,
+     "s": 4.8
+    }
+   ]
+  },
+  "menu-random": {
+   "a": [
+    {
+     "ending": "entry_missing",
+     "conf": null,
+     "requests": 2,
+     "s": 2.6
+    },
+    {
+     "ending": "all_entries",
+     "conf": null,
+     "requests": 2,
+     "s": 2.5
+    },
+    {
+     "ending": "all_entries",
+     "conf": null,
+     "requests": 2,
+     "s": 2.6
+    }
+   ],
+   "b": [
+    {
+     "ending": "entry_missing",
+     "conf": null,
+     "requests": 2,
+     "s": 4.1
+    },
+    {
+     "ending": "entry_missing",
+     "conf": null,
+     "requests": 2,
+     "s": 2.6
+    },
+    {
+     "ending": "entry_missing",
+     "conf": null,
+     "requests": 2,
+     "s": 2.5
+    }
+   ]
+  },
+  "modal-close": {
+   "a": [
+    {
+     "ending": "modal_closed",
+     "conf": 0.68,
+     "requests": 4,
+     "s": 3.3
+    },
+    {
+     "ending": "modal_closed",
+     "conf": 0.71,
+     "requests": 4,
+     "s": 3.5
+    },
+    {
+     "ending": "modal_closed",
+     "conf": 0.7,
+     "requests": 4,
+     "s": 3.4
+    }
+   ],
+   "b": [
+    {
+     "ending": "modal_closed",
+     "conf": 0.68,
+     "requests": 4,
+     "s": 3.4
+    },
+    {
+     "ending": "modal_closed",
+     "conf": 0.66,
+     "requests": 4,
+     "s": 3.4
+    },
+    {
+     "ending": "modal_closed",
+     "conf": 0.68,
+     "requests": 4,
+     "s": 3.4
+    }
+   ]
+  },
+  "notify-random": {
+   "a": [
+    {
+     "ending": "action_unsuccessful",
+     "conf": 0.93,
+     "requests": 3,
+     "s": 3.2
+    },
+    {
+     "ending": "action_successful",
+     "conf": 0.88,
+     "requests": 3,
+     "s": 3.3
+    },
+    {
+     "ending": "action_successful",
+     "conf": 0.89,
+     "requests": 3,
+     "s": 3.2
+    }
+   ],
+   "b": [
+    {
+     "ending": "action_unsuccessful",
+     "conf": 0.89,
+     "requests": 3,
+     "s": 4.6
+    },
+    {
+     "ending": "action_unsuccessful",
+     "conf": 0.92,
+     "requests": 3,
+     "s": 3.3
+    },
+    {
+     "ending": "action_successful",
+     "conf": 0.91,
+     "requests": 3,
+     "s": 3.4
+    }
+   ]
+  },
+  "shop-add-second-item": {
+   "a": [
+    {
+     "ending": "bike_light_in_cart",
+     "conf": 0.9,
+     "requests": 4,
+     "s": 3.1
+    },
+    {
+     "ending": "bike_light_in_cart",
+     "conf": 0.9,
+     "requests": 4,
+     "s": 3.1
+    },
+    {
+     "ending": "bike_light_in_cart",
+     "conf": 0.91,
+     "requests": 4,
+     "s": 3.0
+    }
+   ],
+   "b": [
+    {
+     "ending": "bike_light_in_cart",
+     "conf": 0.91,
+     "requests": 4,
+     "s": 3.1
+    },
+    {
+     "ending": "bike_light_in_cart",
+     "conf": 0.88,
+     "requests": 4,
+     "s": 3.2
+    },
+    {
+     "ending": "bike_light_in_cart",
+     "conf": 0.88,
+     "requests": 4,
+     "s": 3.0
+    }
+   ]
+  },
+  "shop-checkout-error-account": {
+   "a": [
+    {
+     "ending": "undetermined:blocked",
+     "conf": 0.92,
+     "requests": 10,
+     "s": 5.3
+    },
+    {
+     "ending": "undetermined:blocked",
+     "conf": 0.93,
+     "requests": 10,
+     "s": 5.2
+    },
+    {
+     "ending": "undetermined:blocked",
+     "conf": 0.92,
+     "requests": 10,
+     "s": 5.4
+    }
+   ],
+   "b": [
+    {
+     "ending": "undetermined:blocked",
+     "conf": 0.93,
+     "requests": 10,
+     "s": 5.2
+    },
+    {
+     "ending": "undetermined:blocked",
+     "conf": 0.95,
+     "requests": 10,
+     "s": 5.3
+    },
+    {
+     "ending": "undetermined:blocked",
+     "conf": 0.93,
+     "requests": 10,
+     "s": 5.2
+    }
+   ]
+  },
+  "shop-checkout-problem-account": {
+   "a": [
+    {
+     "ending": "form_error",
+     "conf": 0.94,
+     "requests": 9,
+     "s": 4.8
+    },
+    {
+     "ending": "form_error",
+     "conf": 0.94,
+     "requests": 9,
+     "s": 5.6
+    },
+    {
+     "ending": "form_error",
+     "conf": 0.92,
+     "requests": 9,
+     "s": 4.8
+    }
+   ],
+   "b": [
+    {
+     "ending": "form_error",
+     "conf": 0.94,
+     "requests": 9,
+     "s": 5.0
+    },
+    {
+     "ending": "form_error",
+     "conf": 0.96,
+     "requests": 9,
+     "s": 4.8
+    },
+    {
+     "ending": "form_error",
+     "conf": 0.95,
+     "requests": 9,
+     "s": 4.8
+    }
+   ]
+  },
+  "shop-checkout": {
+   "a": [
+    {
+     "ending": "order_complete",
+     "conf": 0.99,
+     "requests": 10,
+     "s": 5.2
+    },
+    {
+     "ending": "order_complete",
+     "conf": 0.99,
+     "requests": 10,
+     "s": 5.3
+    },
+    {
+     "ending": "order_complete",
+     "conf": 0.98,
+     "requests": 10,
+     "s": 5.2
+    }
+   ],
+   "b": [
+    {
+     "ending": "order_complete",
+     "conf": 0.99,
+     "requests": 10,
+     "s": 5.1
+    },
+    {
+     "ending": "order_complete",
+     "conf": 0.99,
+     "requests": 10,
+     "s": 5.3
+    },
+    {
+     "ending": "order_complete",
+     "conf": 0.99,
+     "requests": 10,
+     "s": 5.2
+    }
+   ]
+  },
+  "table-sort-due": {
+   "a": [
+    {
+     "ending": "undetermined:low_confidence",
+     "conf": 0.34,
+     "requests": 4,
+     "s": 4.6
+    },
+    {
+     "ending": "undetermined:low_confidence",
+     "conf": 0.31,
+     "requests": 4,
+     "s": 5.5
+    },
+    {
+     "ending": "undetermined:low_confidence",
+     "conf": 0.4,
+     "requests": 4,
+     "s": 4.6
+    }
+   ],
+   "b": [
+    {
+     "ending": "undetermined:low_confidence",
+     "conf": 0.3,
+     "requests": 4,
+     "s": 4.7
+    },
+    {
+     "ending": "undetermined:low_confidence",
+     "conf": 0.32,
+     "requests": 4,
+     "s": 5.2
+    },
+    {
+     "ending": "undetermined:low_confidence",
+     "conf": 0.35,
+     "requests": 4,
+     "s": 4.5
+    }
+   ]
+  },
+  "todo-add-filter": {
+   "a": [
+    {
+     "ending": "active_filtered",
+     "conf": 0.92,
+     "requests": 8,
+     "s": 4.1
+    },
+    {
+     "ending": "active_filtered",
+     "conf": 0.9,
+     "requests": 8,
+     "s": 3.9
+    },
+    {
+     "ending": "active_filtered",
+     "conf": 0.9,
+     "requests": 8,
+     "s": 4.1
+    }
+   ],
+   "b": [
+    {
+     "ending": "active_filtered",
+     "conf": 0.91,
+     "requests": 8,
+     "s": 3.9
+    },
+    {
+     "ending": "active_filtered",
+     "conf": 0.9,
+     "requests": 8,
+     "s": 3.7
+    },
+    {
+     "ending": "active_filtered",
+     "conf": 0.95,
+     "requests": 8,
+     "s": 3.9
+    }
+   ]
+  },
+  "toolshop-search-cart": {
+   "a": [
+    {
+     "ending": "undetermined:blocked",
+     "conf": 0.76,
+     "requests": 8,
+     "s": 5.3
+    },
+    {
+     "ending": "undetermined:blocked",
+     "conf": 0.82,
+     "requests": 7,
+     "s": 5.1
+    },
+    {
+     "ending": "undetermined:blocked",
+     "conf": 0.78,
+     "requests": 7,
+     "s": 4.5
+    }
+   ],
+   "b": [
+    {
+     "ending": "undetermined:blocked",
+     "conf": 0.8,
+     "requests": 7,
+     "s": 4.4
+    },
+    {
+     "ending": "undetermined:blocked",
+     "conf": 0.71,
+     "requests": 7,
+     "s": 4.8
+    },
+    {
+     "ending": "undetermined:blocked",
+     "conf": 0.68,
+     "requests": 6,
+     "s": 3.9
+    }
+   ]
+  },
+  "web-form-submit": {
+   "a": [
+    {
+     "ending": "form_submitted",
+     "conf": 0.98,
+     "requests": 8,
+     "s": 4.2
+    }
+   ],
+   "b": [
+    {
+     "ending": "form_submitted",
+     "conf": 0.96,
+     "requests": 8,
+     "s": 4.0
+    }
+   ]
+  },
+  "hrm-add-employee": {
+   "a": [
+    {
+     "ending": "employee_saved",
+     "conf": 0.89,
+     "requests": 11,
+     "s": 14.4
+    },
+    {
+     "ending": "employee_saved",
+     "conf": 0.91,
+     "requests": 11,
+     "s": 13.8
+    },
+    {
+     "ending": "employee_saved",
+     "conf": 0.88,
+     "requests": 11,
+     "s": 16.8
+    }
+   ],
+   "b": [
+    {
+     "ending": "employee_saved",
+     "conf": 0.8,
+     "requests": 12,
+     "s": 23.0
+    },
+    {
+     "ending": "undetermined:low_confidence",
+     "conf": 0.36,
+     "requests": 8,
+     "s": 17.4
+    },
+    {
+     "ending": "employee_saved",
+     "conf": 0.77,
+     "requests": 12,
+     "s": 17.3
+    }
+   ]
+  },
+  "hrm-admin-add-user": {
+   "a": [
+    {
+     "ending": "user_listed",
+     "conf": 0.89,
+     "requests": 22,
+     "s": 32.6
+    },
+    {
+     "ending": "user_listed",
+     "conf": 0.83,
+     "requests": 27,
+     "s": 46.9
+    },
+    {
+     "ending": "user_listed",
+     "conf": 0.86,
+     "requests": 19,
+     "s": 25.8
+    }
+   ],
+   "b": [
+    {
+     "ending": "user_listed",
+     "conf": 0.89,
+     "requests": 20,
+     "s": 29.5
+    },
+    {
+     "ending": "user_listed",
+     "conf": 0.85,
+     "requests": 20,
+     "s": 29.4
+    },
+    {
+     "ending": "user_listed",
+     "conf": 0.86,
+     "requests": 22,
+     "s": 38.0
+    }
+   ]
+  },
+  "hrm-leave-assign": {
+   "a": [
+    {
+     "ending": "leave_scheduled",
+     "conf": 0.87,
+     "requests": 26,
+     "s": 32.4
+    },
+    {
+     "ending": "leave_scheduled",
+     "conf": 0.89,
+     "requests": 23,
+     "s": 27.1
+    }
+   ],
+   "b": [
+    {
+     "ending": "leave_scheduled",
+     "conf": 0.88,
+     "requests": 24,
+     "s": 27.2
+    }
+   ]
+  }
+ }
+}

@@ -1,0 +1,237 @@
+{
+ "note": "The application of 0.13.1, anonymised: one read-only spec that opens a form behind a button offered only once the list has loaded. Arm a: runner 0.14.0; arm b: 0.14.1. ab.py --a-runner, interleaved.",
+ "sets": {
+  "default settle_ms 400": [
+   {
+    "arm": "a",
+    "run": "a01",
+    "status": "low_confidence",
+    "duration_ms": 10261,
+    "steps": 5,
+    "undecided_looks": 5,
+    "undecided_wait": []
+   },
+   {
+    "arm": "a",
+    "run": "a02",
+    "status": "low_confidence",
+    "duration_ms": 9352,
+    "steps": 5,
+    "undecided_looks": 5,
+    "undecided_wait": []
+   },
+   {
+    "arm": "a",
+    "run": "a03",
+    "status": "low_confidence",
+    "duration_ms": 9629,
+    "steps": 5,
+    "undecided_looks": 5,
+    "undecided_wait": []
+   },
+   {
+    "arm": "b",
+    "run": "b01",
+    "status": "passed",
+    "duration_ms": 31549,
+    "steps": 7,
+    "undecided_looks": 5,
+    "undecided_wait": [
+     {
+      "ended": "changed",
+      "ms": 21156,
+      "held_ms": 6104,
+      "looks": 5
+     }
+    ]
+   },
+   {
+    "arm": "b",
+    "run": "b02",
+    "status": "passed",
+    "duration_ms": 33624,
+    "steps": 7,
+    "undecided_looks": 5,
+    "undecided_wait": [
+     {
+      "ended": "changed",
+      "ms": 23262,
+      "held_ms": 6034,
+      "looks": 5
+     }
+    ]
+   },
+   {
+    "arm": "b",
+    "run": "b03",
+    "status": "passed",
+    "duration_ms": 31676,
+    "steps": 7,
+    "undecided_looks": 5,
+    "undecided_wait": [
+     {
+      "ended": "changed",
+      "ms": 21377,
+      "held_ms": 6037,
+      "looks": 5
+     }
+    ]
+   }
+  ],
+  "--slow, first 3": [
+   {
+    "arm": "a",
+    "run": "a01",
+    "status": "low_confidence",
+    "duration_ms": 37548,
+    "steps": 5,
+    "undecided_looks": 5,
+    "undecided_wait": []
+   },
+   {
+    "arm": "a",
+    "run": "a02",
+    "status": "passed",
+    "duration_ms": 32430,
+    "steps": 6,
+    "undecided_looks": 4,
+    "undecided_wait": []
+   },
+   {
+    "arm": "a",
+    "run": "a03",
+    "status": "passed",
+    "duration_ms": 31120,
+    "steps": 6,
+    "undecided_looks": 4,
+    "undecided_wait": []
+   },
+   {
+    "arm": "b",
+    "run": "b01",
+    "status": "passed",
+    "duration_ms": 33606,
+    "steps": 6,
+    "undecided_looks": 4,
+    "undecided_wait": []
+   },
+   {
+    "arm": "b",
+    "run": "b02",
+    "status": "passed",
+    "duration_ms": 33478,
+    "steps": 6,
+    "undecided_looks": 4,
+    "undecided_wait": []
+   },
+   {
+    "arm": "b",
+    "run": "b03",
+    "status": "passed",
+    "duration_ms": 32592,
+    "steps": 6,
+    "undecided_looks": 4,
+    "undecided_wait": []
+   }
+  ],
+  "--slow, next 5": [
+   {
+    "arm": "a",
+    "run": "a01",
+    "status": "passed",
+    "duration_ms": 31159,
+    "steps": 6,
+    "undecided_looks": 4,
+    "undecided_wait": []
+   },
+   {
+    "arm": "a",
+    "run": "a02",
+    "status": "passed",
+    "duration_ms": 34244,
+    "steps": 6,
+    "undecided_looks": 4,
+    "undecided_wait": []
+   },
+   {
+    "arm": "a",
+    "run": "a03",
+    "status": "low_confidence",
+    "duration_ms": 33613,
+    "steps": 5,
+    "undecided_looks": 5,
+    "undecided_wait": []
+   },
+   {
+    "arm": "a",
+    "run": "a04",
+    "status": "passed",
+    "duration_ms": 31748,
+    "steps": 6,
+    "undecided_looks": 4,
+    "undecided_wait": []
+   },
+   {
+    "arm": "a",
+    "run": "a05",
+    "status": "low_confidence",
+    "duration_ms": 33908,
+    "steps": 5,
+    "undecided_looks": 5,
+    "undecided_wait": []
+   },
+   {
+    "arm": "b",
+    "run": "b01",
+    "status": "passed",
+    "duration_ms": 32279,
+    "steps": 6,
+    "undecided_looks": 4,
+    "undecided_wait": []
+   },
+   {
+    "arm": "b",
+    "run": "b02",
+    "status": "passed",
+    "duration_ms": 35146,
+    "steps": 7,
+    "undecided_looks": 5,
+    "undecided_wait": [
+     {
+      "ended": "changed",
+      "ms": 229,
+      "held_ms": 29596,
+      "looks": 5
+     }
+    ]
+   },
+   {
+    "arm": "b",
+    "run": "b03",
+    "status": "passed",
+    "duration_ms": 33403,
+    "steps": 6,
+    "undecided_looks": 4,
+    "undecided_wait": []
+   },
+   {
+    "arm": "b",
+    "run": "b04",
+    "status": "passed",
+    "duration_ms": 33375,
+    "steps": 6,
+    "undecided_looks": 4,
+    "undecided_wait": []
+   },
+   {
+    "arm": "b",
+    "run": "b05",
+    "status": "passed",
+    "duration_ms": 33869,
+    "steps": 6,
+    "undecided_looks": 4,
+    "undecided_wait": []
+   }
+  ]
+ }
+}
