@@ -4,6 +4,9 @@
 python $SKILL/scripts/run_suite.py specs/*.json --repeat 3 --workers 2   # -> runs/suite/<ts>/results.json + results.md
 ```
 
+A folder stands for the spec files in it (`run_suite.py specs/`): its own `*.json` that read as specs, not its
+subfolders'.
+
 **Running the same specs again** is `python $SKILL/scripts/rerun.py specs/` (or spec files, or an earlier suite's
 folder): `run_suite.py` with replay and saved sessions on, 4 workers inside the per-host limits, and a summary in
 place of the tables. It prints, and writes to `summary.md` beside `results.json` and `results.md`, either `GREEN: N

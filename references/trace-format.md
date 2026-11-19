@@ -210,7 +210,7 @@ environment failure (or a spec file is missing / two files share an id).
   "usage": { "jev_requests": 5, "input_tokens": 2100, "output_tokens": 300, "model": "jev-1.13.0",
              "reconnects": 0 },      // reconnects > 0: the kept-alive API connection dropped mid-run and was reopened
   "spec": { ... },                       // the spec as run, secrets replaced by "<secret>"
-  "setup": [ { "n": 0, "action": "fill", "selector": "...", "ok": true, "error": null } ],   // "frame" when the step named one; "files" for an upload
+  "setup": [ { "n": 0, "action": "fill", "selector": "...", "ok": true, "error": null } ],   // "frame" when the step named one; "files" for an upload; "scripts_ms" when the step waited for the page's scripts before it ran (the first step that touches a page after it opened)
   "teardown": [ ... ], "teardown_result": { "ok": true, "steps": 3, "ran": 3 },   // the teardown's steps in the same shape, and result.teardown
   "steps": [
     {
@@ -222,6 +222,7 @@ environment failure (or a spec file is missing / two files share an id).
       "covered_controls": 3,                                         // only when > 0: controls on screen but under another layer (a loading overlay, a dialog), counted, not offered; Jev sees the count in its state; flag COVERED:3
       "layer_controls": 0,                                           // with covered_controls: how many offered controls belong to the covering layer (a dialog's buttons, an open list's options); 0 is a blank layer, a loading or saving overlay (run_test.blank_layer); flag COVERED:3(layer:2) when > 0
       "loading_indicators": 1,                                       // only on an undecided (low-confidence) step, when > 0: spinners, indeterminate progress bars and 'Loading...' lines that cover nothing, counted when the decision came back: such a page gets the extra looks a blank layer gets, and nothing else (flag LOADING-IND)
+      "outcome_held": { "outcome": "no_records", "loading_indicators": 1, "held_ms": 0 },   // a non-pass outcome seen while the page said it was loading: not taken as the ending, the step is a wait (flag HELD:no_records); held_ms since the first hold, never past navigation_timeout_ms
       "frames": [ { "selector": "#card-frame", "elements": 2, "label": "Secure card payment", "url": "..." } ],   // with observation.frames: what each listed <iframe> contributed to the table, or "skipped": why not; its elements carry "frame" and a context "frame: <label>"
       "iframes": 1, "shadow_hosts": 1,                              // only when > 0: visible <iframe>s, and elements whose shadow root holds controls (not offered): what the hints of a stalled run read (the summary's `hint:` lines, `result.reason.hints`)
       "diagnostics": { "page_errors": 1, "http_errors": 1, "server_errors": 1 },   // only when the browser reported something since the previous observation (flags JS-ERROR, HTTP-5xx, HTTP-4xx, REQ-FAILED, CONSOLE-ERR)

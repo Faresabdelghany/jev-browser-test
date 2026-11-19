@@ -216,6 +216,23 @@ about half a second off a three-field checkout form, nothing off the two forms w
 at the suggestion list, and the extra questions cost about 9% more input tokens there). It stays opt-in for that
 reason: the saving is one request per plain extra field, and a first run should not pay for questions it cannot use.
 
+## An application the examples had not seen (0.13.1)
+
+Eleven read-only specs written from one look at a server-rendered operations app (2026-11-18), first run: six
+passes, one false BUG, four undetermined. Three were the runner's and are fixed; the measurements and the rest are
+in dev-docs `measurements/`, section "0.13.1".
+
+- **A loading page is not an ending.** The list's body said "Loading records…", its footer "No matching records".
+  `hold_outcome`: a non-pass outcome on a page with a loading indicator is a wait, bounded by
+  `navigation_timeout_ms`. The indicator count is the one an undecided step already asked for
+  (`observe.loading_indicators`), now also asked when a non-pass outcome is seen; an ordinary step still does not
+  pay for it.
+- **A button with `role="combobox"` is a click target** (`policy.types_text` / `opens_list`). The element table
+  carries `tag` and `editable` for this one decision.
+- **Scripted steps start when the page's scripts are in** (`wait_for_scripts`): `document.scripts` against the
+  resource-timing entries, polled every 50 ms, capped at 3 s, analytics out. DOM-quiet says nothing about a
+  server-rendered page: its DOM is complete before any of its code runs.
+
 ## The six speed steps together (0.8.0 to 0.13.0)
 
 What a rerun of the 22 examples is made of now (2026-11-17, dev-docs `measurements/`, section "0.13.0"): 194

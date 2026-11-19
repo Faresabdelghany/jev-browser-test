@@ -464,6 +464,16 @@ def run_suite(spec_paths: list[str], repeat: int, workers: int, out_root: str, r
     return report
 
 
+def reads_as_spec(path: str) -> bool:
+    """A JSON file that reads as a spec (an object with a start_url and a goal): a folder of specs may hold other JSON."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return isinstance(raw, dict) and isinstance(raw.get("start_url"), str) and isinstance(raw.get("goal"), str)
+
+
 def main(argv: list[str]) -> int:
     utf8_stdio()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -514,6 +524,16 @@ def main(argv: list[str]) -> int:
     if missing:
         print("spec file(s) not found: " + ", ".join(missing), file=sys.stderr)
         return 2
+    named, args.specs = args.specs, []
+    for p in named:  # a folder stands for the spec files in it (its own *.json that read as specs, not its subfolders')
+        if not os.path.isdir(p):
+            args.specs.append(p)
+            continue
+        inside = [f for f in (os.path.join(p, n) for n in sorted(os.listdir(p)) if n.endswith(".json")) if reads_as_spec(f)]
+        if not inside:
+            print(f"no spec files in folder: {p}", file=sys.stderr)
+            return 2
+        args.specs.extend(inside)
     ids: dict[str, str] = {}
     for p in args.specs:
         sid = spec_id_of(p)

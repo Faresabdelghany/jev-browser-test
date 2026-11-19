@@ -32,6 +32,7 @@ CLICK_ROLES = {
     "option", "checkbox", "radio", "switch", "clickable", "file",
 }
 TYPE_ROLES = {"textbox", "searchbox", "combobox"}
+TEXT_ENTRY_TAGS = {"input", "textarea"}  # the tags a combobox takes typed text in; any other is a button that opens a list
 CHECKABLE_ROLES = {"checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"}
 HISTORY_WINDOW = 10  # recent_actions entries Jev sees; jev-ultrafast keeps the same window
 # announcements (toasts, live messages) stay in Jev's state for this many observations: the one they preceded and
@@ -117,20 +118,37 @@ def element_operations(spec: dict, e: dict) -> list[str]:
         # With files to attach, a file field is where one goes: clicking it would only open the system's file dialog,
         # which nothing in the run can answer. Without `files` it stays the clickable it always was.
         return ["UPLOAD_FILE"]
-    if e["role"] in CLICK_ROLES:
+    if e["role"] in CLICK_ROLES or opens_list(e):
         ops.append("CLICK")
         if "HOVER" in (spec.get("extra_operations") or []) and e["role"] in HOVER_ROLES:
             ops.append("HOVER")
-    if e["role"] in TYPE_ROLES and spec["data"]:
+    if types_text(e) and spec["data"]:
         ops.append("TYPE_TEXT")
     if e["role"] == "select" and any(not o.get("disabled") for o in e.get("options") or []):
         ops.append("SELECT")
     return ops
 
 
+def types_text(e: dict) -> bool:
+    """Is this a control text is typed into? A textbox, a searchbox, and a combobox that is a text field (`<input
+    role="combobox">`, an `<input list=...>`, a contenteditable). A combobox that is a button (`<button
+    role="combobox">`: the select of Radix, shadcn/ui, MUI, Headless UI) takes no text: a click opens its list, and
+    its caption is the chosen option. An element with no `tag` (an older trace) reads as it always did, as a field.
+    Live, 0.13.0: a dashboard's "Period" was such a button, offered for typing only; Jev answered CLICK at 0.95 four
+    times, the click question did not have the control, and the run ended low_confidence on the account button."""
+    if e["role"] not in TYPE_ROLES:
+        return False
+    return e["role"] != "combobox" or e.get("tag") is None or e.get("tag") in TEXT_ENTRY_TAGS or bool(e.get("editable"))
+
+
+def opens_list(e: dict) -> bool:
+    """A combobox that is not a text field (types_text): the control to click to see its options."""
+    return e["role"] == "combobox" and not types_text(e)
+
+
 def is_field(e: dict) -> bool:
     """A control with content of its own (text field, select): its `value` is the field's current content."""
-    return e["role"] in TYPE_ROLES or e["role"] == "select"
+    return types_text(e) or e["role"] == "select"
 
 
 def describe_element(spec: dict, e: dict) -> dict:
