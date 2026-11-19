@@ -213,7 +213,7 @@ a single-page app, not a dead control), `DEFERRED:<outcome>` (true of the page, 
 condition has not happened yet: not counted), `ANNOUNCED:"…"` (a toast or live message appeared since the previous
 observation), `SLOW-NAV:<s>` (the click landed and the page answered after the action timeout: a slow host, not a
 failure) and `LOW-CONF`. `references/verdict-rubric.md` (How to look at a run) explains every other flag
-(`COVERED`, `DEFERRED-<OP>`, `HELD`, `VIA…`, `LOADING`, `RECHECK`, `ASSERT-PENDING`, `STALE`, `JS-ERROR`, `HTTP-5xx`, `NEW-TAB`) and the `(not run)` /
+(`COVERED`, `DEFERRED-<OP>`, `HELD`, `VIA…`, `LOADING`, `LOADING-WAIT`, `RECHECK`, `ASSERT-PENDING`, `STALE`, `JS-ERROR`, `HTTP-5xx`, `NEW-TAB`) and the `(not run)` /
 `AUTO_DONE` entries of the operation column: read it before judging a run that carries one of them. With the
 default `screenshots: "key"` the terminal step, every flagged step and the step after a no-effect action have a
 `steps/NNN.png`; `--screenshots all` pictures every step on a rerun. The one reading rule: the checks recorded

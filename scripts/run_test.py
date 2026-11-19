@@ -590,6 +590,45 @@ def low_confidence_limit(th: dict, blank: bool) -> int:
     return th["max_low_confidence_steps"] + (BUSY_EXTRA_LOOKS if blank else 0)
 
 
+def keep_undecided(loading: bool, held_ms: int, navigation_timeout_ms: int, waits: int) -> bool:
+    """Is an undecided streak that has used up its looks (`low_confidence_limit`) to go on instead of ending the run
+    `low_confidence`? While the page says it is loading (`loading`: a blank layer over controls, an autocomplete's
+    placeholder row, or an indicator that covers nothing), for no longer than `navigation_timeout_ms` since the
+    streak's first look, and LOADING_WAITS_MAX times at most: the runner then waits without a request
+    (`wait_while_loading`) and Jev decides again on the page as it is. Live, 0.14.0: a list page showed "Loading
+    records…" for some 35 s and offered its "New record" button only with the list; five undecided looks were 27.5 s
+    of waits at settle_ms 2500 (4.4 s at the default 400) and the run ended low_confidence on a page that had said,
+    at every look, that it was not done. An indicator that never goes away is decoration or a hang: after the
+    page's time the ending stands."""
+    return loading and held_ms < navigation_timeout_ms and waits < LOADING_WAITS_MAX
+
+
+def wait_while_loading(page, before: dict | None, indicators: int, wait_ms: int) -> dict:
+    """The wait `keep_undecided` grants: no request, the page looked at every VIA_POLL_MS, ending when it differs
+    from the observation Jev was undecided on (`before`, the whole-page comparison of a WAIT), when the loading
+    indicators counted on that observation are gone (`indicators` > 0: a "Loading…" line far down the page is in
+    no fingerprint), or when `wait_ms` is up.
+    Returns {"ended": "changed" | "indicators_gone" | "navigated" | "timeout", "ms": wall-clock spent}."""
+    t0 = time.perf_counter()
+
+    def spent() -> int:
+        return int((time.perf_counter() - t0) * 1000)
+
+    while True:
+        elapsed = (time.perf_counter() - t0) * 1000
+        if elapsed >= wait_ms:
+            return {"ended": "timeout", "ms": int(elapsed)}
+        page.wait_for_timeout(min(VIA_POLL_MS, wait_ms - elapsed))
+        if before is not None:
+            try:
+                if compare_fingerprint(before, fingerprint(page, before.get("frames"), before.get("deep")), "DONE") is not None:
+                    return {"ended": "changed", "ms": spent()}
+            except Exception:  # noqa: BLE001 - the document navigated: that is a change
+                return {"ended": "navigated", "ms": spent()}
+        if indicators > 0 and loading_indicators(page, (before or {}).get("frames")) == 0:
+            return {"ended": "indicators_gone", "ms": spent()}
+
+
 def loading_indicated(step: dict) -> bool:
     """Does something on the page say it is loading without covering anything (a spinner, an indeterminate progress
     bar, a 'Loading...' line: the step's `loading_indicators`, counted by observe.loading_indicators when the decision
@@ -617,6 +656,8 @@ def deferral_limit(th: dict) -> int:
     marginal decision typed the first name into the sidebar's filter, or left the Assign form for the Leave List tab,
     while the loader was still up."""
     return th["max_low_confidence_steps"] + BUSY_EXTRA_LOOKS
+LOADING_WAITS_MAX = 3  # how many times an undecided streak on a page that says it is loading waits for it without a request (keep_undecided)
+LOADING_WAIT_RESERVE_MS = 2000  # ... and how much of the run's max_seconds that wait leaves for the look after it
 VIA_PATIENCE_SETTLES = 4  # the via action's page gets settle_ms x this to answer before it counts as having changed nothing
 VIA_QUIET_TRIES = 3  # how many times a run waits for a loading page before using the control under test; then it is used anyway
 VIA_POLL_MS = 200  # ... looked at again this often meanwhile; while it says it is loading, for as long as a navigation may take
@@ -1295,6 +1336,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     wait_streak, last_wait_sig = 0, None  # lever F4: consecutive Jev WAITs on the same page signature
     after_no_effect = False  # the last executed action changed nothing: the next step shows that page (a key picture)
     low_streak, last_low_sig = 0, None  # consecutive undecided (low-confidence) steps on one page signature
+    low_since, low_waits = None, 0  # when that streak began; how often it has waited for a page that said it was loading
     defer_streak, last_defer_sig = 0, None  # consecutive deferrals of a marginal action on one page signature under a blank layer
     hold_since, hold_n = None, 0  # when a non-pass outcome was first held because the page said it was loading; holds since
     # The control under test (spec `via`). Once its action has been executed: the page as it was before (via_view), and
@@ -2407,6 +2449,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     # still visibly running and Jev split WAIT against DONE at 0.47 / 0.46.
                     low_streak = low_streak + 1 if sig == last_low_sig else 1
                     last_low_sig = sig
+                    if low_streak == 1:
+                        low_since, low_waits = time.perf_counter(), 0
                     stale_streak = 0  # a refused decision is not a stale one: `max_stale` counts consecutive stale steps
                     step["low_streak"] = low_streak
                     if not page_loading(obs):
@@ -2415,11 +2459,31 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                         found = loading_indicators(page, obs["fingerprint"].get("frames"))
                         if found:
                             step["loading_indicators"] = found
-                    if low_streak >= low_confidence_limit(th, page_loading(obs) or loading_indicated(step)):
+                    says_loading = page_loading(obs) or loading_indicated(step)
+                    if low_streak >= low_confidence_limit(th, says_loading):
                         if not moved_since(page, obs.get("fingerprint")):
                             if via_dead():
                                 end_via(page, step, f"nothing: undecided {low_streak} times on the unchanged page")
                                 break
+                            # The looks are used up and the page still says it is loading: it gets the rest of the time
+                            # a navigation may take, counted from the streak's first look and waited without a
+                            # request, and Jev then decides on the page as it is (keep_undecided).
+                            held_ms = int((time.perf_counter() - low_since) * 1000)
+                            nav_ms = spec["browser"]["navigation_timeout_ms"]
+                            # (never into the last LOADING_WAIT_RESERVE_MS of the run's own time: the look after the wait
+                            # has to fit, because an undecided ending says more than a spent budget)
+                            budget_ms = int((budget["max_seconds"] - (time.perf_counter() - t_start)) * 1000) - LOADING_WAIT_RESERVE_MS
+                            if keep_undecided(says_loading, held_ms, min(nav_ms, held_ms + budget_ms), low_waits):
+                                low_waits += 1
+                                waited = wait_while_loading(page, obs.get("fingerprint"), step.get("loading_indicators", 0),
+                                                            min(nav_ms - held_ms, budget_ms))
+                                step["undecided_wait"] = {**waited, "held_ms": held_ms, "looks": low_streak,
+                                                          "why": (f"{step['loading_indicators']} loading indicator(s)" if step.get("loading_indicators")
+                                                                  else "controls under a blank layer, or a list still loading")}
+                                park(step, f"low confidence; {operation} not executed; the page still said it was loading and was waited for",
+                                     wait_entry(n, "WAIT", "undecided between the offered options; the page was still loading and was given time to finish"),
+                                     sig, pause=False)
+                                continue
                             ask_reason(step, state)
                             finish(page, step, "low_confidence", dict(STOP))
                             break

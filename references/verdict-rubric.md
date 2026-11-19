@@ -151,7 +151,11 @@ When you are handed a run folder (`result.json`, `trace.json`, screenshots) the 
    `NEW-TAB(not followed)` (the action opened a tab).
    The outcome's flags: `DEFERRED:<outcome>` (true of the page, but its `requires_action` / `after` condition has not
    happened yet: not counted), `HELD:<outcome>` (a non-pass outcome seen while the page showed a loading indicator:
-   not the ending yet; the runner waited and looked again, at most `navigation_timeout_ms` in all), `VIA` (the
+   not the ending yet; the runner waited and looked again, at most `navigation_timeout_ms` in all), `LOADING-WAIT:<s>`
+   (Jev was undecided, the looks were used up and the page still said it was loading: the runner waited that long
+   for it, with no request, and Jev decided again; a run that ends `low_confidence` after one that ran its full
+   time sat on a page that loaded for longer than `navigation_timeout_ms`, which is the application's or the
+   host's doing: `flaky` or `environment` before `test_issue`), `VIA` (the
    control the spec's `via` names was used on this step), `VIA-WAIT` (it was about to be used on a page still
    loading: waited for, then decided again), `VIA-ANSWERED` (the first look on which the page differs from the one
    the control was used on) / `VIA-NO-EFFECT` (a look on which nothing but the control itself has changed; a run

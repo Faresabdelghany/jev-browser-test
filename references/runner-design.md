@@ -216,6 +216,35 @@ about half a second off a three-field checkout form, nothing off the two forms w
 at the suggestion list, and the extra questions cost about 9% more input tokens there). It stays opt-in for that
 reason: the saving is one request per plain extra field, and a first run should not pay for questions it cannot use.
 
+## Undecided on a page that says it is loading (0.14.1)
+
+An undecided decision is never executed, and a streak of them on one page ends the run `low_confidence`: three
+looks, five while the page says it is loading (`low_confidence_limit`), each a wait of `settle_ms` x 1, 2, 4, 4.
+That is 4.4 s of waiting at the default `settle_ms` of 400 and 27.5 s at 2500, and a page may load for longer: a
+list page of the application of 0.13.1 showed "Loading records…" for some 35 s and offered its "New record" button
+only with the list, Jev (rightly) chose nothing at 0.23 to 0.37 on a page without the button, and the run ended
+`low_confidence` on a page that had said at every one of the five looks that it was not done.
+
+`keep_undecided` is the same rule the confirmation looks (`can_recheck`) and a held outcome (`hold_outcome`)
+already follow: a page that says it is on its way has as long as a page may take to arrive,
+`browser.navigation_timeout_ms`, counted here from the streak's first look. What differs is how the time is
+spent. The looks are used up, so asking Jev again every few seconds would only buy the same answer: the runner
+waits by itself (`wait_while_loading`, a poll every 200 ms, no request, one step in the trace with
+`undecided_wait`), until the page differs from the observation Jev was undecided on, until the indicators counted
+on that observation are gone (a "Loading…" line far down the page is in no fingerprint), or until the time is up.
+Then Jev decides on the page as it is: a changed page starts a new streak, an unchanged one that no longer says
+it is loading ends at once, and one that still does when its time is up ends too. Three such waits at most on one
+page (`LOADING_WAITS_MAX`: a page that flickers without settling), and never into the last 2 s of the run's
+`max_seconds` (`LOADING_WAIT_RESERVE_MS`): the look after the wait has to fit, because `low_confidence` says more
+than `budget_exhausted`.
+
+What it costs: nothing in a run that is not undecided at the bound on a loading page, which no example is. A run
+that would have ended `low_confidence` on such a page either goes on (the gain) or ends the same way up to
+`navigation_timeout_ms` later, with one request more. An indicator that is decoration and never goes away buys a
+failing run that delay and nothing else. Not covered: a page that loads for longer than the looks last and shows
+nothing the runner reads as loading (no blank layer, no indicator); that one still wants a `setup` `wait_for`.
+Capabilities selftest U; unit tests `UndecidedWhileLoadingTests`.
+
 ## The control under test (0.14.0)
 
 Jev is asked to reach a goal, and it does: by whatever route the page leaves open. That is the point of a
@@ -546,10 +575,11 @@ selftest `covered_check`). So do undecided decisions on a page with a **loading 
 skeleton, a short 'Loading...' / 'Wait for it...' line: `observe.INDICATORS_JS`, a script of its own that the loop
 runs only when a decision came back undecided, because walking a 5,000-node page's text costs some 20 ms that an
 ordinary step should not pay; the count lands on the step as `loading_indicators`, `run_test.loading_indicated`),
-and that is all such an indicator does: it is not `page_busy`, defers nothing and extends no confirmation, because
-an indicator can be decoration that never goes away, and those waits run for as long as `navigation_timeout_ms`
-(capabilities selftest G; live, `dynamic-controls` ended `low_confidence` after three looks in 6.8 s beside a
-'Wait for it...' bar). The other way a page is visibly on its way is an autocomplete whose list holds only a
+and that is all such an indicator does for an action or a pass: it is not `page_busy`, defers nothing and extends
+no confirmation, because an indicator can be decoration that never goes away, and those waits run for as long as
+`navigation_timeout_ms` (capabilities selftest G; live, `dynamic-controls` ended `low_confidence` after three looks
+in 6.8 s beside a 'Wait for it...' bar). Since 0.14.1 the looks are not the end of it either: see "Undecided on a
+page that says it is loading" below. The other way a page is visibly on its way is an autocomplete whose list holds only a
 loading row ('Searching....', 'Loading...', `LOADING_OPTION` in the observer): the row is not offered, counted as
 `loading_options` (in the fingerprint too, so a wait ends when the suggestions replace it), the settle's options wait
 does not take it for the suggestions, and `page_loading` treats it like a blank layer for the deferral and the
