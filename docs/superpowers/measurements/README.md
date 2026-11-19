@@ -1442,9 +1442,9 @@ one control under test; each got `via` naming it, and the three search specs' `a
 | switch a tab | pass 3 | pass 3 | 14.2 s -> 38.9 s | 33 to 34 s |
 | remove a filter | pass 2, `low_confidence` 1 | pass 3 | 33.6 s -> 39.2 s | 3 to 31 s |
 
-On the dead search the ending came two ways: twice Jev chose the menu link (0.5 or more) and the run ended on that
-decision; once it stayed undecided three times on the unchanged page (0.36, 0.35, 0.46 for the same link) and the
-run ended there. `waited_ms` 18.6 to 18.7 s: 10 s of patience (`settle_ms` 2500 x 4), then the looks.
+On the dead search the ending came two ways. In every run Jev's next choice was the menu link, undecided at
+first (0.23 to 0.48). Twice the third or fourth look reached the gate (0.50, 0.56) and the run ended on that
+decision; once it stayed below it three times (0.32, 0.38, 0.48) and the run ended there. `waited_ms` 18.6 to 18.7 s: 10 s of patience (`settle_ms` 2500 x 4), then the looks.
 
 The wait is the application's: after sign-in its start page makes 63 API requests over about 34 s, 38 of them only
 after the previous one has finished, 46.6 s of request time in all (measured with a plain browser script, twice).
@@ -1464,7 +1464,7 @@ one suite each (public: 2 workers; OrangeHRM: 1), 3 repeats. Slim results: `expe
 | median run | 3.0 to 9.4 s public | 3.3 to 9.3 s |
 | `shop-checkout-error-account` (Finish does nothing) x 3 | the example: undetermined, `blocked`, suggested `bug` | `via_no_effect` (bug) 3 of 3 |
 
-In the 45 runs of a working control the page was seen to answer it 42 times (`VIA-ANSWERED`, usually within 30 ms);
+In the 45 runs of a working control the page was seen to answer it 42 times (`VIA-ANSWERED`: at the first look in 39, 3 to 36 ms after the action settled; about 1.1 s later in 3);
 3 were not judged (modal-close: the Close control sits in a dialog whose layer reads as blank). 10 steps waited for a
 page at rest (`VIA-WAIT`).
 
