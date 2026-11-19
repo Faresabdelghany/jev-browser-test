@@ -43,6 +43,12 @@ OUTCOME_NONE = "none_yet"  # the outcome Choice's "nothing listed is visible yet
 # label contains "Search" (case-insensitive); "type" -> TYPE_TEXT, "select" -> SELECT; several keys all have to hold
 AFTER_OPERATIONS = {"click": "CLICK", "type": "TYPE_TEXT", "select": "SELECT"}
 UNDETERMINED = "undetermined"  # result.outcome when the run ended in no declared outcome
+# `via`: the control under test. {"type": "Search"} (one of AFTER_OPERATIONS, matched as `after` matches) says the pass
+# has to come through that action and that the action has to change the page. A run that moves on, gives up or says
+# DONE while the action has changed nothing but the control's own value ends in the outcome VIA_OUTCOME, decided in code
+# (the page before against the page after), with `via.verdict` (default "bug") and `via.note`.
+VIA_OUTCOME = "via_no_effect"
+VIA_VERDICTS = ("bug", "test_issue", "needs_human")
 VERDICTS = ("pass", "bug", "test_issue", "needs_human")
 # every status a run can end in (run_test.TERMINAL_STATUSES has the meanings); `expect.status` is validated against it
 STATUSES = ("passed", "outcome", "assert_failed", "done_unverified", "blocked", "never_violated", "stuck", "low_confidence",
@@ -274,6 +280,9 @@ DEFAULTS = {
     # expectations checked in code on the final page. See references/spec-format.md. When `outcomes` is
     # empty the runner synthesizes them from done_when / never (see effective_outcomes below).
     "outcomes": {},
+    # The control under test, e.g. {"type": "Search"}: the pass has to come through that action, and a run that goes on
+    # another way after the action changed nothing ends in the outcome via_no_effect (see VIA_OUTCOME). null: off.
+    "via": None,
     "assert": [],
     "auto_done": True,
     "fail_fast": True,
@@ -548,6 +557,7 @@ def validate(spec: dict) -> list[str]:
                                       and all(isinstance(v, str) and v.strip() for v in after.values())):
             errors.append(f"outcome '{name}': 'after' must be an object with some of {sorted(AFTER_OPERATIONS)} naming the "
                           f"control an executed action must have targeted, e.g. {{\"click\": \"Search\"}}")
+    errors.extend(via_problems(spec.get("via"), outcomes))
     has_pass_outcome = any(isinstance(o, dict) and o.get("verdict") == "pass" for o in outcomes.values())
     if outcomes and not has_pass_outcome:
         errors.append("'outcomes' must declare an outcome with verdict \"pass\" (done_when / never are shorthand for "
@@ -712,10 +722,37 @@ def validate(spec: dict) -> list[str]:
                     errors.append(f"'expect.{k}' must be a string")
             if isinstance(expect.get("status"), str) and expect["status"] not in STATUSES:
                 errors.append(f"'expect.status' must be one of {list(STATUSES)}")
-            declared = set(outcomes) | {UNDETERMINED} if outcomes else None
+            declared = set(outcomes) | {UNDETERMINED} | ({VIA_OUTCOME} if spec.get("via") else set()) if outcomes else None
             if declared is not None and isinstance(expect.get("outcome"), str) and expect["outcome"] not in declared:
                 errors.append(f"'expect.outcome' must be a declared outcome or '{UNDETERMINED}', got '{expect['outcome']}'")
     return errors
+
+
+def via_problems(via, outcomes: dict) -> list[str]:
+    """What is wrong with a spec's `via` (nothing when it is absent or null)."""
+    if via is None:
+        return []
+    example = '{"type": "Search"}'
+    if not isinstance(via, dict):
+        return [f"'via' must be an object naming the action under test, e.g. {example}"]
+    errors = []
+    named = [k for k in via if k in AFTER_OPERATIONS]
+    if len(named) != 1 or not isinstance(via[named[0]], str) or not via[named[0]].strip():
+        errors.append(f"'via' needs exactly one of {sorted(AFTER_OPERATIONS)} with the name of the control the action targets, "
+                      f"e.g. {example}")
+    if "verdict" in via and via["verdict"] not in VIA_VERDICTS:
+        errors.append(f"'via.verdict' must be one of {list(VIA_VERDICTS)} (what a control that changes nothing means; default \"bug\")")
+    if "note" in via and not isinstance(via["note"], str):
+        errors.append("'via.note' must be a string")
+    if VIA_OUTCOME in outcomes:
+        errors.append(f"outcome name '{VIA_OUTCOME}' is the ending 'via' decides; give the declared outcome another name")
+    return errors
+
+
+def via_action(via: dict) -> tuple[str, str]:
+    """A valid `via` as (operation, the text the target's label has to contain): {"type": "Search"} -> ("TYPE_TEXT", "Search")."""
+    key = next(k for k in via if k in AFTER_OPERATIONS)
+    return AFTER_OPERATIONS[key], via[key]
 
 
 def match_expect(result: dict, expect: dict) -> dict:
@@ -752,6 +789,18 @@ def spec_warnings(spec: dict) -> list[str]:
                          f"the state Jev sees and in the trace, so a value this short also rewrites unrelated page text "
                          f"(a year, a menu entry) as <secret> and can change what Jev decides on; use a longer test "
                          f"credential, or drop '{key}' from 'secrets' if it is not confidential")
+    # `after` and `via` name the control an action targeted, by its label. The text that was typed is not in that label,
+    # so an `after: {"type": <the value typed>}` never holds and the outcome it guards can never be seen. Live: three
+    # search specs carried `after: {"type": "Harbour"}` on their bug outcomes for a field labelled "Search properties".
+    typed = {v.strip().lower() for v in data.values() if isinstance(v, str) and len(v.strip()) >= 3}
+    named = [(f"outcome '{name}': 'after.type'", (o.get("after") or {}).get("type")) for name, o in (spec.get("outcomes") or {}).items()
+             if isinstance(o, dict) and isinstance(o.get("after"), dict)]
+    if isinstance(spec.get("via"), dict):
+        named.append(("'via.type'", spec["via"].get("type")))
+    for where, text in named:
+        if isinstance(text, str) and text.strip().lower() in typed:
+            notes.append(f"{where} is \"{text}\", which is a value in 'data': it has to name the field the text is typed into "
+                         f"(its label or placeholder, e.g. \"Search\"), not the text; as written it never matches")
     return notes
 
 
@@ -871,6 +920,10 @@ def main(argv: list[str]) -> int:
                                     for k, v in eff.items()))
     if spec["outcomes"] and (spec["done_when"] or spec["never"]):
         print("  note: done_when / never are ignored by the runner when outcomes are declared")
+    if spec.get("via"):
+        op, text = via_action(spec["via"])
+        print(f"  via: {op} on a control named '{text}'; a pass counts only after it changed the page, and a run that goes on "
+              f"another way while it has changed nothing ends {VIA_OUTCOME} -> {spec['via'].get('verdict', 'bug')}")
     if spec["assert"]:
         print(f"  assert: {len(spec['assert'])} assertion(s) on the final page")
     print(f"  data keys: {list(spec['data'])}  secrets: {spec['secrets']}")

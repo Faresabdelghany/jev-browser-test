@@ -2,6 +2,7 @@
 
     python scripts/scaffold.py --url URL --goal "..." [--data key=value ...] [--out specs/<id>.json]
         [--id ID] [--secret key ...] [--pass "when"] [--bug "[name=]when" ...] [--needs-human "[name=]when" ...] [--after "click:text"]
+        [--via "type:Search"]
         [--assert-url GLOB] [--assert-text TEXT ...] [--assert-in "css|text" ...]
         [--setup "fill:css=value" | "click:css" | "press:css=Key" | "select:css=value" | "wait_for:css" | "wait_for_url:glob" | "goto:url" ...]
         [--notes "..."] [--comment "..."] [--slow] [--stdout] [--force]
@@ -9,7 +10,8 @@
 The result is a spec that validates as the runner loads it (`spec.py` is run on it before it is written): the goal,
 the data, a `pass` outcome (the goal's "so that ..." clause, or `--pass`), one `bug` outcome per `--bug` (with
 `requires_action`, since a wrong message is never on the start page; `name=when` names it, else its first words do;
-`--after click:Text` holds every bug outcome until that action ran), the standing `app_error` bug outcome, the
+`--after click:Text` holds every bug outcome until that action ran; `--via type:Search` names the control under
+test, see spec-format.md), the standing `app_error` bug outcome, the
 assertions and setup steps given, and only the non-default settings. Nothing is invented: no assertion is emitted
 unless one was given (a trivial one would confirm a pass at first sighting), and a `${ENV}` that is not set yet is
 kept as written and resolved at run time. Keys that look like credentials (password, secret, token, pin) are listed
@@ -84,13 +86,14 @@ def named(text: str) -> tuple[str | None, str]:
     return None, text.strip()
 
 
-def parse_after(text: str | None) -> dict | None:
-    """`--after click:Create account` -> {"click": "Create account"}: the action a bug outcome only means something after."""
+def parse_after(text: str | None, flag: str = "--after") -> dict | None:
+    """`--after click:Create account` -> {"click": "Create account"}: the action a bug outcome only means something after.
+    `--via type:Search` is written the same way."""
     if text is None:
         return None
     op, sep, value = text.partition(":")
     if not sep or op.strip() not in AFTER_OPS or not value.strip():
-        raise ScaffoldError(f"--after wants op:text with op one of {', '.join(AFTER_OPS)}, e.g. 'click:Create account'; got {text!r}")
+        raise ScaffoldError(f"{flag} wants op:text with op one of {', '.join(AFTER_OPS)}, e.g. 'click:Create account'; got {text!r}")
     return {op.strip(): value.strip()}
 
 
@@ -216,6 +219,9 @@ def build(args: argparse.Namespace) -> dict:
         add(raw, {"verdict": "needs_human"})
     outcomes["app_error"] = dict(APP_ERROR)
     spec["outcomes"] = outcomes
+    via = parse_after(getattr(args, "via", None), "--via")
+    if via:
+        spec["via"] = via  # the control under test: the pass comes through it, and it has to change the page
     assertions: list[dict] = []
     if args.assert_url:
         assertions.append({"url_matches": args.assert_url})
@@ -277,6 +283,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--needs-human", action="append", default=[], metavar="[NAME=]WHEN", help="an ending only a human can take further (repeatable)")
     ap.add_argument("--after", metavar="OP:TEXT",
                     help="hold every --bug outcome until this action ran (click:Create account, type:..., select:...): a wrong message only counts after the decisive click")
+    ap.add_argument("--via", metavar="OP:TEXT",
+                    help="the control under test (type:Search, click:Export, select:Sort): the pass has to come through that action, and a "
+                         "run that goes on another way after the action changed nothing on the page ends as the bug via_no_effect")
     ap.add_argument("--assert-url", metavar="GLOB", help="url_matches on the final page (** any, * no slash)")
     ap.add_argument("--assert-text", action="append", default=[], metavar="TEXT", help="text_contains on the final page (repeatable)")
     ap.add_argument("--assert-in", action="append", default=[], metavar="CSS|TEXT", help="text_in: the text inside a CSS-selected element (repeatable)")

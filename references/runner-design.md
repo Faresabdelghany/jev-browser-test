@@ -216,6 +216,45 @@ about half a second off a three-field checkout form, nothing off the two forms w
 at the suggestion list, and the extra questions cost about 9% more input tokens there). It stays opt-in for that
 reason: the saving is one request per plain extra field, and a first run should not pay for questions it cannot use.
 
+## The control under test (0.14.0)
+
+Jev is asked to reach a goal, and it does: by whatever route the page leaves open. That is the point of a
+goal-driven test and also its blind spot. On the application of 0.13.1 "use the Search to find the supplier and open
+it" passed three runs of three with a search box that did nothing, through the menu. Asking Jev whether the search
+had failed did not help: the outcome "the query is in the Search field and the page shows no results for it" read
+0.33 against `none_yet` at 0.54, run after run. A dead control leaves a page on which nothing happened, and a model
+reading that page has nothing to read.
+
+So the question is not put to the model. `via` names the action, and the runner answers in code:
+
+- `policy.via_view`: the page as a tuple of URL, title, element-table rows and whitespace-collapsed text, without
+  the rows of the control the action wrote into and without the typed value. Taken from the observation the action
+  was decided on; every later observation is compared with it (`via_difference`) until one differs. A toast counts.
+- `leaves_via`: WAIT, PRESS_ENTER and the via action again stay; a scroll ends the comparison without a verdict (it
+  changes the viewport-first table by itself); anything else, and DONE, BLOCKED, `stuck` and `low_confidence`, is
+  the ending `via_no_effect` while the views are still equal.
+- The baseline has to be a page at rest, or the first thing that changes is whatever was loading. Live, the query was
+  typed 8 s into a 37 s list fetch. A `NetWatch` is therefore attached for every spec with `via` (the settle still
+  uses it only with `settle: "network"`), and the via action waits for no request in flight and no loading
+  indicator, three times at most and `navigation_timeout_ms` in all. The wait is triggered only by what it can
+  itself watch: a blank layer is read off an observation, and a dialog whose close control is not a button reads as
+  one for as long as it is open (the first measurement spent a modal example's whole budget waiting for the dialog
+  the run was about to close). If the page is still loading, or under such a layer, when the action is executed,
+  nothing is concluded.
+- The outcome is not in `effective_outcomes`: it has no `when`, Jev is never asked about it, and the outcome Choice
+  is what it was. A spec without `via` sends the same questions as before.
+
+The comparison errs toward "it answered": a clock, a carousel, a clear button appearing in the field all count as a
+change, and the run then goes on as it would have without `via`. A false `via_no_effect` needs an action whose
+whole effect is invisible to the table and the text.
+
+Measured (2026-11-19, dev-docs `measurements/`, section "0.14.0"): the dead search box ends `via_no_effect` in 3
+runs of 3 where it passed 3 of 3; six flows of the same application whose control works pass 18 of 18; 15 public
+examples end the same with and without `via` (90 runs); Sauce Demo's error account, whose Finish button does
+nothing, ends `via_no_effect` 3 of 3 instead of `blocked` with a suggestion. The cost is the wait for a page at
+rest, which is the application's own loading time: none on the examples, 14 to 34 s a run on an application that
+keeps fetching for half a minute.
+
 ## An application the examples had not seen (0.13.1)
 
 Eleven read-only specs written from one look at a server-rendered operations app (2026-11-18), first run: six

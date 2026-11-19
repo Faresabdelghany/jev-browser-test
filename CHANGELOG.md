@@ -3,6 +3,67 @@
 Notable changes to the jev-browser-test skill. Versions follow [semantic versioning](https://semver.org); the version
 is the one in `.claude-plugin/plugin.json`, and merging a new one to `main` tags and releases it.
 
+## [0.14.0] - 2026-11-19
+
+**`via`: the control under test.** A goal is reached by whatever route is open. On the application of 0.13.1 a spec
+written to test the sidebar's search box passed three runs of three while the search box did nothing: Jev typed
+the query, saw no hits and opened the record through the menu. The bug outcome written for it read 0.33, because
+a page on which nothing happened has nothing on it to read. `via` decides it in code.
+
+### Added
+- **`"via": {"type": "Search"}`** (`click`, `select`; optional `verdict`, `note`; off unless the spec has it;
+  `scaffold.py --via type:Search`). Two rules follow from it.
+  - *The pass comes through that action.* A pass outcome seen before the action was executed is deferred; a run
+    that reaches the end state without the control ends `done_unverified`, with `result.via.executed_at_step: null`.
+  - *The action has to change the page.* The runner keeps the page the control was used on and compares each later
+    look with it: URL, title, the rows of the element table, the visible text, any toast or live message. What the
+    action itself wrote is left out (the row of the field typed into, the typed text). While nothing else has
+    changed, a run that turns to another control, says DONE or BLOCKED, repeats the action to no effect or stays
+    undecided ends in the outcome **`via_no_effect`**: verdict `bug` unless `via.verdict` says `needs_human` or
+    `test_issue`, no evidence line (it was decided in code), `result.via` with the step, the control, how long the
+    page was given and what the run wanted to do instead.
+- **Time, on both sides of the action.** The control is not used while the page is still loading (requests in
+  flight, a loading indicator): the runner waits without a request, at most three times and
+  `navigation_timeout_ms` in all, and Jev decides again (`VIA-WAIT`). Otherwise a list that was on its way anyway
+  would count as the search box answering. After the action the page has `settle_ms` × 4, and for as long as a
+  request the action started is in flight or the page says it is loading, up to `navigation_timeout_ms`.
+- **No conclusion where there is none.** A scroll between the action and the answer, or a page still loading when
+  the control was used, ends the comparison (`via.not_judged`); the run is then judged as it would be without `via`.
+- Step flags `VIA`, `VIA-WAIT`, `VIA-ANSWERED`, `VIA-NO-EFFECT`; a `via (...)` line in the summary.
+- **`spec.py` warns when `after.type` or `via.type` is one of the spec's `data` values.** Both name the field, by
+  its label; the text typed into it matches no control, and the outcome it guards can then never be seen. Three of
+  the specs written for 0.13.1 had exactly that (`"after": {"type": "Harbour"}` for a field labelled "Search
+  properties"), so their "the search was ignored" bug outcomes could not fire.
+
+### Limits
+- `via` finds a control that does **nothing**. One that answers wrongly ("No results" for a name that exists) has
+  changed the page, and stays a worded `bug` outcome.
+- Name the action the page answers: with a Search field and a Search button, the button. A field that does nothing
+  until its button is clicked reads as dead.
+- The comparison sees text and controls. A chart redrawn on a canvas, or a refresh that shows the same rows, is no
+  change to it. Anything else that changes counts as an answer, a clear button appearing in the field included.
+
+### Measured (2026-11-19, raw numbers on `dev-docs`, `measurements/README.md`, section "0.14.0")
+
+| | without `via` | with `via` |
+|---|---|---|
+| The application of 0.13.1, sidebar search that does nothing, 3 runs | pass 3 of 3 | `via_no_effect` (bug) 3 of 3 |
+| The same application, six flows whose control works, 3 runs each | pass 17 of 18 (one stalled) | pass 18 of 18 |
+| 13 public examples, 3 runs each | 37 pass, 2 the page's own random failure | 37 pass, 2 the page's own random failure |
+| 2 OrangeHRM examples, 3 runs each | pass 6 of 6 | pass 6 of 6 |
+| Sauce Demo's error account, whose Finish button does nothing, 3 runs | undetermined, `blocked`, suggestion `bug` (the example as it stands) | `via_no_effect` (bug) 3 of 3 |
+
+No example ended differently with `via` than without it, and the page was seen to answer the control in 59 of the
+63 runs in which it works (the other four were not judged: a control used under a dialog's layer, three times, and
+on a page still loading, once). What it costs is the wait for a page at rest: nothing on the public examples
+(median run 3 to 9 s either way), 14 to 34 s a run on the application whose pages keep fetching for half a
+minute after they are usable (median run 39 to 45 s, from 8 to 34 s).
+
+The first measurement found a bug in this change before it was a release: the wait for a page at rest was
+triggered by a blank layer, which the wait itself cannot watch, and a modal example spent its whole budget waiting
+for the dialog it was about to close (0 of 3). The wait is now triggered only by requests in flight and loading
+indicators, three times at most; the numbers above are from the code as released.
+
 ## [0.13.1] - 2026-11-18
 
 What the first run against an application the examples had never been tuned on turned up: eleven read-only specs

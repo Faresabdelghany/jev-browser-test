@@ -4175,5 +4175,127 @@ class _FixedRand:
         return self.chars.pop(0)
 
 
+class ViaTests(unittest.TestCase):
+    """`via` (0.14.0): the control under test. Live, a goal-driven run passed 3 of 3 although the search box it was
+    written to test did nothing: Jev typed the query, saw no hits and reached the record through the menu. `via` names
+    the action the pass has to come through, and the runner compares the page before it with the page after it."""
+
+    def problems(self, via, **more) -> list[str]:
+        from spec import validate
+        spec = _merge(SPEC, {"outcomes": {"ok": {"when": "The page says done", "verdict": "pass"}}, "via": via, **more})
+        return [p for p in validate(spec) if "via" in p]
+
+    def test_via_names_exactly_one_action_and_may_say_what_a_dead_control_means(self) -> None:
+        from spec import DEFAULTS as D
+        self.assertIsNone(D["via"])  # off unless the spec says so
+        for good in ({"type": "Search"}, {"click": "Export"}, {"select": "Sort"}, {"type": "Search", "verdict": "needs_human", "note": "n"}, None):
+            self.assertEqual(self.problems(good), [], good)
+        for bad in ("Search", {}, {"type": ""}, {"type": 3}, {"hover": "Menu"}, {"type": "Search", "click": "Go"},
+                    {"type": "Search", "verdict": "pass"}, {"type": "Search", "note": 3}, ["type", "Search"]):
+            self.assertTrue(self.problems(bad), bad)
+
+    def test_the_ending_via_decides_has_a_name_of_its_own(self) -> None:
+        from spec import VIA_OUTCOME, validate
+        taken = {"outcomes": {"ok": {"when": "The page says done", "verdict": "pass"},
+                              VIA_OUTCOME: {"when": "The search shows nothing at all", "verdict": "bug"}}}
+        self.assertTrue(self.problems({"type": "Search"}, **taken))
+        self.assertEqual([p for p in validate(_merge(SPEC, taken)) if "via" in p], [])  # without `via` the name is free
+        expecting = {"expect": {"outcome": VIA_OUTCOME}}  # a documented dead control, kept as an expected-red spec
+        self.assertEqual([p for p in validate(_merge(SPEC, {"outcomes": taken["outcomes"] | {}, "via": None, **expecting}))
+                          if "expect" in p], [])
+        ok = _merge(SPEC, {"outcomes": {"ok": {"when": "The page says done", "verdict": "pass"}}, "via": {"type": "Search"}, **expecting})
+        self.assertEqual([p for p in validate(ok) if "expect" in p], [])
+        ok["via"] = None
+        self.assertTrue([p for p in validate(ok) if "expect" in p])
+
+    def test_which_action_is_the_via_action_and_which_decisions_leave_it(self) -> None:
+        from policy import is_via_action, leaves_via
+        via = {"type": "Search", "verdict": "bug"}
+        self.assertTrue(is_via_action(via, "TYPE_TEXT", '[3] textbox "Search"'))
+        self.assertTrue(is_via_action(via, "TYPE_TEXT", '[3] searchbox "search suppliers"'))  # contained, case-insensitive
+        self.assertFalse(is_via_action(via, "CLICK", '[9] button "Search"'))  # another operation
+        self.assertFalse(is_via_action(via, "TYPE_TEXT", '[4] textbox "Name"'))
+        self.assertFalse(is_via_action(via, "TYPE_TEXT", None))
+        self.assertFalse(is_via_action(None, "TYPE_TEXT", '[3] textbox "Search"'))
+        for stays in (("WAIT", None), ("PRESS_ENTER", None), ("TYPE_TEXT", '[3] textbox "Search"'), ("SCROLL_DOWN", None)):
+            self.assertFalse(leaves_via(via, *stays), stays)
+        for leaves in (("CLICK", '[22] link "Suppliers"'), ("DONE", None), ("BLOCKED", None), ("TYPE_TEXT", '[4] textbox "Name"'),
+                       ("CLICK", '[9] button "Search"')):
+            self.assertTrue(leaves_via(via, *leaves), leaves)
+
+    def test_what_the_action_wrote_is_not_the_page_answering_it(self) -> None:
+        from policy import via_difference, via_view
+        def page(value: str = "", hits: list[str] = (), text: str = "Welcome back") -> dict:
+            els = [_el(0, "link", "All suppliers"), _el(1, "textbox", "Search", value=value)] + [_el(2 + i, "button", h) for i, h in enumerate(hits)]
+            return {**_obs(els, url="https://app.example/home", title="Suppliers"), "visible_text": text}
+        wrote = {"role": "textbox", "name": "Search", "value": "Northwind"}
+        before = via_view(page(), wrote)
+        self.assertEqual(via_difference(before, via_view(page("Northwind"), wrote)), [])  # only the box holds the query
+        self.assertEqual(via_difference(before, via_view(page("Northwind", text="Welcome  back\nNorthwind"), wrote)), [])  # a contenteditable shows it as text
+        self.assertEqual(via_difference(before, via_view(page("Northwind", hits=["Hit: Northwind Recycling"]), wrote)), ["controls"])
+        self.assertEqual(via_difference(before, via_view(page("Northwind", text="No results for your search"), wrote)), ["text"])
+        moved = {**page("Northwind"), "url": "https://app.example/search?q=Northwind"}
+        self.assertEqual(via_difference(before, via_view(moved, wrote)), ["url"])
+        # a click wrote nothing: the clicked control's own row counts (a checkbox now checked is an answer)
+        box = lambda checked: {**_obs([_el(0, "checkbox", "Show archived", checked=checked)]), "visible_text": "Suppliers"}  # noqa: E731
+        self.assertEqual(via_difference(via_view(box(False)), via_view(box(True))), ["controls"])
+        self.assertEqual(via_difference(via_view(box(False)), via_view(box(False))), [])
+
+    def test_the_summary_says_what_became_of_the_control(self) -> None:
+        from summarize_trace import _flags, _via_lines
+        self.assertIn("VIA", _flags({"n": 2, "via": True}))
+        self.assertIn("VIA-NO-EFFECT", _flags({"n": 3, "via_no_effect": {"since_step": 2, "waited_ms": 1600}}))
+        self.assertIn("VIA-ANSWERED", _flags({"n": 3, "via_effect": {"of_step": 2, "changed": ["controls"]}}))
+        self.assertIn("VIA-WAIT", _flags({"n": 1, "via_deferred": {"why": "5 request(s) in flight", "waited_ms": 9000}}))
+        self.assertEqual(_via_lines(None), [])
+        action = {"type": "Search"}
+        self.assertIn("never used", _via_lines({"action": action, "executed_at_step": None, "target": None, "effect": None})[0])
+        dead = _via_lines({"action": action, "executed_at_step": 2, "target": '[3] textbox "Search"', "effect": False, "waited_ms": 1600,
+                           "then": 'CLICK [22] link "Suppliers"'})[0]
+        self.assertIn("NOTHING on the page changed", dead)
+        self.assertIn("Suppliers", dead)
+        self.assertIn("answered at step 3", _via_lines({"action": action, "executed_at_step": 2, "target": "t", "effect": True,
+                                                        "effect_at_step": 3, "changed": ["controls", "text"]})[0])
+        self.assertIn("not judged", _via_lines({"action": action, "executed_at_step": 2, "target": "t", "effect": None,
+                                                "not_judged": "SCROLL_DOWN at step 3 before the page had answered"})[0])
+
+    def test_a_result_carries_the_via_account_and_the_note_of_its_ending(self) -> None:
+        from run_test import build_result
+        from spec import VIA_OUTCOME
+        spec = _merge(SPEC, {"outcomes": {"ok": {"when": "The page says done", "verdict": "pass"}},
+                             "via": {"type": "Search", "note": "the sidebar search is the feature"}})
+        via = {"action": {"type": "Search"}, "executed_at_step": 1, "target": '[3] textbox "Search"', "effect": False, "then": "DONE"}
+        trace = {"status": "outcome", "steps": [{"n": 2, "outcome_seen": VIA_OUTCOME, "executed": {"action": "STOP"}, "checks": {}}],
+                 "duration_ms": 1, "usage": None, "via": via}
+        final = {"outcome": {"name": VIA_OUTCOME, "verdict": "bug", "probability": None, "confidence": None}, "seen_at_step": 2,
+                 "first_seen_at_step": 2, "adjudication": {"line": None, "present": None, "skipped": "decided in code"}}
+        result = build_result(trace, spec, spec["outcomes"], final, "out")
+        self.assertEqual((result["outcome"], result["verdict"], result["note"]), (VIA_OUTCOME, "bug", "the sidebar search is the feature"))
+        self.assertEqual(result["via"], via)
+        self.assertEqual(result["evidence"]["skipped"], "decided in code")
+
+    def test_after_and_via_name_the_field_not_the_text_typed_into_it(self) -> None:
+        from spec import spec_warnings
+        spec = _merge(SPEC, {"data": {"query": "Harbour"}, "via": {"type": "Harbour"},
+                             "outcomes": {"ok": {"when": "The page says done", "verdict": "pass"},
+                                          "ignored": {"when": "The list still shows Mill Lane 18", "verdict": "bug", "after": {"type": "Harbour"}}}})
+        notes = spec_warnings(spec)
+        self.assertEqual(len([n for n in notes if "never matches" in n]), 2, notes)
+        spec["via"] = {"type": "Search"}
+        spec["outcomes"]["ignored"]["after"] = {"type": "Search properties"}
+        self.assertEqual([n for n in spec_warnings(spec) if "never matches" in n], [])
+
+    def test_the_scaffold_writes_via(self) -> None:
+        code, spec, text = ScaffoldTests().run_scaffold(
+            "--url", "https://app.example.com/", "--goal", "Search for the supplier and open it, so that the page shows 'Supplier details'",
+            "--data", "query=Northwind", "--via", "type:Search")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(spec["via"], {"type": "Search"})
+        code, spec, text = ScaffoldTests().run_scaffold(
+            "--url", "https://app.example.com/", "--goal", "Search for the supplier, so that the page shows it", "--via", "Search")
+        self.assertEqual(code, 2)
+        self.assertIn("--via wants op:text", text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
