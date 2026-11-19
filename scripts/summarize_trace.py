@@ -142,6 +142,9 @@ def _flags(step: dict, nxt: dict | None = None) -> str:
         f.append("VIA-ANSWERED")  # the first look on which the page differs from the one the via action was used on
     if step.get("outcome_held"):
         f.append("HELD:" + step["outcome_held"]["outcome"])  # a non-pass outcome read off a page that said it was loading: not the ending yet
+    if step.get("undecided_wait"):
+        # undecided, the looks used up, and the page still said it was loading: waited for without a request, then decided again
+        f.append(f"LOADING-WAIT:{step['undecided_wait'].get('ms', 0) / 1000:.1f}s")
     if step.get("outcome_deferred"):
         f.append("DEFERRED:" + ",".join(step["outcome_deferred"]))  # true of the page, but no action was taken yet (requires_action)
     if step.get("covered_controls"):

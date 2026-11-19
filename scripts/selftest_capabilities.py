@@ -1497,6 +1497,40 @@ def run_checks(tmp: str | None = None) -> list[str]:
     waits = [st["via_deferred"] for st in trace["steps"] if st.get("via_deferred")]
     if trace["result"]["outcome"] != "via_no_effect" or len(waits) != 1 or not 500 <= waits[0]["waited_ms"] < 4000 or "VIA-WAIT" not in flags_of(trace, out):
         failures.append(f"T: the control is not used on a page that is still loading, and is judged once it has been: {trace['result']['outcome']} {waits}")
+
+    # U. undecided on a page that says it is loading for longer than the looks last (0.14.1) ------------------------------
+    # the spinner runs 6 s; five undecided looks at 300 ms x 1, 2, 4, 4 are 3.3 s of waits and used to end the run
+    # low_confidence at about 4 s. Now the fifth look waits for the page without a request, and the sixth sees the result.
+    def waits_of(trace: dict) -> list[dict]:
+        return [st["undecided_wait"] for st in trace["steps"] if st.get("undecided_wait")]
+
+    long_spin = make_spec(base + "/spinner?ms=6000", goal=spin["goal"], budget={"max_steps": 10, "max_seconds": 60})
+    trace, out = go("spinner-long", long_spin, ScriptedJev([], SAVED, undecided_while="Crunching the numbers"))
+    waits = waits_of(trace)
+    if (trace["status"], len(waits)) != ("passed", 1) or waits[0]["ended"] not in ("changed", "indicators_gone") or not 500 <= waits[0]["ms"] < 5000:
+        failures.append(f"U: an undecided streak on a page that says it is loading waits for the page: {trace['status']} {waits} "
+                        f"{[(st['n'], st.get('low_streak')) for st in trace['steps']]}")
+    if len(trace["steps"]) > 7 or "LOADING-WAIT:" not in flags_of(trace, out):
+        failures.append(f"U: the wait costs one step and no request of its own, and the step table flags it: {len(trace['steps'])} steps")
+    # an indicator that never goes away: the page's time is navigation_timeout_ms from the first look, then the ending stands
+    t0 = time.perf_counter()
+    forever = make_spec(base + "/spinner?ms=600000", goal=spin["goal"], budget={"max_steps": 12, "max_seconds": 60}, browser={"navigation_timeout_ms": 5000})
+    trace, out = go("spinner-forever", forever, ScriptedJev([], SAVED, undecided_while="Crunching the numbers"))
+    waits, took = waits_of(trace), time.perf_counter() - t0
+    if (trace["status"], len(waits)) != ("low_confidence", 1) or waits[0]["ended"] != "timeout" or not 4.5 <= took < 12:
+        failures.append(f"U: an indicator that never goes away is waited for no longer than a navigation may take: {trace['status']} {waits} {took:.1f}s")
+    # ... and never to the end of the run's own time: with 8 s of budget the wait leaves room for the look after it,
+    # and the ending is low_confidence as before, not budget_exhausted
+    t0 = time.perf_counter()
+    tight = make_spec(base + "/spinner?ms=600000", goal=spin["goal"], budget={"max_steps": 12, "max_seconds": 8})
+    trace, out = go("spinner-budget", tight, ScriptedJev([], SAVED, undecided_while="Crunching the numbers"))
+    waits, took = waits_of(trace), time.perf_counter() - t0
+    if trace["status"] != "low_confidence" or len(waits) != 1 or took > 9:
+        failures.append(f"U: the wait for a loading page stays inside the run's budget: {trace['status']} {waits} {took:.1f}s")
+    # a page that says nothing about loading keeps the three looks (scenario G, "no-spinner") and is never waited for
+    trace, out = go("no-spinner-again", make_spec(base + "/app", budget={"max_steps": 8, "max_seconds": 30}), ScriptedJev([("undecided",)], SAVED))
+    if trace["status"] != "low_confidence" or len(trace["steps"]) != 3 or waits_of(trace):
+        failures.append(f"U: a page with no indicator is not waited for: {trace['status']} {len(trace['steps'])} steps {waits_of(trace)}")
     return failures
 
 

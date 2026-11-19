@@ -3,6 +3,54 @@
 Notable changes to the jev-browser-test skill. Versions follow [semantic versioning](https://semver.org); the version
 is the one in `.claude-plugin/plugin.json`, and merging a new one to `main` tags and releases it.
 
+## [0.14.1] - 2026-11-19
+
+**An undecided run waits for a page that says it is loading.** The first record-creating spec on the application
+of 0.13.1 ended `low_confidence` before it had done anything: the page showed "Loading records…" for half a
+minute and offered its "New record" button only with the list, Jev chose nothing on a page without the button
+(0.23 to 0.37, which is the right answer), and five undecided looks later the run was over, on a page that had
+said at every look that it was not done.
+
+### Fixed
+- **The undecided looks are not the end of a page that still says it is loading.** When the looks are used up
+  (three, five on a loading page: `settle_ms` × 1, 2, 4, 4, which is 4.4 s at the default `settle_ms` and 27.5 s
+  at `--slow`) and the page still shows a blank layer over its controls, an autocomplete's placeholder row or a
+  loading indicator, the runner waits for it, without a request: until the page changes, until the indicators
+  are gone, and no longer than `browser.navigation_timeout_ms` since the first undecided look. Then Jev decides
+  again on the page as it is. `undecided_wait` on the step (`ended`, `ms`, `held_ms`), `LOADING-WAIT:<s>` in the
+  step table. It is the rule a confirming look and a held outcome already follow (0.13.1), applied to the third
+  place a run gave up on a page that was still arriving.
+- Bounds: three such waits on one page at most; never into the last 2 s of `budget.max_seconds`, so a run that
+  stays undecided still ends `low_confidence` and not `budget_exhausted`; a page that says nothing about loading
+  keeps the plain three looks and is never waited for.
+
+### Limits
+- A run that would have ended `low_confidence` on a page whose indicator never goes away (decoration, or a hang)
+  now ends the same way up to `navigation_timeout_ms` later, with one request more.
+- A page that loads for longer than the looks last and shows nothing the runner reads as loading still wants a
+  `setup` `wait_for`.
+
+### Measured (2026-11-19, raw numbers on `dev-docs`, `measurements/README.md`, section "0.14.1")
+Old runner (0.14.0) against this one with `ab.py --a-runner`, runs interleaved, on the application of 0.13.1: one
+read-only spec that opens the "New record" form, with no `setup` wait.
+
+| | 0.14.0 | 0.14.1 |
+|---|---|---|
+| default `settle_ms` (400), 3 runs each | `low_confidence` 3 of 3, after 9 to 10 s | pass 3 of 3, 32 to 34 s (the wait: 21 to 23 s) |
+| `--slow` (`settle_ms` 2500), 8 runs each | pass 5 of 8, `low_confidence` 3 of 8 | pass 8 of 8 (the wait was needed in 1 of them) |
+
+With `--slow` the list usually arrives inside the looks, which is why 0.14.0 passed most of those runs and why
+the new wait was needed in only one of the eight: the old bound sat at the page's own loading time and lost
+whenever the page was a second or two late. The first row is the clean comparison; the second is eight runs an
+arm, and three against none is what it is. Median run 33.8 s against 33.7 s, 7 requests either way.
+
+The public examples were being compared as well and the comparison was stopped part-way at the owner's request
+(live runs go to their application only from here on). What had finished: 15 public examples, 3 runs per arm
+each (one of them 1 run), ended the same in both arms except the two pages that fail at random by design; of
+the OrangeHRM examples, `hrm-admin-add-user` 3 of 3 in both arms and `hrm-add-employee` 3 of 3 against 2 of 3,
+the third an undecided ending on a page that was not loading, in which the new wait took no part (no
+`undecided_wait` in its trace; that path is unchanged). It is a partial comparison and is reported as one.
+
 ## [0.14.0] - 2026-11-19
 
 **`via`: the control under test.** A goal is reached by whatever route is open. On the application of 0.13.1 a spec

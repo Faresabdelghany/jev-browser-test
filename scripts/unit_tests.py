@@ -4297,5 +4297,70 @@ class ViaTests(unittest.TestCase):
         self.assertIn("--via wants op:text", text)
 
 
+class UndecidedWhileLoadingTests(unittest.TestCase):
+    """0.14.1: an undecided streak on a page that says it is loading waits for the page instead of ending the run."""
+
+    class _Page:
+        def __init__(self) -> None:
+            self.polls = 0
+
+        def wait_for_timeout(self, ms: float) -> None:
+            import time
+            self.polls += 1
+            time.sleep(min(ms, 5) / 1000)
+
+    def test_the_streak_goes_on_while_the_page_says_it_is_loading_and_no_longer_than_a_navigation(self) -> None:
+        from run_test import LOADING_WAITS_MAX, keep_undecided
+        self.assertTrue(keep_undecided(True, 27500, 45000, 0), "live: five looks were 27.5 s and the list took 35")
+        self.assertTrue(keep_undecided(True, 4400, 30000, 0))
+        self.assertFalse(keep_undecided(False, 4400, 30000, 0), "a page that says nothing keeps the count bound")
+        self.assertFalse(keep_undecided(True, 30000, 30000, 0), "the page's time is up: the ending stands")
+        self.assertFalse(keep_undecided(True, 1000, 30000, LOADING_WAITS_MAX), "a page that keeps changing without settling is not waited for forever")
+        self.assertFalse(keep_undecided(True, 1000, 1000 + 0, 0), "no budget left (the caller passes held + what the budget has left)")
+
+    def test_the_wait_ends_when_the_page_changes(self) -> None:
+        import run_test
+        page, before = self._Page(), {"url": "u", "frames": None}
+        answers = iter([None, None, "visible text changed"])
+        with mock.patch.object(run_test, "fingerprint", return_value={}), \
+                mock.patch.object(run_test, "compare_fingerprint", side_effect=lambda *a: next(answers)), \
+                mock.patch.object(run_test, "loading_indicators", return_value=1):
+            got = run_test.wait_while_loading(page, before, 1, 60000)
+        self.assertEqual((got["ended"], page.polls), ("changed", 3))
+
+    def test_the_wait_ends_when_the_indicators_are_gone_although_no_fingerprint_moved(self) -> None:
+        import run_test
+        page = self._Page()
+        counts = iter([2, 1, 0])
+        with mock.patch.object(run_test, "fingerprint", return_value={}), \
+                mock.patch.object(run_test, "compare_fingerprint", return_value=None), \
+                mock.patch.object(run_test, "loading_indicators", side_effect=lambda *a: next(counts)) as asked:
+            got = run_test.wait_while_loading(page, {"url": "u", "frames": ["#f"]}, 2, 60000)
+        self.assertEqual((got["ended"], page.polls), ("indicators_gone", 3))
+        self.assertEqual(asked.call_args.args[1], ["#f"], "the frames of the observation are looked into as well")
+
+    def test_a_blank_layer_is_not_asked_for_indicators_and_the_wait_ends_at_its_time(self) -> None:
+        import run_test
+        page = self._Page()
+        with mock.patch.object(run_test, "fingerprint", return_value={}), \
+                mock.patch.object(run_test, "compare_fingerprint", return_value=None), \
+                mock.patch.object(run_test, "loading_indicators") as asked:
+            got = run_test.wait_while_loading(page, {"url": "u"}, 0, 40)
+        self.assertEqual(got["ended"], "timeout")
+        self.assertGreaterEqual(got["ms"], 40)
+        asked.assert_not_called()
+
+    def test_a_navigation_during_the_wait_is_a_change(self) -> None:
+        import run_test
+        with mock.patch.object(run_test, "fingerprint", side_effect=RuntimeError("Execution context was destroyed")):
+            got = run_test.wait_while_loading(self._Page(), {"url": "u"}, 1, 60000)
+        self.assertEqual(got["ended"], "navigated")
+
+    def test_the_wait_is_flagged_in_the_step_table(self) -> None:
+        from summarize_trace import _flags
+        step = {"n": 5, "low_confidence": True, "undecided_wait": {"ended": "changed", "ms": 17400, "held_ms": 27600, "looks": 5, "why": "1 loading indicator(s)"}}
+        self.assertIn("LOADING-WAIT:17.4s", _flags(step))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
