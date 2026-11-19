@@ -1,0 +1,137 @@
+{
+ "timestamp": "2026-11-19T10:11:45+02:00",
+ "git_commit": "d4631ae",
+ "repeat": 3,
+ "workers": 1,
+ "elapsed_ms": 217178,
+ "specs": {
+  "hrm-login": [
+   {
+    "run": 1,
+    "outcome": "dashboard_shown",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 7928,
+    "requests": 6,
+    "input_tokens": 15643,
+    "actions_executed": 4
+   },
+   {
+    "run": 2,
+    "outcome": "dashboard_shown",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 9492,
+    "requests": 6,
+    "input_tokens": 11899,
+    "actions_executed": 3
+   },
+   {
+    "run": 3,
+    "outcome": "dashboard_shown",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 9998,
+    "requests": 6,
+    "input_tokens": 11894,
+    "actions_executed": 4
+   }
+  ],
+  "hrm-pim-add-employee-list": [
+   {
+    "run": 1,
+    "outcome": "employee_listed",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 48606,
+    "requests": 25,
+    "input_tokens": 127757,
+    "actions_executed": 16
+   },
+   {
+    "run": 2,
+    "outcome": "employee_listed",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 40792,
+    "requests": 22,
+    "input_tokens": 111346,
+    "actions_executed": 14
+   },
+   {
+    "run": 3,
+    "outcome": "employee_listed",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 18708,
+    "requests": 18,
+    "input_tokens": 99858,
+    "actions_executed": 12
+   }
+  ],
+  "hrm-login-via": [
+   {
+    "run": 1,
+    "outcome": "dashboard_shown",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 5641,
+    "requests": 5,
+    "input_tokens": 10909,
+    "actions_executed": 3
+   },
+   {
+    "run": 2,
+    "outcome": "dashboard_shown",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 6895,
+    "requests": 6,
+    "input_tokens": 15648,
+    "actions_executed": 3
+   },
+   {
+    "run": 3,
+    "outcome": "dashboard_shown",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 5686,
+    "requests": 5,
+    "input_tokens": 13041,
+    "actions_executed": 3
+   }
+  ],
+  "hrm-pim-add-employee-list-via": [
+   {
+    "run": 1,
+    "outcome": "employee_listed",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 18537,
+    "requests": 18,
+    "input_tokens": 90852,
+    "actions_executed": 14
+   },
+   {
+    "run": 2,
+    "outcome": "employee_listed",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 21053,
+    "requests": 20,
+    "input_tokens": 113275,
+    "actions_executed": 12
+   },
+   {
+    "run": 3,
+    "outcome": "employee_listed",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 23811,
+    "requests": 22,
+    "input_tokens": 118794,
+    "actions_executed": 16
+   }
+  ]
+ }
+}

@@ -1,0 +1,873 @@
+{
+ "timestamp": "2026-11-19T10:12:23+02:00",
+ "git_commit": "d4631ae",
+ "repeat": 3,
+ "workers": 2,
+ "elapsed_ms": 259272,
+ "specs": {
+  "add-remove-elements": [
+   {
+    "run": 1,
+    "outcome": "one_delete_left",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3819,
+    "requests": 5,
+    "input_tokens": 5862,
+    "actions_executed": 3
+   },
+   {
+    "run": 2,
+    "outcome": "one_delete_left",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4101,
+    "requests": 5,
+    "input_tokens": 5862,
+    "actions_executed": 3
+   },
+   {
+    "run": 3,
+    "outcome": "one_delete_left",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4234,
+    "requests": 5,
+    "input_tokens": 5862,
+    "actions_executed": 3
+   }
+  ],
+  "dynamic-controls": [
+   {
+    "run": 1,
+    "outcome": "both_done",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 12228,
+    "requests": 10,
+    "input_tokens": 15484,
+    "actions_executed": 7
+   },
+   {
+    "run": 2,
+    "outcome": "both_done",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 9370,
+    "requests": 11,
+    "input_tokens": 17471,
+    "actions_executed": 7
+   },
+   {
+    "run": 3,
+    "outcome": "both_done",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 9382,
+    "requests": 10,
+    "input_tokens": 15633,
+    "actions_executed": 8
+   }
+  ],
+  "forgot-password": [
+   {
+    "run": 1,
+    "outcome": "email_sent",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3435,
+    "requests": 4,
+    "input_tokens": 4427,
+    "actions_executed": 2
+   },
+   {
+    "run": 2,
+    "outcome": "email_sent",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3632,
+    "requests": 4,
+    "input_tokens": 4427,
+    "actions_executed": 2
+   },
+   {
+    "run": 3,
+    "outcome": "email_sent",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3558,
+    "requests": 4,
+    "input_tokens": 4427,
+    "actions_executed": 2
+   }
+  ],
+  "load-wait": [
+   {
+    "run": 1,
+    "outcome": "loaded",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 7973,
+    "requests": 7,
+    "input_tokens": 8147,
+    "actions_executed": 5
+   },
+   {
+    "run": 2,
+    "outcome": "loaded",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 8035,
+    "requests": 7,
+    "input_tokens": 8147,
+    "actions_executed": 5
+   },
+   {
+    "run": 3,
+    "outcome": "loaded",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 7889,
+    "requests": 7,
+    "input_tokens": 8147,
+    "actions_executed": 5
+   }
+  ],
+  "login-logout": [
+   {
+    "run": 1,
+    "outcome": "logged_out",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4684,
+    "requests": 6,
+    "input_tokens": 9770,
+    "actions_executed": 4
+   },
+   {
+    "run": 2,
+    "outcome": "logged_out",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4778,
+    "requests": 6,
+    "input_tokens": 9770,
+    "actions_executed": 4
+   },
+   {
+    "run": 3,
+    "outcome": "logged_out",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4745,
+    "requests": 6,
+    "input_tokens": 9770,
+    "actions_executed": 4
+   }
+  ],
+  "modal-close": [
+   {
+    "run": 1,
+    "outcome": "modal_closed",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3358,
+    "requests": 4,
+    "input_tokens": 4033,
+    "actions_executed": 1
+   },
+   {
+    "run": 2,
+    "outcome": "modal_closed",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3316,
+    "requests": 4,
+    "input_tokens": 4033,
+    "actions_executed": 1
+   },
+   {
+    "run": 3,
+    "outcome": "modal_closed",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3457,
+    "requests": 4,
+    "input_tokens": 4033,
+    "actions_executed": 1
+   }
+  ],
+  "notify-random": [
+   {
+    "run": 1,
+    "outcome": "action_successful",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3250,
+    "requests": 3,
+    "input_tokens": 3218,
+    "actions_executed": 1
+   },
+   {
+    "run": 2,
+    "outcome": "action_successful",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3241,
+    "requests": 3,
+    "input_tokens": 3218,
+    "actions_executed": 1
+   },
+   {
+    "run": 3,
+    "outcome": "action_successful",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3336,
+    "requests": 3,
+    "input_tokens": 3218,
+    "actions_executed": 1
+   }
+  ],
+  "shop-add-second-item": [
+   {
+    "run": 1,
+    "outcome": "bike_light_in_cart",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3247,
+    "requests": 4,
+    "input_tokens": 10869,
+    "actions_executed": 2
+   },
+   {
+    "run": 2,
+    "outcome": "bike_light_in_cart",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 2944,
+    "requests": 4,
+    "input_tokens": 10869,
+    "actions_executed": 2
+   },
+   {
+    "run": 3,
+    "outcome": "bike_light_in_cart",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3008,
+    "requests": 4,
+    "input_tokens": 10869,
+    "actions_executed": 2
+   }
+  ],
+  "shop-checkout": [
+   {
+    "run": 1,
+    "outcome": "order_complete",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 5154,
+    "requests": 10,
+    "input_tokens": 24991,
+    "actions_executed": 8
+   },
+   {
+    "run": 2,
+    "outcome": "order_complete",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 5445,
+    "requests": 10,
+    "input_tokens": 24991,
+    "actions_executed": 8
+   },
+   {
+    "run": 3,
+    "outcome": "order_complete",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 5233,
+    "requests": 10,
+    "input_tokens": 24991,
+    "actions_executed": 8
+   }
+  ],
+  "todo-add-filter": [
+   {
+    "run": 1,
+    "outcome": "active_filtered",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3757,
+    "requests": 8,
+    "input_tokens": 15169,
+    "actions_executed": 6
+   },
+   {
+    "run": 2,
+    "outcome": "active_filtered",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3788,
+    "requests": 8,
+    "input_tokens": 15169,
+    "actions_executed": 6
+   },
+   {
+    "run": 3,
+    "outcome": "active_filtered",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3873,
+    "requests": 8,
+    "input_tokens": 15169,
+    "actions_executed": 6
+   }
+  ],
+  "toolshop-search-cart": [
+   {
+    "run": 1,
+    "outcome": "undetermined",
+    "verdict": null,
+    "status": "low_confidence",
+    "wall_ms": 12669,
+    "requests": 15,
+    "input_tokens": 48789,
+    "actions_executed": 8
+   },
+   {
+    "run": 2,
+    "outcome": "in_cart",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 10822,
+    "requests": 14,
+    "input_tokens": 52172,
+    "actions_executed": 8
+   },
+   {
+    "run": 3,
+    "outcome": "in_cart",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 8151,
+    "requests": 11,
+    "input_tokens": 46193,
+    "actions_executed": 5
+   }
+  ],
+  "web-form-submit": [
+   {
+    "run": 1,
+    "outcome": "form_submitted",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4828,
+    "requests": 9,
+    "input_tokens": 23844,
+    "actions_executed": 6
+   },
+   {
+    "run": 2,
+    "outcome": "form_submitted",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4799,
+    "requests": 9,
+    "input_tokens": 23844,
+    "actions_executed": 6
+   },
+   {
+    "run": 3,
+    "outcome": "form_submitted",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3911,
+    "requests": 8,
+    "input_tokens": 20543,
+    "actions_executed": 6
+   }
+  ],
+  "wiki-search": [
+   {
+    "run": 1,
+    "outcome": "article_shown",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4637,
+    "requests": 5,
+    "input_tokens": 39904,
+    "actions_executed": 2
+   },
+   {
+    "run": 2,
+    "outcome": "article_shown",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4029,
+    "requests": 4,
+    "input_tokens": 32532,
+    "actions_executed": 2
+   },
+   {
+    "run": 3,
+    "outcome": "article_shown",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4201,
+    "requests": 4,
+    "input_tokens": 33424,
+    "actions_executed": 2
+   }
+  ],
+  "add-remove-elements-via": [
+   {
+    "run": 1,
+    "outcome": "one_delete_left",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3861,
+    "requests": 5,
+    "input_tokens": 5862,
+    "actions_executed": 3
+   },
+   {
+    "run": 2,
+    "outcome": "one_delete_left",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3706,
+    "requests": 5,
+    "input_tokens": 5862,
+    "actions_executed": 3
+   },
+   {
+    "run": 3,
+    "outcome": "one_delete_left",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3727,
+    "requests": 5,
+    "input_tokens": 5862,
+    "actions_executed": 3
+   }
+  ],
+  "dynamic-controls-via": [
+   {
+    "run": 1,
+    "outcome": "both_done",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 9469,
+    "requests": 11,
+    "input_tokens": 17471,
+    "actions_executed": 7
+   },
+   {
+    "run": 2,
+    "outcome": "both_done",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 9448,
+    "requests": 11,
+    "input_tokens": 17471,
+    "actions_executed": 7
+   },
+   {
+    "run": 3,
+    "outcome": "both_done",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 9556,
+    "requests": 11,
+    "input_tokens": 17471,
+    "actions_executed": 7
+   }
+  ],
+  "forgot-password-via": [
+   {
+    "run": 1,
+    "outcome": "email_sent",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3539,
+    "requests": 4,
+    "input_tokens": 4427,
+    "actions_executed": 2
+   },
+   {
+    "run": 2,
+    "outcome": "email_sent",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3535,
+    "requests": 4,
+    "input_tokens": 4427,
+    "actions_executed": 2
+   },
+   {
+    "run": 3,
+    "outcome": "email_sent",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3565,
+    "requests": 4,
+    "input_tokens": 4427,
+    "actions_executed": 2
+   }
+  ],
+  "load-wait-via": [
+   {
+    "run": 1,
+    "outcome": "loaded",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 8124,
+    "requests": 7,
+    "input_tokens": 8147,
+    "actions_executed": 5
+   },
+   {
+    "run": 2,
+    "outcome": "loaded",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 7858,
+    "requests": 7,
+    "input_tokens": 8147,
+    "actions_executed": 5
+   },
+   {
+    "run": 3,
+    "outcome": "loaded",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 7942,
+    "requests": 7,
+    "input_tokens": 8147,
+    "actions_executed": 5
+   }
+  ],
+  "login-logout-via": [
+   {
+    "run": 1,
+    "outcome": "logged_out",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4849,
+    "requests": 6,
+    "input_tokens": 9770,
+    "actions_executed": 4
+   },
+   {
+    "run": 2,
+    "outcome": "logged_out",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4609,
+    "requests": 6,
+    "input_tokens": 9770,
+    "actions_executed": 4
+   },
+   {
+    "run": 3,
+    "outcome": "logged_out",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4621,
+    "requests": 6,
+    "input_tokens": 9770,
+    "actions_executed": 4
+   }
+  ],
+  "modal-close-via": [
+   {
+    "run": 1,
+    "outcome": "undetermined",
+    "verdict": null,
+    "status": "budget_exhausted",
+    "wall_ms": 4664,
+    "requests": 7,
+    "input_tokens": 7904,
+    "actions_executed": 0
+   },
+   {
+    "run": 2,
+    "outcome": "undetermined",
+    "verdict": null,
+    "status": "budget_exhausted",
+    "wall_ms": 4589,
+    "requests": 7,
+    "input_tokens": 7904,
+    "actions_executed": 0
+   },
+   {
+    "run": 3,
+    "outcome": "undetermined",
+    "verdict": null,
+    "status": "budget_exhausted",
+    "wall_ms": 4386,
+    "requests": 7,
+    "input_tokens": 7904,
+    "actions_executed": 0
+   }
+  ],
+  "notify-random-via": [
+   {
+    "run": 1,
+    "outcome": "action_successful",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3232,
+    "requests": 3,
+    "input_tokens": 3218,
+    "actions_executed": 1
+   },
+   {
+    "run": 2,
+    "outcome": "action_unsuccessful",
+    "verdict": "bug",
+    "status": "outcome",
+    "wall_ms": 3264,
+    "requests": 3,
+    "input_tokens": 3268,
+    "actions_executed": 1
+   },
+   {
+    "run": 3,
+    "outcome": "action_unsuccessful",
+    "verdict": "bug",
+    "status": "outcome",
+    "wall_ms": 3496,
+    "requests": 3,
+    "input_tokens": 3268,
+    "actions_executed": 1
+   }
+  ],
+  "shop-add-second-item-via": [
+   {
+    "run": 1,
+    "outcome": "bike_light_in_cart",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3804,
+    "requests": 5,
+    "input_tokens": 15037,
+    "actions_executed": 2
+   },
+   {
+    "run": 2,
+    "outcome": "bike_light_in_cart",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3481,
+    "requests": 5,
+    "input_tokens": 15037,
+    "actions_executed": 2
+   },
+   {
+    "run": 3,
+    "outcome": "bike_light_in_cart",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3886,
+    "requests": 5,
+    "input_tokens": 15037,
+    "actions_executed": 2
+   }
+  ],
+  "shop-checkout-error-account-via": [
+   {
+    "run": 1,
+    "outcome": "via_no_effect",
+    "verdict": "bug",
+    "status": "outcome",
+    "wall_ms": 34258,
+    "requests": 10,
+    "input_tokens": 26774,
+    "actions_executed": 8
+   },
+   {
+    "run": 2,
+    "outcome": "via_no_effect",
+    "verdict": "bug",
+    "status": "outcome",
+    "wall_ms": 34341,
+    "requests": 10,
+    "input_tokens": 26774,
+    "actions_executed": 8
+   },
+   {
+    "run": 3,
+    "outcome": "via_no_effect",
+    "verdict": "bug",
+    "status": "outcome",
+    "wall_ms": 34555,
+    "requests": 10,
+    "input_tokens": 26774,
+    "actions_executed": 8
+   }
+  ],
+  "shop-checkout-via": [
+   {
+    "run": 1,
+    "outcome": "order_complete",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 11152,
+    "requests": 10,
+    "input_tokens": 24991,
+    "actions_executed": 8
+   },
+   {
+    "run": 2,
+    "outcome": "order_complete",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 5079,
+    "requests": 10,
+    "input_tokens": 24991,
+    "actions_executed": 8
+   },
+   {
+    "run": 3,
+    "outcome": "order_complete",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 5129,
+    "requests": 10,
+    "input_tokens": 24991,
+    "actions_executed": 8
+   }
+  ],
+  "todo-add-filter-via": [
+   {
+    "run": 1,
+    "outcome": "active_filtered",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3868,
+    "requests": 8,
+    "input_tokens": 15169,
+    "actions_executed": 6
+   },
+   {
+    "run": 2,
+    "outcome": "active_filtered",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3845,
+    "requests": 8,
+    "input_tokens": 15169,
+    "actions_executed": 6
+   },
+   {
+    "run": 3,
+    "outcome": "active_filtered",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3856,
+    "requests": 8,
+    "input_tokens": 15169,
+    "actions_executed": 6
+   }
+  ],
+  "toolshop-search-cart-via": [
+   {
+    "run": 1,
+    "outcome": "in_cart",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 7955,
+    "requests": 11,
+    "input_tokens": 46191,
+    "actions_executed": 5
+   },
+   {
+    "run": 2,
+    "outcome": "in_cart",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 8911,
+    "requests": 11,
+    "input_tokens": 46193,
+    "actions_executed": 5
+   },
+   {
+    "run": 3,
+    "outcome": "in_cart",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 7878,
+    "requests": 11,
+    "input_tokens": 46191,
+    "actions_executed": 5
+   }
+  ],
+  "web-form-submit-via": [
+   {
+    "run": 1,
+    "outcome": "form_submitted",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4625,
+    "requests": 9,
+    "input_tokens": 23844,
+    "actions_executed": 6
+   },
+   {
+    "run": 2,
+    "outcome": "form_submitted",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 3998,
+    "requests": 8,
+    "input_tokens": 20532,
+    "actions_executed": 6
+   },
+   {
+    "run": 3,
+    "outcome": "form_submitted",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4741,
+    "requests": 9,
+    "input_tokens": 23844,
+    "actions_executed": 6
+   }
+  ],
+  "wiki-search-via": [
+   {
+    "run": 1,
+    "outcome": "article_shown",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4126,
+    "requests": 4,
+    "input_tokens": 32303,
+    "actions_executed": 2
+   },
+   {
+    "run": 2,
+    "outcome": "article_shown",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4475,
+    "requests": 5,
+    "input_tokens": 38742,
+    "actions_executed": 2
+   },
+   {
+    "run": 3,
+    "outcome": "article_shown",
+    "verdict": "pass",
+    "status": "passed",
+    "wall_ms": 4128,
+    "requests": 5,
+    "input_tokens": 38742,
+    "actions_executed": 2
+   }
+  ]
+ }
+}

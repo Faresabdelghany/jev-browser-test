@@ -1421,3 +1421,70 @@ Offline: 244 unit tests, `selftest.py` and `selftest_capabilities.py` (scenario 
 "No matching records" footer passes, the same list empty after loading ends BUG, an indicator that never ends
 holds the outcome no longer than a navigation; a button combobox is clicked open; a sign-in form whose code
 arrives 700 ms late is waited for, its 2.5 s analytics script is not).
+
+## 0.14.0 (2026-11-19): `via`, the control under test
+
+Finding 1 of 0.13.1, "a pass by another route". The spec field `via` names the action a pass has to come through; the
+runner compares the page before it with the pages after it, in code, and a run that goes on another way while nothing
+but the control itself has changed ends in the outcome `via_no_effect`. Branch `feat/required-control`, runner at
+commit `6975bf9` (the `git_commit` in the result files is the checkout the suites were started from, `main` at
+`d4631ae`), `jev-1.14.0`.
+
+**The private application** (the one of 0.13.1; nothing of it is here but the tally). Seven of its eleven specs have
+one control under test; each got `via` naming it, and the three search specs' `after` was corrected (see below).
+`run_suite.py`, 3 repeats, 2 workers, final code.
+
+| spec | 0.13.1, no `via` (3 runs) | 0.14.0 with `via` (3 runs) | median run | of it, waiting for the page to come to rest |
+|---|---|---|---:|---:|
+| global search (the box does nothing) | pass 3 | **`via_no_effect` (bug) 3** | 24.8 s -> 55.8 s | 30 to 40 s |
+| search a list (three specs) | pass 9 | pass 9 | 17 to 31 s -> 41 to 45 s | 14 to 25 s |
+| change a dropdown | pass 3 | pass 3 (one run not judged) | 7.7 s -> 40.4 s | 30 to 34 s |
+| switch a tab | pass 3 | pass 3 | 14.2 s -> 38.9 s | 33 to 34 s |
+| remove a filter | pass 2, `low_confidence` 1 | pass 3 | 33.6 s -> 39.2 s | 3 to 31 s |
+
+On the dead search the ending came two ways: twice Jev chose the menu link (0.5 or more) and the run ended on that
+decision; once it stayed undecided three times on the unchanged page (0.36, 0.35, 0.46 for the same link) and the
+run ended there. `waited_ms` 18.6 to 18.7 s: 10 s of patience (`settle_ms` 2500 x 4), then the looks.
+
+The wait is the application's: after sign-in its start page makes 63 API requests over about 34 s, 38 of them only
+after the previous one has finished, 46.6 s of request time in all (measured with a plain browser script, twice).
+The page is usable long before; a change on it is attributable only after. Without the wait the first probe of the
+design would have counted the list arriving as the search box answering.
+
+**The examples: does a declared `via` change an ending?** `experiments/via-014/make_variants.py` writes a `-via`
+variant of 15 examples (the control each flow goes through) and of the error account; examples and variants ran in
+one suite each (public: 2 workers; OrangeHRM: 1), 3 repeats. Slim results: `experiments/via-014/*-final.json`;
+`tab.py` prints the comparison.
+
+| | without `via` | with `via` |
+|---|---|---|
+| 13 public examples x 3 | 37 pass, 2 `action_unsuccessful` (notify-random, random by design) | 37 pass, 2 `action_unsuccessful` |
+| 2 OrangeHRM examples x 3 | 6 pass | 6 pass |
+| requests, median per run | 3 to 11 public, 6 and 19 OrangeHRM | 3 to 11, 6 and 24 |
+| median run | 3.0 to 9.4 s public | 3.3 to 9.3 s |
+| `shop-checkout-error-account` (Finish does nothing) x 3 | the example: undetermined, `blocked`, suggested `bug` | `via_no_effect` (bug) 3 of 3 |
+
+In the 45 runs of a working control the page was seen to answer it 42 times (`VIA-ANSWERED`, usually within 30 ms);
+3 were not judged (modal-close: the Close control sits in a dialog whose layer reads as blank). 10 steps waited for a
+page at rest (`VIA-WAIT`).
+
+**A bug of this change, found by the first measurement** (`*-before-fix.json`). The wait for a page at rest was also
+triggered by a blank layer, which is read off an observation and which the wait's own polling cannot see: on
+modal-close the wait returned at once, Jev decided again, the layer was still there, and the run spent its eight steps
+that way: `budget_exhausted` 3 of 3, where the example passes 3 of 3. Fixed: only requests in flight and loading
+indicators trigger the wait, three times at most; a control used under a blank layer is not judged. In that first
+measurement the other twelve public pairs and both OrangeHRM pairs already ended alike (one baseline run of
+toolshop-search-cart was undetermined; none of its variant's).
+
+**A mistake in the 0.13.1 specs, found on the way.** Their bug outcomes carried `after: {"type": <the query>}`.
+`after` matches the label of the control typed into, never the text, so "the list still shows the other record"
+could not have fired in any of those runs. `spec.py` now warns when `after.type` / `via.type` is a `data` value.
+
+**What `via` does not do.** A control that answers wrongly has changed the page (a worded bug outcome's job). A
+control whose whole effect is outside the element table and the text (a canvas) would read as dead; none of the 22
+specs measured has one. Naming a field whose text does nothing until a button is clicked would read as dead; the
+rubric says what that looks like in `result.via.then`.
+
+Offline: 252 unit tests (`ViaTests`), `selftest_capabilities.py` scenario T (dead and working search, slow answer,
+control skipped, DONE after a dead control, a clicked control, a page still fetching, a page that never comes to
+rest), `selftest.py`.
