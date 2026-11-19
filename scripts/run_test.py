@@ -36,15 +36,16 @@ from observe import (
 )
 from policy import (
     ADJUDICATION_MAX_LINES, ADJUDICATION_NONE, FILL_PREFIX, SUGGESTED_VERDICTS, announcement_lines, build_adjudication, build_questions,
-    build_reason_questions, build_state, defer_action, deferred_outcomes, evidence_line_keys, is_field, plan_batch, quoted_pick, read_checks, read_choice,
-    read_outcome, recent_announcements, resolve_target, seen_outcomes, suggested_verdict, validate_choice,
+    build_reason_questions, build_state, defer_action, deferred_outcomes, evidence_line_keys, is_field, is_via_action, leaves_via, plan_batch, quoted_pick,
+    read_checks, read_choice, read_outcome, recent_announcements, resolve_target, seen_outcomes, suggested_verdict, validate_choice, via_difference, via_view,
+    VIA_LOOKS_AWAY, VIA_WRITES,
 )
 from replay import (ATTRS_JS, POLL_MS, REPLAYABLE, STABLE_ATTRS, VERIFY_MODES, Replay, Tokens, describe_target, find_target, match_final,
                     match_page, page_print)
 from session import (DEFAULT_CACHE_DIR, DEFAULT_MAX_AGE_S, DEFAULT_SESSION_DIR, VALIDATE_WAIT_MS, CacheSlot, drop_session, load_session,
                      local_storage_script, page_mismatch, save_session, session_file, session_key, strip_profile)
-from spec import (DIAGNOSTIC_ASSERTIONS, HEADED_ENV, UNDETERMINED, effective_outcomes, load_dotenv, load_spec, match_expect, resolve_headless,
-                  spec_warnings, utf8_stdio, validate)
+from spec import (DIAGNOSTIC_ASSERTIONS, HEADED_ENV, UNDETERMINED, VIA_OUTCOME, effective_outcomes, load_dotenv, load_spec, match_expect, resolve_headless,
+                  spec_warnings, utf8_stdio, validate, via_action)
 from summarize_trace import STALLED_STATUSES, is_action_step, summarize, unobserved_controls
 
 
@@ -616,6 +617,9 @@ def deferral_limit(th: dict) -> int:
     marginal decision typed the first name into the sidebar's filter, or left the Assign form for the Leave List tab,
     while the loader was still up."""
     return th["max_low_confidence_steps"] + BUSY_EXTRA_LOOKS
+VIA_PATIENCE_SETTLES = 4  # the via action's page gets settle_ms x this to answer before it counts as having changed nothing
+VIA_QUIET_TRIES = 3  # how many times a run waits for a loading page before using the control under test; then it is used anyway
+VIA_POLL_MS = 200  # ... looked at again this often meanwhile; while it says it is loading, for as long as a navigation may take
 WAIT_POLL_MS = 100  # a WAIT re-reads the page's fingerprint this often and ends as soon as the page has changed
 HOVER_REVEAL_MS = 800  # a hover menu may open after a delay (jQuery UI's default is 300 ms, hover-intent scripts 100-500):
 # after a HOVER the runner waits up to this long for the page to change, ending the moment it does. Live, 0.5.0: the
@@ -1136,7 +1140,7 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
         "spec_id": spec["id"],
         "outcome": seen["name"] if seen else UNDETERMINED,
         "verdict": seen["verdict"] if seen else None,
-        "note": outcomes[seen["name"]].get("note") if seen else None,
+        "note": (outcomes.get(seen["name"]) or {}).get("note") if seen else None,
         "probability": seen.get("probability") if seen else None,
         "confidence": seen.get("confidence") if seen else None,
         "seen_at_step": final.get("seen_at_step"),
@@ -1171,6 +1175,11 @@ def build_result(trace: dict, spec: dict, outcomes: dict, final: dict, out_dir: 
         "usage": trace["usage"],
         "trace": os.path.join(out_dir, "trace.json"),
     }
+    if trace.get("via"):
+        # the control under test (spec `via`): whether its action was executed, and what the page did in answer
+        result["via"] = trace["via"]
+        if seen and seen["name"] == VIA_OUTCOME:
+            result["note"] = (spec.get("via") or {}).get("note")
     if not seen:
         blocked = (terminal.get("blocked_reason") or {}).get("choice")
         stuck = (terminal.get("stuck_reason") or {}).get("choice")
@@ -1288,6 +1297,12 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     low_streak, last_low_sig = 0, None  # consecutive undecided (low-confidence) steps on one page signature
     defer_streak, last_defer_sig = 0, None  # consecutive deferrals of a marginal action on one page signature under a blank layer
     hold_since, hold_n = None, 0  # when a non-pass outcome was first held because the page said it was loading; holds since
+    # The control under test (spec `via`). Once its action has been executed: the page as it was before (via_view), and
+    # whether anything but the control's own value has changed since. {step, label, wrote, view, effect: None | True |
+    # False, fresh, acted_at, judging, ...}; None until the action is executed.
+    via = spec.get("via")
+    via_state: dict | None = None
+    via_quiet_ms, via_quiet_n = 0, 0  # how long, and how often, the run has waited for a loading page before using the control under test
     announced_raw: list[dict] = []  # messages the page reported through ANNOUNCE_FUNCTION since the last observation
     all_announcements: list[dict] = []  # every announcement of the run, each with the step it preceded
     stale_streak = 0
@@ -1301,7 +1316,9 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     # first_seen_at_step is added when a pass sighting starts its confirmation (the confirming step becomes seen_at_step)
     secret_values = [spec["data"][k] for k in spec["secrets"] if spec["data"].get(k)]
     diagnostics = Diagnostics(secret_values)  # what the browser says went wrong (exceptions, failed requests, 4xx/5xx)
-    net = NetWatch() if spec["browser"].get("settle") == "network" else None  # the requests in flight, for the settle
+    # the requests in flight: for the settle (browser.settle "network"), and for the control under test (spec `via`),
+    # which is used on a page that has stopped loading and whose own requests are waited for
+    net = NetWatch() if spec["browser"].get("settle") == "network" or spec.get("via") else None
     action_started = time.perf_counter()  # when the last executed action began: the settle waits for what was requested since
     teardown_summary: dict | None = None
     # Replay (replay.py): with `replay` on, a saved path's steps are executed in place of Jev's decisions for as long as
@@ -1354,7 +1371,7 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         """The steps worth a picture in "key" mode: something went wrong or the runner refused to act."""
         return bool(step.get("never_violated") or step.get("low_confidence") or step.get("stale")
                     or step.get("outcome_seen") or step.get("pending_outcome") or step.get("outcome_unconfirmed")
-                    or step.get("repeat_count", 0) >= 2 or step.get("after_no_effect") or step.get("outcome_deferred")
+                    or step.get("repeat_count", 0) >= 2 or step.get("after_no_effect") or step.get("outcome_deferred") or step.get("via_no_effect")
                     or step.get("action_deferred"))
 
     def capture(page, step: dict, terminal: bool = False) -> None:
@@ -1463,9 +1480,94 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
         actions it names have been executed ("only after a click on Search"): policy.deferred_outcomes. Deferred
         sightings are recorded on the step (`outcome_deferred`) and the run goes on."""
         deferred = deferred_outcomes(seen, outcomes, history)
+        if via and not via_through():
+            # the pass has to come through the control under test: not before its action was executed, and not while
+            # that action has changed nothing (the end state reached some other way is not what the spec asked about)
+            held = [s["name"] for s in seen if s["verdict"] == "pass" and s["name"] not in deferred]
+            if held:
+                step["via_awaited"] = "not executed yet" if via_state is None else "executed, the page has not answered it"
+                deferred += held
         if deferred:
             step["outcome_deferred"] = deferred
         return [s for s in seen if s["name"] not in deferred]
+
+    def via_through() -> bool:
+        """Has the run gone through the control under test: its action executed, and the page seen to answer it (or
+        the comparison given up, after a scroll)?"""
+        return via_state is not None and (via_state["effect"] is True or not via_state["judging"])
+
+    def via_dead() -> bool:
+        """The via action was executed and, as far as the last look, changed nothing but its own control."""
+        return via_state is not None and via_state["effect"] is False and via_state["judging"]
+
+    def via_busy(obs: dict | None = None) -> str | None:
+        """Is the page still on its way (requests in flight, a loading indicator, a blank layer)? Then a change on it
+        is not the answer to anything the run does now. Returns what says so, else None."""
+        if net is not None and net.pending:
+            return f"{len(net.pending)} request(s) in flight"
+        if obs is not None and page_loading(obs):
+            return "controls under a blank layer, or none yet"
+        try:
+            found = loading_indicators(page, ((obs or {}).get("fingerprint") or {}).get("frames"))
+        except Exception:  # noqa: BLE001 - the document navigated: on its way
+            return "the document is navigating"
+        return f"{found} loading indicator(s)" if found else None
+
+    def via_watch(obs: dict, n: int) -> dict:
+        """The look after the via action (and every look until the page answers it): compare the page with the one the
+        action was decided on, leaving out what the action itself wrote. An unchanged page is given time, looked at
+        again every VIA_POLL_MS: settle_ms x VIA_PATIENCE_SETTLES from the action, and for as long as a request the
+        action started is in flight or the page says it is loading, up to navigation_timeout_ms. Returns the
+        observation the step goes on with."""
+        patience = spec["browser"]["settle_ms"] * VIA_PATIENCE_SETTLES
+        while True:
+            changed = via_difference(via_state["view"], via_view(obs, via_state["wrote"]))
+            if announced_raw:
+                changed.append("announcement")  # a toast or live message since the action is the page answering
+            waited = int((time.perf_counter() - via_state["acted_at"]) * 1000)
+            if changed:
+                via_state.update({"effect": True, "changed": changed, "effect_at_step": n, "answered_after_ms": waited})
+                return obs
+            if not via_state["fresh"]:
+                break
+            # (the requests the action started, a loading indicator, a blank layer: the answer is on its way)
+            loading = (net is not None and net.started_since(via_state["started"]) > 0) or via_busy(obs) is not None
+            if waited >= (spec["browser"]["navigation_timeout_ms"] if loading else patience):
+                break
+            page.wait_for_timeout(VIA_POLL_MS)
+            obs = look()
+        via_state.update({"effect": False, "fresh": False, "waited_ms": max(waited, via_state.get("waited_ms", 0))})
+        return obs
+
+    def end_via(page, step: dict, wanted: str) -> None:
+        """The control under test changed nothing and the run was about to go on without it (`wanted`: what it would
+        have done). That is the ending: outcome via_no_effect, with the verdict the spec gave it, decided in code."""
+        op, text = via_action(via)
+        seen = {"name": VIA_OUTCOME, "verdict": via.get("verdict", "bug"), "probability": None, "confidence": None}
+        final["outcome"] = seen
+        final["seen_at_step"] = final["first_seen_at_step"] = step["n"]
+        step["outcome_seen"] = VIA_OUTCOME
+        via_state["then"] = wanted
+        step["via_no_effect"] = {"since_step": via_state["step"], "waited_ms": via_state.get("waited_ms", 0), "then": wanted}
+        finish(page, step, "outcome", dict(STOP))
+        final["adjudication"] = {
+            "outcome": VIA_OUTCOME, "line": None, "line_id": None, "present": None, "confidence": None,
+            "statement": f"{op} on {via_state['label']} (step {via_state['step']}) changed nothing on the page but the control itself",
+            "skipped": "decided in code: the page before the action was compared with the page after it "
+                       "(url, title, controls, visible text), and no toast or live message followed",
+        }
+
+    def via_report() -> dict:
+        """result.via / trace.via: what became of the control under test."""
+        rec: dict = {"action": {k: v for k, v in via.items() if k not in ("verdict", "note")}, "executed_at_step": None,
+                     "target": None, "effect": None}
+        if via_state is not None:
+            rec.update({"executed_at_step": via_state["step"], "target": via_state["label"],
+                        "effect": via_state["effect"] if via_state["judging"] else None})
+            for k in ("changed", "effect_at_step", "answered_after_ms", "waited_ms", "then", "not_judged"):
+                if via_state.get(k) is not None:
+                    rec[k] = via_state[k]
+        return rec
 
     def end_with_outcome(page, step: dict, seen: dict, jev) -> None:
         """A non-pass outcome is terminal at first confident sighting (fail_fast): the picture is forced."""
@@ -1819,7 +1921,15 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 settle, a new tab, the history. Shared by Jev's decisions and a saved path's (`saved`: the path step being
                 replayed). `state_fn()` builds Jev's state for the follow-up question of a `stuck` ending. Returns True
                 when the run ends here."""
-                nonlocal page, wait_streak, last_wait_sig, last_operation, last_action_end, action_started
+                nonlocal page, wait_streak, last_wait_sig, last_operation, last_action_end, action_started, via_state
+                label = target["label"] if target and not target.get("missing") else None
+                if via_dead():
+                    if operation in VIA_LOOKS_AWAY:
+                        # a scroll changes what is on screen by itself: the comparison ends here, with no verdict
+                        via_state.update({"judging": False, "not_judged": f"{operation} at step {n} before the page had answered"})
+                    elif leaves_via(via, operation, label):
+                        end_via(page, step, f"{operation} {label}" if label else operation)
+                        return True
                 # Repeat detection: the same action on an unchanged page max_repeat times is `stuck`. A WAIT is
                 # not an action on the page: Jev choosing it again on a page that still says "Loading..." is the
                 # right answer for as long as the page keeps loading (measured live: a 5 s loader ended `stuck`
@@ -1829,6 +1939,9 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     repeats[key] = repeats.get(key, 0) + 1
                     step["repeat_count"] = repeats[key]
                     if repeats[key] >= th["max_repeat"]:
+                        if via_dead():
+                            end_via(page, step, f"{operation} again, {repeats[key]} times on a page that did not change")
+                            return True
                         ask_reason(step, state_fn())
                         finish(page, step, "stuck", dict(STOP))
                         return True
@@ -1858,6 +1971,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 if rp is not None and saved is None and target_el and not target_el.get("frame"):
                     # recorded now, before the action can remove the element: what identifies it across renders
                     path_attrs = read_attrs([target_el["idx"]]).get(str(target_el["idx"]))
+                via_first = bool(via) and via_state is None and is_via_action(via, operation, label)
+                busy_before = via_busy(obs) if via_first else None  # read before the action starts requests of its own
                 executed = execute(page, spec, operation, target, value_key, wait_ms, obs.get("fingerprint"), target_el.get("frame"))
                 if rp is not None and operation in REPLAYABLE:
                     if executed["ok"]:
@@ -1902,6 +2017,24 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                         step["new_tab"]["error"] = f"{type(e).__name__}: {str(e)[:120]}"
                 step["latency_ms"]["browser"] = int((time.perf_counter() - t_b) * 1000)
                 step["executed"] = executed
+                if via and executed["ok"]:
+                    if is_via_action(via, operation, label) and (via_state is None or via_dead()):
+                        if via_state is None:
+                            # the control under test: keep the page it was used on, without what the action wrote there
+                            wrote = None
+                            if operation in VIA_WRITES:
+                                typed = spec["data"].get(value_key) if operation == "TYPE_TEXT" and value_key not in spec["secrets"] else None
+                                wrote = {"role": target_el.get("role"), "name": target_el.get("name") or "", "value": typed}
+                            via_state = {"step": n, "label": label, "wrote": wrote, "view": via_view(obs, wrote), "effect": None,
+                                         "judging": True}
+                            step["via"] = True  # flag VIA
+                            if busy_before:
+                                # used on a page that was still loading although it had been waited for: whatever changes
+                                # next may be that load, so nothing is concluded from it either way
+                                via_state.update({"judging": False, "not_judged": f"the page was still loading when the control was used ({busy_before})"})
+                        via_state.update({"fresh": True, "acted_at": time.perf_counter(), "started": t_b})
+                    elif operation == "PRESS_ENTER" and via_state is not None and via_state["effect"] is not True and via_state["judging"]:
+                        via_state.update({"fresh": True, "acted_at": time.perf_counter(), "started": t_b})  # Enter in the control: its answer gets the same time
                 record(history_entry(n, operation, target, value_key, executed), step, sig)
                 last_operation = operation if executed["ok"] else None
                 if operation != "WAIT":
@@ -1914,6 +2047,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                     status = "budget_exhausted"
                     break
                 obs = look()
+                if via_state is not None and via_state["effect"] is not True and via_state["judging"]:
+                    obs = via_watch(obs, n)  # has the page answered the control under test? (an unchanged page is given time)
                 replay_decision, replay_why, replay_checked, verify_look = None, None, None, False
                 if rp is not None and rp.active:
                     # the next saved step, if it applies to this page (given the time the recorded run took to get here)
@@ -1957,6 +2092,11 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                 note_diagnostics(step)
                 if after_no_effect:
                     step["after_no_effect"] = True  # this is the page the previous action failed to change
+                if via_dead():
+                    # the page the control under test has not changed (flag VIA-NO-EFFECT; a key picture)
+                    step["via_no_effect"] = {"since_step": via_state["step"], "waited_ms": via_state.get("waited_ms", 0)}
+                elif via_state is not None and via_state.get("effect_at_step") == n:
+                    step["via_effect"] = {"of_step": via_state["step"], "changed": via_state["changed"]}
                 recent_ann = recent_announcements(all_announcements, n)
                 if replay_decision is not None:
                     # A saved step decides this one: no request. From here on it is an ordinary executed action.
@@ -2277,6 +2417,9 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                             step["loading_indicators"] = found
                     if low_streak >= low_confidence_limit(th, page_loading(obs) or loading_indicated(step)):
                         if not moved_since(page, obs.get("fingerprint")):
+                            if via_dead():
+                                end_via(page, step, f"nothing: undecided {low_streak} times on the unchanged page")
+                                break
                             ask_reason(step, state)
                             finish(page, step, "low_confidence", dict(STOP))
                             break
@@ -2316,6 +2459,28 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                         continue
                     step["deferrals_exhausted"] = deferral_limit(th)  # executed on a page still under its layer, after the last deferral
 
+                if via and via_state is None and is_via_action(via, operation, (target or {}).get("label") if target and not target.get("missing") else None):
+                    # The control under test is used on a page that has stopped loading: what changes after it is then
+                    # its answer, and not a list that was on its way anyway. Waited for here, without a request, for as
+                    # long as a navigation may take in all; then Jev decides again, on the page as it is now. Live: the
+                    # application's start page was still fetching its list (10 to 30 s) when the query was typed.
+                    # (Only what the wait itself can watch: requests and indicators. A blank layer is read off an
+                    # observation, and a dialog whose close control is not a button reads as one for as long as it is open:
+                    # live, three runs of a modal example spent their budget waiting for the dialog they were about to close.)
+                    why = via_busy()
+                    left = spec["browser"]["navigation_timeout_ms"] - via_quiet_ms
+                    if why and left > 0 and via_quiet_n < VIA_QUIET_TRIES:
+                        via_quiet_n += 1
+                        t_q = time.perf_counter()
+                        while via_busy() and (time.perf_counter() - t_q) * 1000 < left:
+                            page.wait_for_timeout(VIA_POLL_MS)
+                        spent = int((time.perf_counter() - t_q) * 1000)
+                        via_quiet_ms += spent
+                        step["via_deferred"] = {"why": why, "waited_ms": spent}
+                        park(step, f"{operation} on the control under test deferred: the page was still loading ({why})",
+                             wait_entry(n, "WAIT", "the page was still loading; it was given time to finish"), sig, pause=False)
+                        continue
+
                 # Freshness guard. Jev decided on the observation; the page may have moved on while it
                 # was deciding (a toast, a re-render, a redirect). Re-read identity and meaning of what the
                 # decision depends on - the target node for CLICK/TYPE_TEXT/SELECT, the whole page for
@@ -2343,6 +2508,9 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
                         continue
                 stale_streak = 0
 
+                if operation in ("DONE", "BLOCKED") and via_dead():
+                    end_via(page, step, operation)
+                    break
                 if operation == "DONE":
                     if n >= budget["max_steps"] and not passes:
                         finish(page, step, "done_unverified", {"action": "DONE", "ok": True, "error": None})
@@ -2500,6 +2668,8 @@ def run(spec: dict, jev, out_dir: str, screenshots: bool | str | None = None) ->
     trace["actions_executed"] = sum(1 for s in trace["steps"] if is_action_step(s))
     trace["usage"] = jev.usage_summary()
     trace["adjudication"] = final.get("adjudication")
+    if via:
+        trace["via"] = via_report()
     if diagnostics.any():
         trace["diagnostics"] = diagnostics.for_trace()
     result = build_result(trace, spec, outcomes, final, out_dir)

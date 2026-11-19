@@ -15,6 +15,15 @@ buried).
   weakest decision on the way; a low value means the path there was shaky even if the ending is clear). If
   the outcome name does not match what you see, the spec mislabelled it: fix the `when` or the `verdict`
   (a one-line change) and rerun, and say so in the report.
+- **`via_no_effect`** (a spec with `via`): the control under test was used and nothing on the page changed but the
+  control itself, then the run turned elsewhere, gave up or said DONE. The verdict is the one the spec gave it
+  (`bug` unless `via.verdict` says otherwise) and it was decided in code, so there is no evidence line: read
+  `result.via` (`target`, `waited_ms`, `then`) and the picture of the unchanged page. Two things to rule out before
+  reporting it, both the spec's: `then` is a click on the button that submits the same control (the Search button
+  beside the Search field: name that button in `via`, the field alone does nothing by design), or the answer is
+  one the comparison cannot see (a canvas, the same rows again). And the other way round, a run that ends
+  `done_unverified` with `via.executed_at_step: null` reached the end state without the control: a test issue (say
+  in the goal to use it), never a pass.
 - **`undetermined` with a suggestion** (`reason.suggested_verdict` set): start from the suggestion and
   confirm it with the rubric below; the typed reason (`reason.blocked_reason`, `reason.stuck_reason`) and
   `reason.status` tell you where to look in the trace. A stalled run whose last page keeps controls where the
@@ -142,7 +151,11 @@ When you are handed a run folder (`result.json`, `trace.json`, screenshots) the 
    `NEW-TAB(not followed)` (the action opened a tab).
    The outcome's flags: `DEFERRED:<outcome>` (true of the page, but its `requires_action` / `after` condition has not
    happened yet: not counted), `HELD:<outcome>` (a non-pass outcome seen while the page showed a loading indicator:
-   not the ending yet; the runner waited and looked again, at most `navigation_timeout_ms` in all), `RECHECK:<n>` / `ASSERT-PENDING:<n>` (a pass in sight on a page still busy, looked at
+   not the ending yet; the runner waited and looked again, at most `navigation_timeout_ms` in all), `VIA` (the
+   control the spec's `via` names was used on this step), `VIA-WAIT` (it was about to be used on a page still
+   loading: waited for, then decided again), `VIA-ANSWERED` (the first look on which the page differs from the one
+   the control was used on) / `VIA-NO-EFFECT` (a look on which nothing but the control itself has changed; a run
+   that then turns elsewhere ends `via_no_effect`), `RECHECK:<n>` / `ASSERT-PENDING:<n>` (a pass in sight on a page still busy, looked at
    again).
    In the operation column, `(not run)` marks a decision the runner turned into a wait (a marginal or deferred action,
    an undecided step) and `AUTO_DONE` a pass the runner confirmed itself when its outcome came into sight, without Jev

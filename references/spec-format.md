@@ -78,6 +78,29 @@ The same flow, saying which endings Claude will accept back and what must be exa
   outcome fired on the unfiltered list before Search was clicked although the filter checks in its `requires` read
   0.82 and 0.88, because a check is a probability about the page, not a record of what was done. Deferred sightings
   are recorded like `requires_action`'s (`outcome_deferred`, flag `DEFERRED:<name>`).
+- **`via`** — the control under test: `"via": {"type": "Search"}` (or `click`, `select`; matched as `after` matches,
+  by the text in the control's label). A goal is reached by whatever route is open, so a flow written to test a
+  search box passes through the menu when the search box does nothing. With `via`, two things hold. **The pass has
+  to come through that action**: a pass outcome seen before it was executed is deferred (`DEFERRED:<outcome>`), and a
+  run that never uses the control ends `done_unverified`, not passed. **And the action has to change the page**: the
+  runner keeps the page the control was used on and compares every later look with it, in code (the URL, the title,
+  the controls, the visible text, any toast), leaving out what the action itself wrote (the box now holding the
+  query). While nothing else has changed, a run that turns to another control, says DONE or BLOCKED, repeats the
+  action to no effect or stays undecided ends in the outcome **`via_no_effect`**, verdict `bug` (or
+  `"verdict": "needs_human"` / `"test_issue"` in `via`; `"note"` is copied to the result). Waiting, pressing Enter
+  and using the control again do not end it. The page gets time first: the control is not used while the page is
+  still loading (requests in flight, a loading indicator: flag `VIA-WAIT`, at most three times and
+  `navigation_timeout_ms` in all),
+  and after the action the page has `settle_ms` × 4 to answer, longer while a request the action started is in
+  flight or the page says it is loading. `result.via` says what happened: the step, the control, `effect`, what
+  changed or what the run wanted to do instead. Three rules for writing one. Name the action **the page answers**:
+  the Search button when there is one, the field when results appear as you type or on Enter; a field whose text
+  does nothing until a button is clicked would read as dead. Use it where the answer is **text or controls**: a
+  chart redrawn on a canvas, or a Refresh that shows the same rows again, changes nothing the comparison can see.
+  And it is one control per spec: a flow with two features under test is two specs. What it does not catch is a
+  control that answers wrongly ("No results" for a name that exists): the page changed, so that is a `bug` outcome
+  with a `when` of its own, as before. If a scroll comes between the action and the answer, or the page was still
+  loading when the control was used, nothing is concluded (`via.not_judged`) and the run is judged as without `via`.
 - **`assert`** — exact expectations checked **in code** on the final observation, free and non-model, the
   "DONE is never proof" verifier: `url_matches` (Playwright's URL glob, the same dialect as `setup.wait_for.url`:
   `**` anything, `*` anything but `/`, `{a,b}` either, everything else literal, `?` included), `text_contains`
@@ -134,6 +157,7 @@ The same flow, saying which endings Claude will accept back and what must be exa
 | `done_when` | list | `[]` | Check names that must all be ≥ `thresholds.check_true` for the synthesized `goal_reached` pass outcome. Required when no `outcomes` are declared; ignored when they are |
 | `never` | list | `[]` | Check names that end the run as the synthesized `never_<check>` outcome (verdict `bug`) at `thresholds.never_true`. Ignored when `outcomes` are declared |
 | `outcomes` | object | `{}` | `name -> {when, verdict, requires?, requires_action?, after?, note?}`: the endings the run may return, see above. Names are identifiers; `none_yet` and the reserved question names are not allowed |
+| `via` | object | none | The control under test: `{"type": "Search"}`, `{"click": "Export"}` or `{"select": "Sort"}`, with optional `verdict` (`bug`, `needs_human`, `test_issue`; default `bug`) and `note`. The pass has to come through that action, and a run that goes on another way while the action has changed nothing on the page ends in the outcome `via_no_effect`, decided in code. See above. `scaffold.py --via type:Search` |
 | `assert` | list | `[]` | Exact expectations checked in code on the final page before a pass counts, see above (`url_matches`, `text_contains`, `text_in`, `text_order`, `field_value`, `element_present`, `element_absent`), and two that read what the browser recorded during the run instead: `{"no_page_errors": true}` (no uncaught JavaScript exception) and `{"no_failed_requests": true}` (no request failed outright, no 5xx response), see "Browser diagnostics" below |
 | `expect` | object | none | The result an expected-red spec should end in (`outcome`, `status`, `verdict`, `blocked_reason`, `stuck_reason`, `suggested_verdict`), see above. Exit 0 and suite verdict `expected` when it matches |
 | `auto_done` | bool | `true` | Start the confirmation as soon as a pass outcome is seen, even if Jev has not chosen DONE (false: only Jev's DONE starts it) |
@@ -473,10 +497,15 @@ Checks are Noul questions: Jev returns the probability that the statement is tru
 - **Name the choice.** A goal that leaves a choice open ("change the period to another one it offers") splits Jev
   between the options that all fit, and a decision split 0.55 / 0.45 is one the runner does not act on: the run ends
   `low_confidence` in front of an open list. Say which option ("change the period to 'Last 7 days'").
-- **Give the feature under test a bug outcome of its own.** A goal is reached by whatever route is open: "search for
-  the supplier and open the one it finds" passed through the menu while the search box did nothing. When the route
-  is the point, declare what its failure looks like ("the query is in the Search field and the page shows no
-  results for it", `requires_action`, `after: {type: ...}`), and the dead control ends the run as a bug.
+- **Name the control under test with `via`.** A goal is reached by whatever route is open: "search for the supplier
+  and open the one it finds" passed through the menu, three runs of three, while the search box did nothing. A bug
+  outcome written for it ("the query is in the Search field and the page shows no results for it") read 0.33: a
+  page on which nothing happened shows nothing to read. `"via": {"type": "Search"}` decides it in code, and the
+  same run ends `via_no_effect`. Keep the worded bug outcomes for a control that answers wrongly ("the search says
+  it found nothing").
+- **`after` and `via` name the field, not the text.** `"after": {"type": "Search"}` is the field labelled Search;
+  `{"type": "Harbour"}`, the query, matches no control, and the outcome it guards can never be seen. `spec.py`
+  warns when the text is one of the spec's `data` values.
 - **Slow lists.** An outcome about an empty list ("the list says 'No matching records'") is held while the page
   shows a loading indicator, so it needs no wait of its own; give the pass an assertion on a record the list
   should hold, and `--slow` (or `browser.navigation_timeout_ms`) the time the list needs.

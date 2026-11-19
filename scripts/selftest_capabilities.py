@@ -572,7 +572,26 @@ HYDRATE_JS = """(() => {
     document.getElementById('msg').textContent = state.email && state.pw ? 'Saved successfully' : 'missing email or phone'; };
 })();"""
 
-ROUTES = {"/records": RECORDS_PAGE, "/dropdown": DROPDOWN_PAGE, "/login-app": LOGIN_APP_PAGE, "/cache-app": CACHE_APP_PAGE, "/net": NET_PAGE, "/batch-form": BATCH_FORM_PAGE, "/replay-form": REPLAY_FORM_PAGE, "/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
+# A supplier can be reached two ways: through the Search box (the list of hits under it) and through the menu. With
+# ?dead=1 the Search box takes the text and nothing answers it; ?ms= is how long a hit takes to appear; ?noop=1 makes
+# the Refresh button do nothing.
+VIA_PAGE = """<!doctype html><html><head><title>Suppliers</title></head><body>
+<nav><a id="all" href="#">All suppliers</a> <button id="refresh" type="button">Refresh</button></nav>
+<input id="q" aria-label="Search" placeholder="Search"><ul id="hits"></ul>
+<div id="main"><p>Welcome back</p></div>
+<script>
+  const q = new URLSearchParams(location.search), main = document.getElementById('main');
+  if (q.get('busy')) { const t = Date.now(); (function poll() { if (Date.now() - t < Number(q.get('busy'))) fetch('/api/slow?ms=150').finally(poll); })(); }
+  const open = () => { main.innerHTML = '<h2>Northwind Recycling</h2><p>Supplier details</p>'; };
+  document.getElementById('all').onclick = (e) => { e.preventDefault();
+    main.innerHTML = '<button id="row" type="button">Open Northwind Recycling</button>'; document.getElementById('row').onclick = open; };
+  document.getElementById('refresh').onclick = () => { if (!q.get('noop')) main.insertAdjacentHTML('beforeend', '<p>Refreshed</p>'); };
+  if (!q.get('dead')) document.getElementById('q').oninput = () => setTimeout(() => {
+    document.getElementById('hits').innerHTML = '<li><button id="hit" type="button">Hit: Northwind Recycling</button></li>';
+    document.getElementById('hit').onclick = open; }, Number(q.get('ms') || 0));
+</script></body></html>"""
+
+ROUTES = {"/via": VIA_PAGE, "/records": RECORDS_PAGE, "/dropdown": DROPDOWN_PAGE, "/login-app": LOGIN_APP_PAGE, "/cache-app": CACHE_APP_PAGE, "/net": NET_PAGE, "/batch-form": BATCH_FORM_PAGE, "/replay-form": REPLAY_FORM_PAGE, "/dropzone": DROPZONE_PAGE, "/dropzone-only": DROPZONE_ONLY_PAGE, "/hover-delay": HOVER_DELAY_PAGE, "/shadow-app": SHADOW_APP_PAGE, "/upload": UPLOAD_PAGE, "/hover": HOVER_PAGE, "/app": APP_PAGE, "/cleanup": CLEANUP_PAGE, "/steps": STEPS_PAGE, "/checkout": CHECKOUT_PAGE, "/card": CARD_PAGE, "/checkout-slim": SLIM_CHECKOUT_PAGE, "/card-line": CARD_LINE_PAGE,
           "/device": DEVICE_PAGE, "/tabs": TABS_PAGE, "/receipt": RECEIPT_PAGE, "/spinner": SPINNER_PAGE, "/shadow": SHADOW_PAGE,
           "/shadow-names": SHADOW_NAMES_PAGE}
 
@@ -1417,6 +1436,67 @@ def run_checks(tmp: str | None = None) -> list[str]:
     if trace["status"] != "passed" or not 300 <= waited < 2200:
         failures.append(f"S3: scripted steps wait for the page's own scripts before they touch it, and not for analytics: {trace['status']} "
                         f"waited {waited} ms; the page said: {(trace.get('final') or {}).get('url')}")
+
+    # T. the control under test (spec `via`, 0.14.0) -------------------------------------------------------------------
+    # The goal can be reached two ways. Without `via` a dead Search box is walked around and the run passes; with it the
+    # run ends in via_no_effect the moment it turns to the menu.
+    def via_spec(query: str = "", **over) -> dict:
+        return make_spec(base + "/via" + query, goal="Search for Northwind and open the supplier the search finds.",
+                         data={"query": "Northwind"},
+                         outcomes={"opened": {"when": "The page shows 'Supplier details'", "verdict": "pass"}}, **over)
+    opened = {"opened": "Supplier details"}
+    detour = [("type", "Search", "query"), ("click", "Hit:"), ("click", "All suppliers"), ("click", "Open Northwind")]
+    trace, out = go("via-off-dead", via_spec("?dead=1"), ScriptedJev(detour, opened))
+    if trace["status"] != "passed" or "via" in trace["result"]:
+        failures.append(f"T: without `via` nothing changes: the dead Search is walked around and the run passes: {trace['status']}")
+    trace, out = go("via-dead", via_spec("?dead=1", via={"type": "Search", "note": "the sidebar search is the feature"}), ScriptedJev(detour, opened))
+    res, v = trace["result"], trace["result"].get("via") or {}
+    if (trace["status"], res["outcome"], res["verdict"], res["note"]) != ("outcome", "via_no_effect", "bug", "the sidebar search is the feature"):
+        failures.append(f"T: a control under test that changes nothing ends the run as via_no_effect when it turns elsewhere: "
+                        f"{trace['status']} {res['outcome']} {res['verdict']} {res['note']}")
+    if v.get("effect") is not False or "All suppliers" not in (v.get("then") or "") or v.get("executed_at_step") != 1 or v.get("waited_ms", 0) < 1000:
+        failures.append(f"T: result.via says the action was executed, what the page did and where the run turned: {v}")
+    if exit_code(trace) != 1 or not all(f in flags_of(trace, out) for f in ("VIA", "VIA-NO-EFFECT", "NOTHING on the page changed")):
+        failures.append("T: the red run exits 1 and its summary flags the via step and the unchanged page")
+    trace, out = go("via-works", via_spec(via={"type": "Search"}), ScriptedJev(detour, opened))
+    v = trace["result"].get("via") or {}
+    if trace["status"] != "passed" or v.get("effect") is not True or "controls" not in (v.get("changed") or []) or "VIA-ANSWERED" not in flags_of(trace, out):
+        failures.append(f"T: a control that answers is a pass like any other, with what changed on record: {trace['status']} {v}")
+    trace, out = go("via-slow", via_spec("?ms=900", via={"type": "Search"}), ScriptedJev(detour, opened))
+    v = trace["result"].get("via") or {}
+    if trace["status"] != "passed" or v.get("effect") is not True or not 700 <= v.get("answered_after_ms", 0) < 2500:
+        failures.append(f"T: an answer that takes its time is waited for (settle_ms x 4) before the run decides anything: {trace['status']} {v}")
+    trace, out = go("via-skipped", via_spec(via={"type": "Search"}), ScriptedJev(detour[2:], opened))
+    v = trace["result"].get("via") or {}
+    deferred = [st["n"] for st in trace["steps"] if "opened" in (st.get("outcome_deferred") or [])]
+    if trace["status"] != "done_unverified" or v.get("executed_at_step") is not None or not deferred or "never used" not in flags_of(trace, out):
+        failures.append(f"T: the end state reached without the control is not a pass (and not a bug): {trace['status']} {v} deferred={deferred}")
+    trace, out = go("via-dead-done", via_spec("?dead=1", via={"type": "Search", "verdict": "needs_human"}), ScriptedJev(detour[:1], opened))
+    res = trace["result"]
+    if (res["outcome"], res["verdict"], (res.get("via") or {}).get("then")) != ("via_no_effect", "needs_human", "DONE"):
+        failures.append(f"T: DONE after a control that changed nothing is the same ending, with the verdict the spec gave it: {res['outcome']} {res['verdict']}")
+    # a click as the action under test: a button that does nothing, then one that does
+    click_moves = [("click", "Refresh"), ("click", "All suppliers"), ("click", "Open Northwind")]
+    trace, out = go("via-click-dead", via_spec("?noop=1", via={"click": "Refresh"}), ScriptedJev(click_moves, opened))
+    if trace["result"]["outcome"] != "via_no_effect":
+        failures.append(f"T: a clicked control that changes nothing is found the same way: {trace['result']['outcome']}")
+    trace, out = go("via-click-works", via_spec(via={"click": "Refresh"}), ScriptedJev(click_moves, opened))
+    if trace["status"] != "passed" or (trace["result"].get("via") or {}).get("changed") != ["text"]:
+        failures.append(f"T: a clicked control that answers lets the run go on to its pass: {trace['status']} {trace['result'].get('via')}")
+    # a page that never stops fetching: the wait is bounded (navigation_timeout_ms in all, three times at most), the
+    # control is then used anyway, nothing is concluded from what follows, and the run ends as it would without `via`
+    trace, out = go("via-never-quiet", via_spec("?busy=60000&dead=1", via={"type": "Search"}, browser={"navigation_timeout_ms": 1200}),
+                    ScriptedJev(detour[:1] * 3 + detour, opened))
+    v = trace["result"].get("via") or {}
+    waits = [st["via_deferred"] for st in trace["steps"] if st.get("via_deferred")]
+    if trace["status"] != "passed" or "still loading" not in (v.get("not_judged") or "") or not 1 <= len(waits) <= 3 or sum(w["waited_ms"] for w in waits) > 2500:
+        failures.append(f"T: a page that never comes to rest is waited for no longer than a navigation, then nothing is concluded: {trace['status']} {v} {waits}")
+    # a page still fetching when Jev reaches for the control: waited for, without a request, and then judged
+    # (the scripted Jev plays a move once, so the typing it is asked to decide again is listed twice)
+    trace, out = go("via-busy", via_spec("?busy=1500&dead=1", via={"type": "Search"}), ScriptedJev(detour[:1] + detour, opened))
+    waits = [st["via_deferred"] for st in trace["steps"] if st.get("via_deferred")]
+    if trace["result"]["outcome"] != "via_no_effect" or len(waits) != 1 or not 500 <= waits[0]["waited_ms"] < 4000 or "VIA-WAIT" not in flags_of(trace, out):
+        failures.append(f"T: the control is not used on a page that is still loading, and is judged once it has been: {trace['result']['outcome']} {waits}")
     return failures
 
 

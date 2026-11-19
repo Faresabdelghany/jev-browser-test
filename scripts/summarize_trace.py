@@ -26,6 +26,22 @@ def is_action_step(step: dict) -> bool:
     return ex.get("action") not in NON_ACTIONS and not ex.get("reason")
 
 
+def _via_lines(via: dict | None) -> list[str]:
+    """The summary's line about the control under test (spec `via`): used or not, and what the page did in answer."""
+    if not via:
+        return []
+    named = ", ".join(f"{k} '{v}'" for k, v in (via.get("action") or {}).items())
+    if via.get("executed_at_step") is None:
+        return [f"  via ({named}): never used; a pass seen without it does not count (the goal should say to use it)"]
+    head = f"  via ({named}): step {via['executed_at_step']}, {via.get('target')}"
+    if via.get("effect") is True:
+        return [head + f"; the page answered at step {via.get('effect_at_step')} ({', '.join(via.get('changed') or [])} changed)"]
+    if via.get("effect") is False:
+        then = f"; the run then wanted: {via['then']}" if via.get("then") else ""
+        return [head + f"; NOTHING on the page changed but the control itself ({via.get('waited_ms', 0)} ms given){then}"]
+    return [head + "; " + (f"not judged ({via['not_judged']})" if via.get("not_judged") else "the run ended before the next look")]
+
+
 def _fmt_conf(step: dict) -> str:
     if step.get("replayed"):
         return "saved path"  # no request, so no confidence: the step came from the path of an earlier passing run
@@ -116,6 +132,14 @@ def _flags(step: dict, nxt: dict | None = None) -> str:
         f.append("ASSERT-FAILED")
     if step.get("no_effect") or (step.get("page_changed") is False and ex.get("action") in NO_EFFECT_ACTIONS and ex.get("ok")):
         f.append("NO-EFFECT")  # the action landed and the page Jev sees did not change (a dead control?); derived for older traces
+    if step.get("via"):
+        f.append("VIA")  # the action the spec's `via` names: the control under test was used here
+    if step.get("via_deferred"):
+        f.append("VIA-WAIT")  # the control under test was about to be used on a page still loading: waited for, then decided again
+    if step.get("via_no_effect"):
+        f.append("VIA-NO-EFFECT")  # a look at the page after the via action: nothing but the control itself has changed
+    if step.get("via_effect"):
+        f.append("VIA-ANSWERED")  # the first look on which the page differs from the one the via action was used on
     if step.get("outcome_held"):
         f.append("HELD:" + step["outcome_held"]["outcome"])  # a non-pass outcome read off a page that said it was loading: not the ending yet
     if step.get("outcome_deferred"):
@@ -201,6 +225,7 @@ def summarize(trace: dict, out_dir: str | None = None) -> str:
             lines.append(f"  evidence: line not asked ({asked}); the assertions below are the proof")
         if result.get("note"):
             lines.append(f"  note: {result['note']}")
+    lines.extend(_via_lines(trace.get("via")))
     lines.extend(_replay_lines(trace.get("replay")))
     if trace.get("expected") is not None:
         ex = trace["expected"]

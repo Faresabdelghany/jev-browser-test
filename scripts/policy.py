@@ -25,7 +25,7 @@ import re
 from jev_client import choice, noul
 from observe import element_label
 from rules import CHECK, NEXT_ACTION, TARGET, VALUE
-from spec import AFTER_OPERATIONS, OUTCOME_NONE, effective_outcomes
+from spec import AFTER_OPERATIONS, OUTCOME_NONE, effective_outcomes, via_action
 
 CLICK_ROLES = {
     "link", "button", "submit", "reset", "image", "tab", "menuitem", "menuitemcheckbox", "menuitemradio",
@@ -496,6 +496,47 @@ def deferred_outcomes(seen: list[dict], outcomes: dict, history: list[dict]) -> 
         if (o.get("requires_action") and not acted) or (o.get("after") and not after_satisfied(o["after"], history)):
             deferred.append(s["name"])
     return deferred
+
+
+VIA_WRITES = {"TYPE_TEXT", "SELECT"}  # the via actions that write into their own control: that row is not the page's answer
+VIA_STAYS = {"WAIT", "PRESS_ENTER"}  # what a run may do after the via action without having left it
+VIA_LOOKS_AWAY = {"SCROLL_DOWN", "SCROLL_UP"}  # these change what is on screen themselves: the comparison ends, with no verdict
+
+
+def is_via_action(via: dict | None, operation: str, label: str | None) -> bool:
+    """Is this the action the spec's `via` names? The same match as `after`: the operation, and the text contained in
+    the target's label, case-insensitive."""
+    if not via or not label:
+        return False
+    op, text = via_action(via)
+    return operation == op and text.lower() in label.lower()
+
+
+def via_view(obs: dict, wrote: dict | None = None) -> dict:
+    """What a page shows, apart from what the via action itself wrote: the url, the title, the rows of the element
+    table and the visible text. `wrote` ({role, name, value}, for TYPE_TEXT and SELECT) leaves out the rows of the
+    control the action wrote into and takes the typed value out of the text (a contenteditable shows it there), so that
+    a search box holding the query is not, by itself, the page answering the query. A CLICK wrote nothing: the clicked
+    control's own row counts (a checkbox now checked, a toggle now pressed is an answer)."""
+    rows = [element_label(e) for e in obs["elements"]
+            if not (wrote and e["role"] == wrote["role"] and (e.get("name") or "") == wrote["name"])]
+    text = " ".join((obs.get("visible_text") or "").split())
+    if wrote and wrote.get("value"):
+        text = " ".join(text.replace(wrote["value"], " ").split())
+    return {"url": obs["url"], "title": obs["title"], "controls": rows, "text": text, "covered": obs.get("covered", 0)}
+
+
+def via_difference(before: dict, after: dict) -> list[str]:
+    """Which parts of two via_views differ, in a fixed order; empty when the action changed nothing a person could
+    see beyond its own control."""
+    return [k for k in ("url", "title", "controls", "text", "covered") if before.get(k) != after.get(k)]
+
+
+def leaves_via(via: dict, operation: str, label: str | None) -> bool:
+    """After the via action, does this decision go somewhere else? Waiting, pressing Enter and doing the via action
+    again stay with it; scrolling is neither (see VIA_LOOKS_AWAY); DONE, BLOCKED and any action on another control
+    leave."""
+    return not (operation in VIA_STAYS or operation in VIA_LOOKS_AWAY or is_via_action(via, operation, label))
 
 
 DEFERRABLE = {"CLICK", "TYPE_TEXT", "SELECT"}  # the actions a covered page can make Jev misplace
